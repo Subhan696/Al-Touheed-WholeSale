@@ -240,6 +240,7 @@ async function initDatabase() {
 
       ALTER TABLE products ADD COLUMN IF NOT EXISTS year INTEGER;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT '';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS profit_rules (
       id SERIAL PRIMARY KEY,
@@ -413,25 +414,25 @@ async function handleIPC(channel, ...args) {
     // ─── PRODUCTS ────────────────────────────────────────────────────────────
     case 'get-next-item-code': {
       const r = await query("SELECT item_code FROM products ORDER BY id DESC LIMIT 1");
-      if (!r.rows.length) return 'W001';
+      if (!r.rows.length) return '0001';
       const last = r.rows[0].item_code;
       const num = parseInt(last.replace(/\D/g, '')) || 0;
-      return `W${String(num + 1).padStart(3, '0')}`;
+      return String(num + 1).padStart(4, '0');
     }
     case 'save-product': {
-      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand } = data;
+      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount } = data;
       const r = await query(
-        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, item_code',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year ? parseInt(year) : null, brand || '']
+        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, item_code',
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year ? parseInt(year) : null, brand || '', discount ? parseFloat(discount) : 0]
       );
       broadcast('products');
       return { success: true, id: r.rows[0].id, itemCode: r.rows[0].item_code };
     }
     case 'update-product': {
-      const { id, itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, photoPath, brand } = data;
+      const { id, itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, photoPath, brand, discount } = data;
       await query(
-        'UPDATE products SET item_code=$1, description=$2, gender=$3, category=$4, size_range=$5, purchase_rate=$6, sale_rate=$7, packing_qty=$8, year=$9, photo_path=$10, brand=$11, updated_at=NOW() WHERE id=$12',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year ? parseInt(year) : null, photoPath || null, brand || '', id]
+        'UPDATE products SET item_code=$1, description=$2, gender=$3, category=$4, size_range=$5, purchase_rate=$6, sale_rate=$7, packing_qty=$8, year=$9, photo_path=$10, brand=$11, discount=$12, updated_at=NOW() WHERE id=$13',
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year ? parseInt(year) : null, photoPath || null, brand || '', discount ? parseFloat(discount) : 0, id]
       );
       broadcast('products');
       return { success: true };

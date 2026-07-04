@@ -11,6 +11,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [sizeRange, setSizeRange] = useState('');
   const [purchaseRate, setPurchaseRate] = useState('');
   const [saleRate, setSaleRate] = useState('');
+  const [discount, setDiscount] = useState('');
+  const [discountPct, setDiscountPct] = useState('');
   const [packingQty, setPackingQty] = useState('');
   const [year, setYear] = useState(new Date().getFullYear());
   const [gendersList, setGendersList] = useState([]);
@@ -68,7 +70,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     if (type === 'categories') setManageListItems(categoriesList);
     if (type === 'size_ranges') setManageListItems(sizeRangesList);
     if (type === 'packings') setManageListItems(packingsList);
+    if (type === 'brands') setManageListItems(brandsList);
     setShowManageModal(true);
+    setTimeout(() => refs.current.manageListInput?.focus(), 100);
   };
 
   const handleAddListItem = async () => {
@@ -78,12 +82,15 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     if (manageListType === 'categories') await ipcRenderer.invoke('add-category', val);
     if (manageListType === 'size_ranges') await ipcRenderer.invoke('add-size-range', val);
     if (manageListType === 'packings') await ipcRenderer.invoke('add-packing', val);
+    if (manageListType === 'brands') await ipcRenderer.invoke('add-brand', val);
     setNewItemName('');
     if (manageListType === 'genders') setManageListItems(await ipcRenderer.invoke('get-genders') || []);
     if (manageListType === 'categories') setManageListItems(await ipcRenderer.invoke('get-categories') || []);
     if (manageListType === 'size_ranges') setManageListItems(await ipcRenderer.invoke('get-size-ranges') || []);
     if (manageListType === 'packings') setManageListItems(await ipcRenderer.invoke('get-packings') || []);
+    if (manageListType === 'brands') setManageListItems(await ipcRenderer.invoke('get-brands') || []);
     await loadLists();
+    setTimeout(() => refs.current.manageListInput?.focus(), 0);
   };
 
   const handleDeleteListItem = async (id) => {
@@ -91,10 +98,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     if (manageListType === 'categories') await ipcRenderer.invoke('delete-category', id);
     if (manageListType === 'size_ranges') await ipcRenderer.invoke('delete-size-range', id);
     if (manageListType === 'packings') await ipcRenderer.invoke('delete-packing', id);
+    if (manageListType === 'brands') await ipcRenderer.invoke('delete-brand', id);
     if (manageListType === 'genders') setManageListItems(await ipcRenderer.invoke('get-genders') || []);
     if (manageListType === 'categories') setManageListItems(await ipcRenderer.invoke('get-categories') || []);
     if (manageListType === 'size_ranges') setManageListItems(await ipcRenderer.invoke('get-size-ranges') || []);
     if (manageListType === 'packings') setManageListItems(await ipcRenderer.invoke('get-packings') || []);
+    if (manageListType === 'brands') setManageListItems(await ipcRenderer.invoke('get-brands') || []);
     await loadLists();
   };
 
@@ -127,12 +136,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     setTimeout(() => profitModalRefs.current.defaultPct?.focus(), 30);
   };
 
-  // Auto-focus default % when modal opens
+  // Auto-focus default % when modal opens — use first brand
   useEffect(() => {
-    if (!showProfitModal || companies.length === 0) return;
-    const co = companies[0];
+    if (!showProfitModal || brandsList.length === 0) return;
+    const co = brandsList[0].name;
     selectProfitCompany(co);
-  }, [showProfitModal]);
+  }, [showProfitModal, brandsList]);
 
   const findDiscountPct = (company, cat, sr) => {
     if (!company) return 0;
@@ -177,7 +186,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       setBrand(editItemData.brand || '');
       setSizeRange(editItemData.size_range || '');
       setYear(editItemData.year || new Date().getFullYear());
-      setSaleRate(String(editItemData.sale_rate));
+      setSaleRate(String(editItemData.sale_rate || ''));
+      setDiscount(String(editItemData.discount || ''));
+      const savedSale = parseFloat(editItemData.sale_rate) || 0;
+      const savedDisc = parseFloat(editItemData.discount) || 0;
+      if (savedSale > 0 && savedDisc > 0) setDiscountPct(String((savedDisc / savedSale * 100).toFixed(1)));
       setPackingQty(editItemData.packing_qty || 6);
       if (editItemData.photo_path) {
         ipcRenderer.invoke('get-product-photo', editItemData.id).then(img => { if (img) setPhotoPreview(img); });
@@ -190,6 +203,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       setItemCode('');
       setYear(new Date().getFullYear());
       setDescription(''); setPurchaseRate(''); setSaleRate('');
+      setDiscount(''); setDiscountPct('');
       setBrand('');
       setPhotoFile(null); setPhotoPreview(null);
     }
@@ -206,13 +220,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const handleSubmit = async (e) => {
     e?.preventDefault();
     if (isSubmitting) return;
-    if (!itemCode || !description || !purchaseRate || !saleRate) {
-      setStatusMsg('❌ Fill in Item Code, Description, and both Rates');
+    if (!itemCode.trim()) {
+      setStatusMsg('❌ Item Code is required');
       setTimeout(() => setStatusMsg(''), 3000);
+      refs.current.itemCode?.focus();
       return;
     }
-    if (parseFloat(saleRate) < parseFloat(purchaseRate)) {
-      setStatusMsg('❌ Sale Rate cannot be less than Purchase Rate');
+    if (!purchaseRate || !saleRate) {
+      setStatusMsg('❌ Fill in Purchase Rate and Sale Rate');
       setTimeout(() => setStatusMsg(''), 3000);
       return;
     }
@@ -229,8 +244,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       sizeRange: sizeRange.trim(),
       purchaseRate: parseFloat(purchaseRate),
       saleRate: parseFloat(saleRate),
-      packingQty: parseInt(packingQty),
+      packingQty: parseInt(packingQty) || 6,
       year: parseInt(year),
+      discount: discount ? parseFloat(discount) : 0,
     };
 
     try {
@@ -244,18 +260,31 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
           finalPhotoPath = null;
         }
         result = await ipcRenderer.invoke('update-product', { ...payload, id: editItemData.id, photoPath: finalPhotoPath });
-        if (result.success) { setStatusMsg(`✅ Updated! ${payload.itemCode}`); setTimeout(() => onClearEdit?.(), 1500); }
+        if (result.success) { setStatusMsg(`✅ Updated! ${payload.itemCode}`); setTimeout(() => onClearEdit?.(), 500); }
         else setStatusMsg(`❌ ${result.error}`);
       } else {
         result = await ipcRenderer.invoke('save-product', payload);
         if (result.success) {
           if (photoFile) await ipcRenderer.invoke('save-product-photo', { productId: result.id, photoData: photoPreview });
           setStatusMsg(`✅ Saved! ${result.itemCode}`);
-          setTimeout(() => { setStatusMsg(''); handleReset(); }, 1500);
-        } else setStatusMsg(`❌ ${result.error}`);
+          setTimeout(() => {
+            setStatusMsg('');
+            // Clear form but keep lists, focus item code
+            setItemCode('');
+            setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
+            setBrand(''); setGender(''); setCategory(''); setSizeRange('');
+            setPhotoFile(null); setPhotoPreview(null);
+            setYear(new Date().getFullYear());
+            setTimeout(() => refs.current.itemCode?.focus(), 50);
+          }, 500);
+        } else {
+          setStatusMsg(`❌ ${result.error || 'Failed to save'}`);
+          setTimeout(() => setStatusMsg(''), 4000);
+        }
       }
     } catch (err) {
       setStatusMsg(`❌ ${err.message}`);
+      setTimeout(() => setStatusMsg(''), 4000);
     } finally {
       setIsSubmitting(false);
     }
@@ -263,28 +292,67 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
 
   const handleReset = () => {
     if (isEditing) { onClearEdit?.(); return; }
-    setDescription(''); setPurchaseRate(''); setSaleRate('');
+    setItemCode('');
+    setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
+    setBrand(''); setGender(''); setCategory(''); setSizeRange('');
     setPhotoFile(null); setPhotoPreview(null);
-    loadNextCode();
     setYear(new Date().getFullYear());
-    setTimeout(() => companyRef.current?.focus(), 100);
+    setTimeout(() => refs.current.itemCode?.focus(), 100);
   };
 
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); handleSubmit(e); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        // Close manage/company modals immediately
+        if (showManageModal) { setShowManageModal(false); return; }
+        if (showCompanyModal) { setShowCompanyModal(false); return; }
+        // In profit sheet: save current inputs then close
+        if (showProfitModal) {
+          if (selectedProfitCompany && (defaultPctInput || defaultDiscInput)) {
+            saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput)
+              .then(() => setShowProfitModal(false));
+          } else {
+            setShowProfitModal(false);
+          }
+          return;
+        }
+        handleSubmit(e);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, itemCode, description, purchaseRate, saleRate, packingQty, gender, category, sizeRange, isEditing]);
+  }, [isActive, itemCode, description, purchaseRate, saleRate, packingQty, gender, category, sizeRange, isEditing, showManageModal, showProfitModal, showCompanyModal, selectedProfitCompany, defaultPctInput, defaultDiscInput]);
 
-  // Auto-calculate sale rate from profit rules (new items only, when purchase rate is set)
+  // Round a number to the nearest multiple of 5 (so last digit is 0 or 5)
+  const roundToFive = (n) => Math.round(n / 5) * 5;
+
+  // Auto-calculate sale rate and discount from profit rules when purchase rate changes
   useEffect(() => {
-    if (isEditing || !purchaseRate || !selectedCompany) return;
-    const pct = findProfitPct(selectedCompany, gender, sizeRange);
-    if (pct !== null) setSaleRate(String(Math.round(parseFloat(purchaseRate) * (1 + pct / 100))));
-  }, [purchaseRate, selectedCompany, gender, sizeRange, profitRules]);
+    if (isEditing || !purchaseRate || !brand) return;
+    const pct = findProfitPct(brand, gender, sizeRange);
+    const dPct = findDiscountPct(brand, gender, sizeRange);
+    if (pct !== null) {
+      const rawSale = parseFloat(purchaseRate) * (1 + pct / 100);
+      const calculatedSale = roundToFive(rawSale);
+      setSaleRate(String(calculatedSale));
+      if (dPct > 0) {
+        setDiscount(String(roundToFive(calculatedSale * (dPct / 100))));
+      } else {
+        setDiscount('');
+      }
+    }
+  }, [purchaseRate, brand, gender, sizeRange, profitRules]);
+
+  // Live-recalculate discount amount whenever sale rate or brand changes
+  useEffect(() => {
+    if (!saleRate) return;
+    const dPct = findDiscountPct(brand, gender, sizeRange);
+    if (dPct > 0) {
+      setDiscount(String(roundToFive(parseFloat(saleRate) * (dPct / 100))));
+    }
+  }, [saleRate, brand, gender, sizeRange, profitRules]);
 
   const handleEnter = (e, nextKey) => {
     if (e.key === 'Enter') { e.preventDefault(); refs.current[nextKey]?.focus(); }
@@ -294,17 +362,29 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
 
   return (
     <div className="new-item-dashboard">
-      <header className="dashboard-header">
-        <h2 className="title">{isEditing ? `Edit: ${itemCode}` : 'New Stock Entry'}</h2>
-        <div className="status-msg">
-          {statusMsg && <span className={statusMsg.includes('❌') ? 'error' : 'success'}>{statusMsg}</span>}
-        </div>
+      <header className="page-header">
+        <h2 className="page-title">{isEditing ? 'Edit Stock Entry' : 'New Stock Entry'}</h2>
+        {statusMsg && (
+          <span style={{
+            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: '0.9rem',
+            background: statusMsg.includes('✅') ? '#d1fae5' : '#fee2e2',
+            color: statusMsg.includes('✅') ? '#065f46' : '#b91c1c',
+            border: `1px solid ${statusMsg.includes('✅') ? '#6ee7b7' : '#fca5a5'}`,
+          }}>{statusMsg}</span>
+        )}
         <div className="header-actions">
-          <button type="button" onClick={() => setShowProfitModal(true)} className="btn btn-secondary sm">📊 Profit Sheet</button>
-          <button type="button" onClick={() => setShowCompanyModal(true)} className="btn btn-secondary sm">🏢 Companies</button>
-          <button type="button" onClick={handleReset} className="btn btn-secondary sm" disabled={isSubmitting}>{isEditing ? 'Cancel' : 'Reset'}</button>
-          <button type="button" onClick={handleSubmit} className="btn btn-primary sm" disabled={isSubmitting}>
-            {isSubmitting ? '...' : isEditing ? 'Update (Ctrl+S)' : 'Save (Ctrl+S)'}
+          <button type="button" onClick={() => setShowProfitModal(true)} className="btn btn-secondary">📊 Profit Sheet</button>
+          <select value="" onChange={e => { if (e.target.value) openListManager(e.target.value); }} className="btn btn-secondary" style={{ appearance: 'none', paddingRight: '12px' }}>
+            <option value="" disabled>⚙️ Manage Lists...</option>
+            <option value="brands">🏢 Brands</option>
+            <option value="genders">👔 Genders</option>
+            <option value="categories">🏷️ Categories</option>
+            <option value="size_ranges">📏 Sizes</option>
+            <option value="packings">📦 Packings</option>
+          </select>
+          <button type="button" onClick={handleReset} className="btn btn-secondary">Reset</button>
+          <button type="button" onClick={handleSubmit} className="btn btn-primary" disabled={isSubmitting}>
+            {isSubmitting ? 'Saving...' : 'Save (Ctrl+S)'}
           </button>
         </div>
       </header>
@@ -321,7 +401,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <input ref={el => refs.current.itemCode = el} type="text" value={itemCode}
                   onChange={e => setItemCode(e.target.value.toUpperCase())}
                   onKeyDown={e => handleEnter(e, 'year')}
-                  placeholder="W001" className="form-input" style={{ fontWeight: 700 }} />
+                  placeholder="e.g. 0001" className="form-input" style={{ fontWeight: 700 }} />
               </div>
               <div className="form-group span-third">
                 <label>Year</label>
@@ -330,10 +410,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                   onKeyDown={e => handleEnter(e, 'packing')} className="form-input" />
               </div>
               <div className="form-group span-third">
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
-                  <label style={{ margin: 0 }}>Packing Qty</label>
-                  <button type="button" onClick={() => openListManager("packings")} className="btn btn-secondary sm" style={{ padding: "2px 6px", fontSize: "0.75rem", height: "24px" }}>⚙️</button>
-                </div>
+                <label>Packing Qty</label>
                 <select ref={el => refs.current.packing = el} value={packingQty}
                   onChange={e => setPackingQty(parseInt(e.target.value))}
                   onKeyDown={e => handleEnter(e, 'brand')} className="form-input">
@@ -344,10 +421,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
 
               {/* Row 2: Brand */}
               <div className="form-group span-half">
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
-                  <label style={{ margin: 0 }}>Brand</label>
-                  <button type="button" onClick={() => openListManager("brands")} className="btn btn-secondary sm" style={{ padding: "2px 6px", fontSize: "0.75rem", height: "24px" }}>⚙️</button>
-                </div>
+                <label>Brand</label>
                 <select ref={el => refs.current.brand = el} value={brand}
                   onChange={e => setBrand(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (brand) setDescription(brand + ' '); refs.current.description?.focus(); } }} className="form-input">
@@ -365,12 +439,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                   placeholder="e.g. Cotton Suit, Jeans, Shirt..." className="form-input" />
               </div>
 
-              {/* Row 3: Gender + Category + Size Range */}
+              {/* Row 4: Gender + Category + Size Range */}
               <div className="form-group span-third">
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
-                  <label style={{ margin: 0 }}>Gender</label>
-                  <button type="button" onClick={() => openListManager("genders")} className="btn btn-secondary sm" style={{ padding: "2px 6px", fontSize: "0.75rem", height: "24px" }}>⚙️</button>
-                </div>
+                <label>Gender</label>
                 <select ref={el => refs.current.gender = el} value={gender}
                   onChange={e => { setGender(e.target.value); setSizeRange(''); }}
                   onKeyDown={e => handleEnter(e, 'category')} className="form-input">
@@ -379,10 +450,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 </select>
               </div>
               <div className="form-group span-third">
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
-                  <label style={{ margin: 0 }}>Category</label>
-                  <button type="button" onClick={() => openListManager("categories")} className="btn btn-secondary sm" style={{ padding: "2px 6px", fontSize: "0.75rem", height: "24px" }}>⚙️</button>
-                </div>
+                <label>Category</label>
                 <select ref={el => refs.current.category = el} value={category}
                   onChange={e => setCategory(e.target.value)}
                   onKeyDown={e => handleEnter(e, 'sizeRange')} className="form-input">
@@ -391,10 +459,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 </select>
               </div>
               <div className="form-group span-third">
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
-                  <label style={{ margin: 0 }}>Size Range</label>
-                  <button type="button" onClick={() => openListManager("size_ranges")} className="btn btn-secondary sm" style={{ padding: "2px 6px", fontSize: "0.75rem", height: "24px" }}>⚙️</button>
-                </div>
+                <label>Size Range</label>
                 <select ref={el => refs.current.sizeRange = el} value={sizeRange}
                   onChange={e => setSizeRange(e.target.value)}
                   onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
@@ -403,30 +468,50 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 </select>
               </div>
 
-              {/* Row 4: Rates */}
+              {/* Row 5: Rates */}
               <div className="form-group span-half">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                  <div>
-                    <label>Purchase Rate (PKR)</label>
-                    <input ref={el => refs.current.purchaseRate = el} type="text" inputMode="numeric"
-                      value={purchaseRate} onChange={e => setPurchaseRate(e.target.value.replace(/[^\d.]/g, ''))}
-                      onKeyDown={e => handleEnter(e, 'saleRate')}
-                      placeholder="0" className="form-input" style={{ fontSize: '1.1rem', fontWeight: 600 }} />
-                  </div>
-                  <div>
-                    <label>Discount Amount</label>
-                    <input type="text" readOnly
-                      value={((parseFloat(saleRate) || 0) * (findDiscountPct(selectedCompany, gender, sizeRange) / 100)).toFixed(0)}
-                      placeholder="0" className="form-input" style={{ fontSize: '1.1rem', fontWeight: 600, backgroundColor: '#fff5f5', color: '#e53935', borderColor: '#ffcdd2' }} />
-                  </div>
-                </div>
+                <label>Purchase Rate (PKR)</label>
+                <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
+                  onChange={e => setPurchaseRate(e.target.value)}
+                  onKeyDown={e => handleEnter(e, 'saleRate')}
+                  placeholder="0" className="form-input" style={{ fontSize: '1.1rem', fontWeight: 600 }} />
               </div>
               <div className="form-group span-half">
                 <label>Sale Rate (PKR)</label>
-                <input ref={el => refs.current.saleRate = el} type="text" inputMode="numeric"
-                  value={saleRate} onChange={e => setSaleRate(e.target.value.replace(/[^\d.]/g, ''))}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
+                <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
+                  onChange={e => setSaleRate(e.target.value)}
+                  onKeyDown={e => handleEnter(e, 'discount')}
                   placeholder="0" className="form-input" style={{ fontSize: '1.1rem', fontWeight: 600 }} />
+              </div>
+            </div>
+
+            {/* Row 6: Discount Amount (auto from profit sheet %) */}
+            <div className="form-grid" style={{ marginTop: '16px' }}>
+              <div className="form-group span-half">
+                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Discount Amount</span>
+                  {(() => {
+                    const dPct = findDiscountPct(brand, gender, sizeRange);
+                    return dPct > 0
+                      ? <span style={{ fontSize: '0.75rem', color: '#e53935', fontWeight: 700, background: '#fff0f0', padding: '2px 8px', borderRadius: 5 }}>{dPct}% of sale</span>
+                      : <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>set in Profit Sheet</span>;
+                  })()}
+                </label>
+                <input
+                  ref={el => refs.current.discount = el}
+                  type="number"
+                  value={discount}
+                  onChange={e => setDiscount(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
+                  placeholder="0"
+                  className="form-input"
+                  style={{ fontSize: '1.1rem', fontWeight: 700, backgroundColor: '#fff5f5', color: '#e53935', borderColor: '#ffcdd2' }}
+                />
+                {saleRate && discount && parseFloat(discount) > 0 && (
+                  <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 4 }}>
+                    Price after discount: <strong style={{ color: '#15803d' }}>PKR {Math.round((parseFloat(saleRate) || 0) - (parseFloat(discount) || 0))}</strong>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -519,11 +604,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
         const companyRules = profitRules.filter(r => r.company_name === selectedProfitCompany);
         const defaultRule = companyRules.find(r => r.category === '' && r.size_range === '');
         const overrideRules = companyRules.filter(r => r.size_range !== '' || r.category !== '');
-        const coIdx = companies.indexOf(selectedProfitCompany);
+        const brandNames = brandsList.map(b => b.name);
+        const coIdx = brandNames.indexOf(selectedProfitCompany);
 
         const handleCompanyNav = (e) => {
-          if (e.key === 'ArrowDown') { e.preventDefault(); selectProfitCompany(companies[Math.min(coIdx + 1, companies.length - 1)]); }
-          if (e.key === 'ArrowUp') { e.preventDefault(); selectProfitCompany(companies[Math.max(coIdx - 1, 0)]); }
+          if (e.key === 'ArrowDown') { e.preventDefault(); selectProfitCompany(brandNames[Math.min(coIdx + 1, brandNames.length - 1)]); }
+          if (e.key === 'ArrowUp') { e.preventDefault(); selectProfitCompany(brandNames[Math.max(coIdx - 1, 0)]); }
           if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); profitModalRefs.current.defaultPct?.focus(); }
           if (e.key === 'Escape') setShowProfitModal(false);
         };
@@ -578,8 +664,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                   onKeyDown={handleCompanyNav}
                   style={{ width: 182, borderRight: '1px solid #e4e6ef', overflowY: 'auto', flexShrink: 0, outline: 'none' }}
                 >
-                  {companies.length === 0 && <div style={{ padding: 16, color: '#9ca3af', fontSize: '0.85rem' }}>No companies yet</div>}
-                  {companies.map(co => {
+                  {brandsList.length === 0 && <div style={{ padding: 16, color: '#9ca3af', fontSize: '0.85rem' }}>No brands yet. Add brands first →</div>}
+                  {brandsList.map(brand => {
+                    const co = brand.name;
                     const def = profitRules.find(r => r.company_name === co && r.category === '' && r.size_range === '');
                     const ov = profitRules.filter(r => r.company_name === co && (r.size_range !== '' || r.category !== ''));
                     const isSel = selectedProfitCompany === co;
@@ -797,7 +884,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
             <button className="modal-close" onClick={() => setShowManageModal(false)}>✕</button>
             <h3 style={{ margin: "0 0 16px", fontSize: "1.1rem", fontWeight: 700, textTransform: "capitalize" }}>⚙️ Manage {manageListType.replace("_", " ")}</h3>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-              <input type={manageListType === "packings" ? "number" : "text"} value={newItemName}
+              <input ref={el => refs.current.manageListInput = el} type={manageListType === "packings" ? "number" : "text"} value={newItemName}
                 onChange={e => setNewItemName(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") handleAddListItem(); }}
                 placeholder={"New " + manageListType.replace("_", " ") + "..."} style={{ flex: 1, padding: "8px 10px", border: "1px solid #e4e6ef", borderRadius: 5, fontSize: "0.9rem", fontFamily: "inherit" }} />
