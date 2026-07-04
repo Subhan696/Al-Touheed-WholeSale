@@ -4,13 +4,15 @@
 .search-bar { padding: 8px 12px; border: 1px solid #e4e6ef; border-radius: 6px; font-size: 0.9rem; width: 260px; font-family: inherit; background: #f9fafb; }
 .search-bar:focus { border-color: #3699ff; outline: none; background: #fff; }
 .table-wrapper { flex: 1; overflow-y: auto; border: 1px solid #e4e6ef; border-radius: 8px; background: #fff; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 .data-table thead { position: sticky; top: 0; background: #f5f7fa; z-index: 1; }
 .data-table th { padding: 10px 12px; text-align: left; font-weight: 700; color: #5e6278; border-bottom: 2px solid #e4e6ef; white-space: nowrap; }
-.data-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; color: #3f4254; }
+.data-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; color: #1e1e2d; font-weight: 500; }
 .data-table tr:hover { background: #f8f9fb; }
+.data-table tr.selected-row { background: #eff6ff; border-left: 3px solid #3699ff; }
+.data-table tr.selected-row td:first-child { border-left-color: #3699ff; }
 .data-table tr:last-child td { border-bottom: none; }
-.badge { padding: 3px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 700; }
+.badge { padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700; }
 .badge-code { background: rgba(54,153,255,0.1); color: #3699ff; font-family: monospace; letter-spacing: 0.5px; }
 .badge-cat { background: #f0f4ff; color: #3699ff; }
 .text-right { text-align: right; }

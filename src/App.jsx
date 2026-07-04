@@ -65,7 +65,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [networkMode, setNetworkMode] = useState('server');
-  const [windowStack, setWindowStack] = useState([{ id: `w-${Date.now()}`, key: 'sale' }]);
+  const [windowStack, setWindowStack] = useState([]);
   const [purchaseMenuOpen, setPurchaseMenuOpen] = useState(false);
   const [purchaseMenuIndex, setPurchaseMenuIndex] = useState(0);
 
@@ -127,13 +127,8 @@ function App() {
 
   const closeTopWindow = () => setWindowStack(prev => {
     if (prev.length > 1) return prev.slice(0, -1);
-    const baseKey = prev[0]?.rootKey || prev[0]?.key || '';
-    if (baseKey === 'sale' || baseKey.startsWith('sale-')) return [{ id: `w-${Date.now()}`, key: 'sales-list' }];
-    if (baseKey === 'sales-return') return [{ id: `w-${Date.now()}`, key: 'sales-return-list' }];
-    if (baseKey === 'new-purchase') return [{ id: `w-${Date.now()}`, key: 'purchases' }];
-    if (baseKey === 'purchase-return') return [{ id: `w-${Date.now()}`, key: 'purchase-return-list' }];
-    if (baseKey === 'new-item') return [{ id: `w-${Date.now()}`, key: 'products' }];
-    return prev;
+    // Last window — go to empty homepage
+    return [];
   });
 
   React.useEffect(() => {

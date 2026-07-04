@@ -13,7 +13,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [saleRate, setSaleRate] = useState('');
   const [discount, setDiscount] = useState('');
   const [discountPct, setDiscountPct] = useState('');
-  const [packingQty, setPackingQty] = useState('');
+  const [packingQty, setPackingQty] = useState('6');
   const [year, setYear] = useState(new Date().getFullYear());
   const [gendersList, setGendersList] = useState([]);
   const [categoriesList, setCategoriesList] = useState([]);
@@ -57,11 +57,24 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   useEffect(() => { loadCompanies(); loadProfitRules(); loadLists(); }, []);
 
   const loadLists = async () => {
-    setGendersList(await ipcRenderer.invoke('get-genders') || []);
-    setCategoriesList(await ipcRenderer.invoke('get-categories') || []);
-    setSizeRangesList(await ipcRenderer.invoke('get-size-ranges') || []);
-    setPackingsList(await ipcRenderer.invoke('get-packings') || []);
-    setBrandsList(await ipcRenderer.invoke('get-brands') || []);
+    const genders = await ipcRenderer.invoke('get-genders') || [];
+    const categories = await ipcRenderer.invoke('get-categories') || [];
+    const sizeRanges = await ipcRenderer.invoke('get-size-ranges') || [];
+    const packings = await ipcRenderer.invoke('get-packings') || [];
+    const brands = await ipcRenderer.invoke('get-brands') || [];
+
+    setGendersList(genders);
+    setCategoriesList(categories);
+    setSizeRangesList(sizeRanges);
+    setPackingsList(packings);
+    setBrandsList(brands);
+
+    if (!editItemData) {
+      setBrand(prev => prev || (brands.length > 0 ? brands[0].name : ''));
+      setGender(prev => prev || (genders.length > 0 ? genders[0].name : ''));
+      setCategory(prev => prev || (categories.length > 0 ? categories[0].name : ''));
+      setSizeRange(prev => prev || (sizeRanges.length > 0 ? sizeRanges[0].name : ''));
+    }
   };
 
   const openListManager = (type) => {
@@ -186,24 +199,23 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       setBrand(editItemData.brand || '');
       setSizeRange(editItemData.size_range || '');
       setYear(editItemData.year || new Date().getFullYear());
+      setPurchaseRate(String(editItemData.purchase_rate || ''));
       setSaleRate(String(editItemData.sale_rate || ''));
       setDiscount(String(editItemData.discount || ''));
-      const savedSale = parseFloat(editItemData.sale_rate) || 0;
-      const savedDisc = parseFloat(editItemData.discount) || 0;
-      if (savedSale > 0 && savedDisc > 0) setDiscountPct(String((savedDisc / savedSale * 100).toFixed(1)));
       setPackingQty(editItemData.packing_qty || 6);
       if (editItemData.photo_path) {
         ipcRenderer.invoke('get-product-photo', editItemData.id).then(img => { if (img) setPhotoPreview(img); });
       }
       const match = companies.find(c => editItemData.description.startsWith(c));
       if (match) setSelectedCompany(match);
+      setTimeout(() => refs.current.itemCode?.focus(), 200);
     } else {
       setIsEditing(false);
       // loadNextCode(); // Auto-increment paused as requested
       setItemCode('');
       setYear(new Date().getFullYear());
       setDescription(''); setPurchaseRate(''); setSaleRate('');
-      setDiscount(''); setDiscountPct('');
+      setDiscount(''); setDiscountPct(''); setPackingQty('6');
       setBrand('');
       setPhotoFile(null); setPhotoPreview(null);
     }
@@ -237,7 +249,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
 
     const payload = {
       itemCode: itemCode.trim().toUpperCase(),
-      description: `${description || ''} ${brand || ''} ${category || ''} ${sizeRange || ''} ${gender || ''}`.trim(),
+      description: description.trim(),
       gender: gender,
       category: category,
       brand: brand,
@@ -271,8 +283,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
             setStatusMsg('');
             // Clear form but keep lists, focus item code
             setItemCode('');
-            setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
-            setBrand(''); setGender(''); setCategory(''); setSizeRange('');
+            setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct(''); setPackingQty('6');
+            setBrand(brandsList.length > 0 ? brandsList[0].name : '');
+            setGender(gendersList.length > 0 ? gendersList[0].name : '');
+            setCategory(categoriesList.length > 0 ? categoriesList[0].name : '');
+            setSizeRange(sizeRangesList.length > 0 ? sizeRangesList[0].name : '');
             setPhotoFile(null); setPhotoPreview(null);
             setYear(new Date().getFullYear());
             setTimeout(() => refs.current.itemCode?.focus(), 50);
@@ -474,14 +489,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
                   onChange={e => setPurchaseRate(e.target.value)}
                   onKeyDown={e => handleEnter(e, 'saleRate')}
-                  placeholder="0" className="form-input" style={{ fontSize: '1.1rem', fontWeight: 600 }} />
+                  placeholder="0" className="form-input" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#be123c' }} />
               </div>
               <div className="form-group span-half">
                 <label>Sale Rate (PKR)</label>
                 <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
                   onChange={e => setSaleRate(e.target.value)}
                   onKeyDown={e => handleEnter(e, 'discount')}
-                  placeholder="0" className="form-input" style={{ fontSize: '1.1rem', fontWeight: 600 }} />
+                  placeholder="0" className="form-input" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }} />
               </div>
             </div>
 
@@ -505,7 +520,10 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
                   placeholder="0"
                   className="form-input"
-                  style={{ fontSize: '1.1rem', fontWeight: 700, backgroundColor: '#fff5f5', color: '#e53935', borderColor: '#ffcdd2' }}
+                  style={{
+                    backgroundColor: '#fff1f2', border: '1px solid #fecdd3', color: '#be123c',
+                    fontWeight: '800', fontSize: '1.25rem'
+                  }}
                 />
                 {saleRate && discount && parseFloat(discount) > 0 && (
                   <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 4 }}>
@@ -522,7 +540,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
           <div className="preview-card">
             <h3 className="card-title">Product Preview</h3>
             <div className="product-preview-box">
-              <div className="item-code-badge">{itemCode || 'W000'}</div>
+              <div className="item-code-badge">{itemCode || '0000'}</div>
 
               <div className="preview-row" style={{ backgroundColor: '#fff3cd', fontWeight: 'bold', padding: '4px', borderRadius: '4px' }}>
                 <span className="preview-label">Description</span>
