@@ -1,0 +1,389 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background-color: #f0f2f5;
+  overflow: hidden;
+}
+
+/* === Global Scrollbar Styling === */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #000;
+  border-radius: 5px;
+  border: 1px solid #000;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #000;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #000 #f1f1f1;
+}
+
+/* Main Layout Grid */
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* === Sidebar === */
+.app-sidebar {
+  width: 200px;
+  background-color: #1e1e2d;
+  color: #a2a3b7;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #2d2d3f;
+  flex-shrink: 0;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+
+.sidebar-header {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px;
+  background-color: #1a1a27;
+  border-bottom: 1px solid #2d2d3f;
+  gap: 6px;
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.user-info {
+  font-size: 0.75rem;
+  color: #7e8299;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+  padding-top: 5px;
+}
+
+.user-details {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.username {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.user-role {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  background: rgba(54, 153, 255, 0.1);
+  color: #3699ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.brand-main {
+  font-weight: 800;
+  color: #fff;
+  font-size: 1.2rem;
+  letter-spacing: 1px;
+}
+
+.brand-sub {
+  font-size: 0.75rem;
+  color: #5d5d7a;
+}
+
+.sidebar-nav {
+  padding: 20px 10px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #2d2d3f transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: #2d2d3f;
+  border-radius: 4px;
+}
+
+.nav-divider {
+  height: 1px;
+  background: #2d2d3f;
+  margin: 10px 0;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #a2a3b7;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.nav-item:hover {
+  background-color: #2b2b40;
+  color: #fff;
+}
+
+.nav-item.active,
+.nav-item.active-parent {
+  background-color: #3699ff;
+  color: #fff;
+}
+
+.nav-item .icon {
+  margin-right: 10px;
+  font-size: 1.1rem;
+}
+
+/* Featured Reports Button */
+.nav-item-reports {
+  background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%) !important;
+  color: #ffffff !important;
+  margin-bottom: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.nav-item-reports:hover {
+  background: linear-gradient(135deg, #5c7cd1 0%, #1e325a 100%) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.25);
+}
+
+.nav-item-reports.active {
+  background: #3699ff !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Purchase dropdown menu */
+.nav-item-with-dropdown {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: static;
+  background: #1a1a27;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  min-width: 100%;
+  z-index: 1000;
+  padding: 5px 0 5px 20px;
+  margin: 0;
+  border-left: 2px solid #3699ff;
+  border-top: 1px solid #2d2d3f;
+  animation: slideDownNav 0.2s ease-out;
+}
+
+@keyframes slideDownNav {
+  from {
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+  }
+
+  to {
+    opacity: 1;
+    max-height: 500px;
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #a2a3b7;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.dropdown-item:hover,
+.dropdown-item.selected {
+  background-color: #2b2b40;
+  color: #fff;
+}
+
+.dropdown-item.current {
+  background-color: #3699ff;
+  color: #fff;
+}
+
+.dropdown-item .icon {
+  margin-right: 10px;
+  font-size: 1.1rem;
+}
+
+.sidebar-footer {
+  padding: 15px;
+  text-align: center;
+  font-size: 0.7rem;
+  color: #4a4a6aaa;
+  border-top: 1px solid #2d2d3f;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* === Main Content Area === */
+.app-main-content {
+  flex: 1;
+  background-color: #f3f6f9;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* === Window System Styles === */
+.window-content-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #f3f6f9;
+}
+
+.window-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #f3f6f9;
+  display: flex;
+  flex-direction: column;
+}
+
+.window-layer.fullscreen-mode {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999 !important;
+}
+
+.window-content-wrapper {
+  flex: 1;
+  overflow: clip;
+  position: relative;
+  padding: 10px 15px 15px 15px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Global Button Styles */
+.btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity 0.2s;
+}
+
+.btn-primary {
+  background: #3699ff;
+  color: white;
+}
+
+.btn-secondary {
+  background: #e4e6ef;
+  color: #3f4254;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Logout Button */
+.btn-logout {
+  width: 100%;
+  padding: 10px;
+  background: #f64e60;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 10px;
+}
+
+.btn-logout:hover {
+  background: #d93547;
+  transform: translateY(-1px);
+}
+
+.btn-logout:active {
+  transform: translateY(0);
+}

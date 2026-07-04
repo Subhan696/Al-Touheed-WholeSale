@@ -1,0 +1,65 @@
+{
+  "name": "al-touheed-wholesale",
+  "version": "1.0.0",
+  "description": "Wholesale Billing, Inventory and Stock Management for Al-Touheed Wholesale",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "concurrently \"npm run dev\" \"npm run electron\"",
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "wait-on http://localhost:5173 && electron .",
+    "package": "vite build && electron-builder"
+  },
+  "keywords": [
+    "wholesale",
+    "inventory",
+    "billing",
+    "garments",
+    "pos"
+  ],
+  "author": "Al-Touheed Wholesale",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "electron-store": "^8.1.0",
+    "express": "^5.2.1",
+    "node-fetch": "^2.7.0",
+    "nodemailer": "^8.0.1",
+    "pdfkit": "^0.17.2",
+    "pg": "^8.20.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^22.3.27",
+    "electron-builder": "^24.9.1",
+    "vite": "^5.0.8",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.altouheed.wholesale",
+    "productName": "Al-Touheed Wholesale",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": true
+    }
+  }
+}

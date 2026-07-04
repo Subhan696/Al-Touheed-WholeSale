@@ -1,0 +1,198 @@
+.sales-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #f8fafc;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.dashboard-header .title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #1e1e2d;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.search-box {
+  position: relative;
+  width: 280px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: .5;
+  font-size: 14px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 12px 10px 36px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.sales-list .table-wrapper {
+  flex: 1;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  overflow-y: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  min-height: 0;
+}
+
+.sales-list .data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sales-list .data-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  color: #374151;
+  font-weight: 600;
+  font-size: .85rem;
+  padding: 16px 20px;
+  text-align: left;
+  border-bottom: 2px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.sales-list .data-table td {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+
+.sales-list .data-table tbody tr:hover {
+  background: #f1f5f9;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover td {
+  background: #e0e7ff !important;
+}
+
+.selected-row {
+  background: #c7d2fe !important;
+}
+
+.selected-row td {
+  background: #c7d2fe !important;
+  border-color: #4f46e5;
+}
+
+.font-bold {
+  font-weight: 700;
+  color: #4f46e5;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.right-text {
+  text-align: right;
+  font-weight: 500;
+}
+
+.center-text {
+  text-align: center;
+}
+
+.btn {
+  background: #f3f4f6;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn.btn-secondary {
+  background: #e5e7eb;
+}
+
+.btn.sm {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: .6;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.btn-icon:hover {
+  opacity: 1;
+  background: #f3f4f6;
+}
+
+.loading-state,
+.empty-state {
+  padding: 60px 20px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+/* Make table compact with 4 columns */
+.sales-list .data-table {
+  width: 100%;
+  min-width: 600px;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+.sales-list .data-table th:first-child,
+.sales-list .data-table td:first-child {
+  width: 20%;
+  min-width: 120px;
+}
+
+.sales-list .data-table th:nth-child(2),
+.sales-list .data-table td:nth-child(2) {
+  width: 25%;
+  min-width: 160px;
+}
+
+/* 3rd Column: Total Qty (Centered) */
+.sales-list .data-table th:nth-child(3),
+.sales-list .data-table td:nth-child(3) {
+  width: 15%;
+  min-width: 80px;
+  text-align: center;
+}
+
+/* 4th Column: Total Amount (Right aligned) */
+.sales-list .data-table th:nth-child(4),
+.sales-list .data-table td:nth-child(4) {
+  width: 25%;
+  min-width: 130px;
+  text-align: right;
+}
+
+/* removed 5th column */
