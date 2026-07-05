@@ -36,7 +36,8 @@ function ProductList({ onEditProduct, currentUser, isActive }) {
 
   const canManage = currentUser?.role === 'admin' || (currentUser?.permissions || []).includes('manage_products');
 
-  useEffect(() => { setSelectedIndex(0); }, [search, products]);
+  useEffect(() => { setSelectedIndex(0); }, [search]);
+  useEffect(() => { setSelectedIndex(prev => Math.min(prev, Math.max(0, filtered.length - 1))); }, [filtered.length]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -65,10 +66,13 @@ function ProductList({ onEditProduct, currentUser, isActive }) {
       const containerRect = container.getBoundingClientRect();
       const rowRect = row.getBoundingClientRect();
 
+      const thead = container.querySelector('thead');
+      const offset = thead ? thead.getBoundingClientRect().height : 45;
+
       if (rowRect.bottom > containerRect.bottom) {
         container.scrollTop += (rowRect.bottom - containerRect.bottom);
-      } else if (rowRect.top < containerRect.top) {
-        container.scrollTop -= (containerRect.top - rowRect.top);
+      } else if (rowRect.top < containerRect.top + offset) {
+        container.scrollTop -= ((containerRect.top + offset) - rowRect.top);
       }
     }
   }, [selectedIndex]);

@@ -399,14 +399,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     }
   }, [purchaseRate, brand, gender, sizeRange, profitRules]);
 
-  // Live-recalculate discount amount whenever sale rate or brand changes
+  // Live-recalculate discount amount whenever sale rate or brand changes (only for new items)
   useEffect(() => {
-    if (!saleRate) return;
+    if (isEditing || !saleRate) return;
     const dPct = findDiscountPct(brand, gender, sizeRange);
     if (dPct > 0) {
       setDiscount(String(roundToFive(parseFloat(saleRate) * (dPct / 100))));
     }
-  }, [saleRate, brand, gender, sizeRange, profitRules]);
+  }, [saleRate, brand, gender, sizeRange, profitRules, overallDiscountPct, overallEnabled]);
 
   const handleEnter = (e, nextKey) => {
     if (e.key === 'Enter') { e.preventDefault(); refs.current[nextKey]?.focus(); }
