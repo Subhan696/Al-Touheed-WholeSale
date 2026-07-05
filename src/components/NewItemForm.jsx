@@ -14,7 +14,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [discount, setDiscount] = useState('');
   const [discountPct, setDiscountPct] = useState('');
   const [packingQty, setPackingQty] = useState('6');
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [year, setYear] = useState('2024-25');
+  const [note, setNote] = useState('');
   const [gendersList, setGendersList] = useState([]);
   const [categoriesList, setCategoriesList] = useState([]);
   const [sizeRangesList, setSizeRangesList] = useState([]);
@@ -47,6 +48,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [newRuleSizeRange, setNewRuleSizeRange] = useState('');
   const [newRulePct, setNewRulePct] = useState('');
   const [newRuleDisc, setNewRuleDisc] = useState('');
+  const [overallProfitPct, setOverallProfitPct] = useState('');
+  const [overallDiscountPct, setOverallDiscountPct] = useState('');
+  const [overallEnabled, setOverallEnabled] = useState(false);
+  const [brandSearchQuery, setBrandSearchQuery] = useState('');
+  const [profitSavedMsg, setProfitSavedMsg] = useState('');
 
   const refs = useRef({});
   const fileInputRef = useRef(null);
@@ -54,7 +60,28 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const newCompanyInputRef = useRef(null);
   const profitModalRefs = useRef({});
 
-  useEffect(() => { loadCompanies(); loadProfitRules(); loadLists(); }, []);
+  useEffect(() => { loadCompanies(); loadProfitRules(); loadLists(); loadOverallProfit(); }, []);
+
+  const loadOverallProfit = async () => {
+    try {
+      const data = await ipcRenderer.invoke('get-overall-profit');
+      if (data) {
+        setOverallProfitPct(parseFloat(data.profit_pct) ? String(parseFloat(data.profit_pct)) : '');
+        setOverallDiscountPct(parseFloat(data.discount_pct) ? String(parseFloat(data.discount_pct)) : '');
+        setOverallEnabled(!!data.enabled);
+      }
+    } catch {}
+  };
+
+  const saveOverallProfit = async () => {
+    try {
+      await ipcRenderer.invoke('save-overall-profit', {
+        profit_pct: parseFloat(overallProfitPct) || 0,
+        discount_pct: parseFloat(overallDiscountPct) || 0,
+        enabled: overallEnabled
+      });
+    } catch {}
+  };
 
   const loadLists = async () => {
     const genders = await ipcRenderer.invoke('get-genders') || [];
@@ -157,23 +184,27 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   }, [showProfitModal, brandsList]);
 
   const findDiscountPct = (company, cat, sr) => {
-    if (!company) return 0;
+    if (!company) return overallEnabled ? (parseFloat(overallDiscountPct) || 0) : 0;
     const m1 = profitRules.find(r => r.company_name === company && r.category === cat && r.size_range === sr);
     if (m1) return parseFloat(m1.discount_pct || 0);
     const m2 = profitRules.find(r => r.company_name === company && r.category === '' && r.size_range === sr && sr);
     if (m2) return parseFloat(m2.discount_pct || 0);
     const m3 = profitRules.find(r => r.company_name === company && r.category === '' && r.size_range === '');
     if (m3) return parseFloat(m3.discount_pct || 0);
+    // Fallback to overall if enabled
+    if (overallEnabled) return parseFloat(overallDiscountPct) || 0;
     return 0;
   };
   const findProfitPct = (company, cat, sr) => {
-    if (!company) return null;
+    if (!company) return overallEnabled ? (parseFloat(overallProfitPct) || null) : null;
     const m1 = profitRules.find(r => r.company_name === company && r.category === cat && r.size_range === sr);
     if (m1) return parseFloat(m1.profit_pct);
     const m2 = profitRules.find(r => r.company_name === company && r.category === '' && r.size_range === sr && sr);
     if (m2) return parseFloat(m2.profit_pct);
     const m3 = profitRules.find(r => r.company_name === company && r.category === '' && r.size_range === '');
     if (m3) return parseFloat(m3.profit_pct);
+    // Fallback to overall if enabled
+    if (overallEnabled) return parseFloat(overallProfitPct) || null;
     return null;
   };
 
@@ -198,11 +229,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       setCategory(editItemData.category || '');
       setBrand(editItemData.brand || '');
       setSizeRange(editItemData.size_range || '');
-      setYear(editItemData.year || new Date().getFullYear());
-      setPurchaseRate(String(editItemData.purchase_rate || ''));
-      setSaleRate(String(editItemData.sale_rate || ''));
-      setDiscount(String(editItemData.discount || ''));
+      setYear(editItemData.year || '2024-25');
+      setPurchaseRate(editItemData.purchase_rate ? String(parseFloat(editItemData.purchase_rate)) : '');
+      setSaleRate(editItemData.sale_rate ? String(parseFloat(editItemData.sale_rate)) : '');
+      setDiscount(editItemData.discount && parseFloat(editItemData.discount) > 0 ? String(parseFloat(editItemData.discount)) : '');
       setPackingQty(editItemData.packing_qty || 6);
+      setNote(editItemData.note || '');
       if (editItemData.photo_path) {
         ipcRenderer.invoke('get-product-photo', editItemData.id).then(img => { if (img) setPhotoPreview(img); });
       }
@@ -213,7 +245,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       setIsEditing(false);
       // loadNextCode(); // Auto-increment paused as requested
       setItemCode('');
-      setYear(new Date().getFullYear());
       setDescription(''); setPurchaseRate(''); setSaleRate('');
       setDiscount(''); setDiscountPct(''); setPackingQty('6');
       setBrand('');
@@ -257,8 +288,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       purchaseRate: parseFloat(purchaseRate),
       saleRate: parseFloat(saleRate),
       packingQty: parseInt(packingQty) || 6,
-      year: parseInt(year),
+      year: year,
       discount: discount ? parseFloat(discount) : 0,
+      note: note.trim(),
     };
 
     try {
@@ -281,15 +313,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
           setStatusMsg(`✅ Saved! ${result.itemCode}`);
           setTimeout(() => {
             setStatusMsg('');
-            // Clear form but keep lists, focus item code
+            // Clear only item-specific fields, retain selects/year/packing
             setItemCode('');
-            setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct(''); setPackingQty('6');
-            setBrand(brandsList.length > 0 ? brandsList[0].name : '');
-            setGender(gendersList.length > 0 ? gendersList[0].name : '');
-            setCategory(categoriesList.length > 0 ? categoriesList[0].name : '');
-            setSizeRange(sizeRangesList.length > 0 ? sizeRangesList[0].name : '');
+            setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
             setPhotoFile(null); setPhotoPreview(null);
-            setYear(new Date().getFullYear());
+            setNote('');
             setTimeout(() => refs.current.itemCode?.focus(), 50);
           }, 500);
         } else {
@@ -311,34 +339,45 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
     setBrand(''); setGender(''); setCategory(''); setSizeRange('');
     setPhotoFile(null); setPhotoPreview(null);
-    setYear(new Date().getFullYear());
+    setYear('2024-25'); setNote('');
     setTimeout(() => refs.current.itemCode?.focus(), 100);
   };
 
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
+      // Ctrl+X closes profit sheet
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        if (showProfitModal) { e.preventDefault(); setShowProfitModal(false); return; }
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         // Close manage/company modals immediately
         if (showManageModal) { setShowManageModal(false); return; }
         if (showCompanyModal) { setShowCompanyModal(false); return; }
-        // In profit sheet: save current inputs then close
+        // In profit sheet: save all and show banner (don't close)
         if (showProfitModal) {
-          if (selectedProfitCompany && (defaultPctInput || defaultDiscInput)) {
-            saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput)
-              .then(() => setShowProfitModal(false));
-          } else {
-            setShowProfitModal(false);
-          }
+          (async () => {
+            await saveOverallProfit();
+            if (selectedProfitCompany && (defaultPctInput || defaultDiscInput)) {
+              await saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput);
+            }
+            setProfitSavedMsg('✅ Saved!');
+            setTimeout(() => setProfitSavedMsg(''), 2000);
+          })();
           return;
         }
         handleSubmit(e);
       }
+      // Esc closes profit sheet
+      if (e.key === 'Escape' && showProfitModal) {
+        e.preventDefault();
+        setShowProfitModal(false);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, itemCode, description, purchaseRate, saleRate, packingQty, gender, category, sizeRange, isEditing, showManageModal, showProfitModal, showCompanyModal, selectedProfitCompany, defaultPctInput, defaultDiscInput]);
+  }, [isActive, itemCode, description, purchaseRate, saleRate, packingQty, gender, category, sizeRange, isEditing, showManageModal, showProfitModal, showCompanyModal, selectedProfitCompany, defaultPctInput, defaultDiscInput, note, overallProfitPct, overallDiscountPct, overallEnabled]);
 
   // Round a number to the nearest multiple of 5 (so last digit is 0 or 5)
   const roundToFive = (n) => Math.round(n / 5) * 5;
@@ -410,60 +449,34 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
           <div className="dashboard-card">
             <h3 className="card-title">Basic Information</h3>
             <div className="form-grid">
-              {/* Row 1: Item Code + Year + Packing Qty */}
-              <div className="form-group span-third">
+              {/* Row 1: Item Code + Brand */}
+              <div className="form-group span-half">
                 <label>Item Code</label>
                 <input ref={el => refs.current.itemCode = el} type="text" value={itemCode}
                   onChange={e => setItemCode(e.target.value.toUpperCase())}
-                  onKeyDown={e => handleEnter(e, 'year')}
-                  placeholder="e.g. 0001" className="form-input" style={{ fontWeight: 700 }} />
+                  onKeyDown={e => handleEnter(e, 'brand')}
+                  className="form-input" style={{ fontWeight: 700 }} />
               </div>
-              <div className="form-group span-third">
-                <label>Year</label>
-                <input ref={el => refs.current.year = el} type="number" value={year}
-                  onChange={e => setYear(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'packing')} className="form-input" />
-              </div>
-              <div className="form-group span-third">
-                <label>Packing Qty</label>
-                <select ref={el => refs.current.packing = el} value={packingQty}
-                  onChange={e => setPackingQty(parseInt(e.target.value))}
-                  onKeyDown={e => handleEnter(e, 'brand')} className="form-input">
-                  <option value="">-- Select --</option>
-                  {packingsList.map(p => <option key={p.id} value={p.value}>{p.value} pcs/packet</option>)}
-                </select>
-              </div>
-
-              {/* Row 2: Brand */}
               <div className="form-group span-half">
                 <label>Brand</label>
                 <select ref={el => refs.current.brand = el} value={brand}
                   onChange={e => setBrand(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (brand) setDescription(brand + ' '); refs.current.description?.focus(); } }} className="form-input">
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (brand) setDescription(brand + ' D-'); refs.current.description?.focus(); } }} className="form-input">
                   <option value="">-- Select --</option>
                   {brandsList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
 
-              {/* Row 3: Description */}
+              {/* Row 2: Description */}
               <div className="form-group span-full">
                 <label>Description</label>
                 <input ref={el => refs.current.description = el} type="text" value={description}
                   onChange={e => setDescription(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'gender')}
+                  onKeyDown={e => handleEnter(e, 'category')}
                   placeholder="e.g. Cotton Suit, Jeans, Shirt..." className="form-input" />
               </div>
 
-              {/* Row 4: Gender + Category + Size Range */}
-              <div className="form-group span-third">
-                <label>Gender</label>
-                <select ref={el => refs.current.gender = el} value={gender}
-                  onChange={e => { setGender(e.target.value); setSizeRange(''); }}
-                  onKeyDown={e => handleEnter(e, 'category')} className="form-input">
-                  <option value="">-- Select --</option>
-                  {gendersList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              </div>
+              {/* Row 3: Category + Size Range + Gender */}
               <div className="form-group span-third">
                 <label>Category</label>
                 <select ref={el => refs.current.category = el} value={category}
@@ -477,9 +490,29 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <label>Size Range</label>
                 <select ref={el => refs.current.sizeRange = el} value={sizeRange}
                   onChange={e => setSizeRange(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
+                  onKeyDown={e => handleEnter(e, 'gender')} className="form-input">
                   <option value="">-- Select --</option>
                   {sizeRangesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group span-third">
+                <label>Gender</label>
+                <select ref={el => refs.current.gender = el} value={gender}
+                  onChange={e => setGender(e.target.value)}
+                  onKeyDown={e => handleEnter(e, 'packing')} className="form-input">
+                  <option value="">-- Select --</option>
+                  {gendersList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </div>
+
+              {/* Row 4: Packing Qty */}
+              <div className="form-group span-third">
+                <label>Packing Qty</label>
+                <select ref={el => refs.current.packing = el} value={packingQty}
+                  onChange={e => setPackingQty(parseInt(e.target.value))}
+                  onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
+                  <option value="">-- Select --</option>
+                  {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                 </select>
               </div>
 
@@ -500,9 +533,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
               </div>
             </div>
 
-            {/* Row 6: Discount Amount (auto from profit sheet %) */}
-            <div className="form-grid" style={{ marginTop: '16px' }}>
-              <div className="form-group span-half">
+            {/* Row 6: Discount + Year + Note */}
+            <div className="form-grid" style={{ marginTop: '16px', alignItems: 'flex-end' }}>
+              <div className="form-group span-third" style={{ position: 'relative' }}>
                 <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Discount Amount</span>
                   {(() => {
@@ -517,7 +550,10 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                   type="number"
                   value={discount}
                   onChange={e => setDiscount(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.year?.focus(); }
+                  }}
                   placeholder="0"
                   className="form-input"
                   style={{
@@ -526,10 +562,28 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                   }}
                 />
                 {saleRate && discount && parseFloat(discount) > 0 && (
-                  <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 4 }}>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, fontSize: '0.78rem', color: '#9ca3af', marginTop: 4, whiteSpace: 'nowrap' }}>
                     Price after discount: <strong style={{ color: '#15803d' }}>PKR {Math.round((parseFloat(saleRate) || 0) - (parseFloat(discount) || 0))}</strong>
                   </div>
                 )}
+              </div>
+              <div className="form-group span-third">
+                <label>Year</label>
+                <input ref={el => refs.current.year = el} type="text" value={year}
+                  onChange={e => setYear(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.note?.focus(); }
+                  }}
+                  className="form-input" />
+              </div>
+              <div className="form-group span-third">
+                <label>Note</label>
+                <input ref={el => refs.current.note = el} type="text" value={note}
+                  onChange={e => setNote(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
+                  placeholder="Optional note..."
+                  className="form-input" />
               </div>
             </div>
           </div>
@@ -539,43 +593,44 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
         <div className="dashboard-col">
           <div className="preview-card">
             <h3 className="card-title">Product Preview</h3>
-            <div className="product-preview-box">
-              <div className="item-code-badge">{itemCode || '0000'}</div>
-
-              <div className="preview-row" style={{ backgroundColor: '#fff3cd', fontWeight: 'bold', padding: '4px', borderRadius: '4px' }}>
-                <span className="preview-label">Description</span>
-                <span className="preview-value" style={{ maxWidth: '60%', textAlign: 'right' }}>{`${description || ''} ${category || ''} ${sizeRange || ''} ${gender || ''}`.trim() || '—'}</span>
-              </div>
-              <div className="preview-row">
-                <span className="preview-label">Gender</span>
-                <span className="preview-value">{gender}</span>
-              </div>
-              <div className="preview-row">
-                <span className="preview-label">Category</span>
-                <span className="preview-value">{category}</span>
-              </div>
-              <div className="preview-row">
-                <span className="preview-label">Size Range</span>
-                <span className="preview-value">{sizeRange || '—'}</span>
-              </div>
-              <div className="preview-row">
-                <span className="preview-label">Packing</span>
-                <span className="preview-value">{packingQty} pcs / packet</span>
-              </div>
-              <div className="preview-row">
-                <span className="preview-label">Purchase Rate</span>
-                <span className="preview-value" style={{ color: '#f64e60' }}>PKR {purchaseRate || '0'}</span>
-              </div>
-              <div className="preview-row">
-                <span className="preview-label">Sale Rate</span>
-                <span className="preview-value" style={{ color: '#16a34a' }}>PKR {saleRate || '0'}</span>
-              </div>
-              {margin !== null && (
-                <div className="preview-row">
-                  <span className="preview-label">Margin</span>
-                  <span className="preview-value" style={{ color: margin >= 0 ? '#16a34a' : '#f64e60' }}>{margin}%</span>
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {/* Item Code - highlighted, left-aligned, big */}
+              {itemCode && (
+                <div style={{
+                  background: '#eef2ff', borderRadius: '10px 10px 0 0', border: '1px solid #c7d2fe',
+                  padding: '12px 18px'
+                }}>
+                  <span style={{ fontWeight: 900, fontSize: '1.4rem', color: '#3730a3', letterSpacing: '1px' }}>{itemCode}</span>
                 </div>
               )}
+              {/* Header row: DESCRIPTION | SALE RATE */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: '#f8fafc', borderLeft: '1px solid #e4e6ef', borderRight: '1px solid #e4e6ef',
+                borderTop: itemCode ? 'none' : '1px solid #e4e6ef',
+                padding: '8px 18px'
+              }}>
+                <span style={{ fontSize: '0.75rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Description</span>
+                <span style={{ fontSize: '0.75rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sale Rate</span>
+              </div>
+              {/* Values row: description text | sale rate badge */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: '#fff', border: '1px solid #e4e6ef', borderTop: 'none',
+                borderRadius: '0 0 10px 10px', padding: '14px 18px', gap: 12
+              }}>
+                <span style={{ fontWeight: 700, fontSize: '1rem', color: '#1e1e2d', flex: 1, minWidth: 0 }}>
+                  {`${description || ''} ${category || ''} ${sizeRange || ''} ${gender || ''}`.trim() || '\u2014'}
+                </span>
+                {saleRate && (
+                  <span style={{
+                    background: '#2bbcb3', color: '#fff', fontWeight: 800, fontSize: '1.3rem',
+                    padding: '6px 18px', borderRadius: 8, letterSpacing: '0.5px', flexShrink: 0
+                  }}>
+                    {saleRate}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Photo */}
@@ -619,10 +674,13 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
 
       {/* Profit Sheet Modal */}
       {showProfitModal && (() => {
+        const filteredBrands = brandSearchQuery
+          ? brandsList.filter(b => b.name.toLowerCase().includes(brandSearchQuery.toLowerCase()))
+          : brandsList;
         const companyRules = profitRules.filter(r => r.company_name === selectedProfitCompany);
         const defaultRule = companyRules.find(r => r.category === '' && r.size_range === '');
         const overrideRules = companyRules.filter(r => r.size_range !== '' || r.category !== '');
-        const brandNames = brandsList.map(b => b.name);
+        const brandNames = filteredBrands.map(b => b.name);
         const coIdx = brandNames.indexOf(selectedProfitCompany);
 
         const handleCompanyNav = (e) => {
@@ -632,87 +690,127 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
           if (e.key === 'Escape') setShowProfitModal(false);
         };
 
-        const handleDefaultPctKey = (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            if (defaultPctInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput);
-            profitModalRefs.current.newCat?.focus();
-          }
-          if (e.key === 'Escape') setShowProfitModal(false);
+        const showSavedBanner = () => {
+          setProfitSavedMsg('✅ Saved!');
+          setTimeout(() => setProfitSavedMsg(''), 2000);
         };
 
-        const handleOverridePctKey = (e, rule, idx) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            const val = ruleEdits[rule.id];
-            if (val) saveProfitRule(rule.company_name, rule.category, rule.size_range, val);
-            const next = overrideRules[idx + 1];
-            if (next) profitModalRefs.current[`rule_${next.id}`]?.focus();
-            else profitModalRefs.current.newCat?.focus();
+        const handleSaveAll = async () => {
+          // Save overall
+          await saveOverallProfit();
+          // Save brand default if present
+          if (selectedProfitCompany && (defaultPctInput || defaultDiscInput)) {
+            await saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput);
           }
-          if (e.key === 'Escape') setShowProfitModal(false);
-        };
-
-        const handleAddPctKey = async (e) => {
-          if (e.key === 'Enter' && newRuleSizeRange && newRulePct) {
-            e.preventDefault();
-            await saveProfitRule(selectedProfitCompany, newRuleCategory, newRuleSizeRange, newRulePct);
-            setNewRuleSizeRange(''); setNewRulePct('');
-            profitModalRefs.current.newRange?.focus();
+          // Save all override edits
+          for (const rule of overrideRules) {
+            const vals = ruleEdits[rule.id];
+            if (vals) await saveProfitRule(rule.company_name, rule.category, rule.size_range, vals.pct, vals.disc);
           }
-          if (e.key === 'Escape') setShowProfitModal(false);
+          showSavedBanner();
         };
 
         return (
           <div className="modal-overlay" onClick={() => setShowProfitModal(false)}>
-            <div className="modal-content" style={{ maxWidth: 720, width: '96%', padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-content" style={{ maxWidth: 780, width: '96%', padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
 
               {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #e4e6ef', background: '#f8fafc' }}>
-                <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1rem' }}>📊 Profit Sheet</h3>
-                <span style={{ marginLeft: 10, fontSize: '0.78rem', color: '#9ca3af' }}>↑↓ navigate companies · Enter/Tab to move between fields · auto-saves on blur</span>
-                <button className="modal-close" style={{ position: 'static', marginLeft: 'auto' }} onClick={() => setShowProfitModal(false)}>✕</button>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #e4e6ef', background: '#f8fafc', gap: 10 }}>
+                <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1rem', flexShrink: 0 }}>📊 Profit Sheet</h3>
+                {profitSavedMsg && (
+                  <span style={{ padding: '4px 12px', borderRadius: 6, fontWeight: 700, fontSize: '0.82rem', background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', animation: 'fadeIn 0.2s' }}>{profitSavedMsg}</span>
+                )}
+                <span style={{ flex: 1 }} />
+                <button onClick={handleSaveAll} className="btn btn-primary" style={{ padding: '6px 16px', fontSize: '0.82rem' }}>💾 Save</button>
+                <button className="modal-close" style={{ position: 'static' }} onClick={() => setShowProfitModal(false)}>✕</button>
               </div>
 
-              <div style={{ display: 'flex', height: 490 }}>
+              <div style={{ display: 'flex', height: 510 }}>
 
-                {/* Left: company list — keyboard navigable */}
-                <div
-                  tabIndex={0}
-                  onKeyDown={handleCompanyNav}
-                  style={{ width: 182, borderRight: '1px solid #e4e6ef', overflowY: 'auto', flexShrink: 0, outline: 'none' }}
-                >
-                  {brandsList.length === 0 && <div style={{ padding: 16, color: '#9ca3af', fontSize: '0.85rem' }}>No brands yet. Add brands first →</div>}
-                  {brandsList.map(brand => {
-                    const co = brand.name;
-                    const def = profitRules.find(r => r.company_name === co && r.category === '' && r.size_range === '');
-                    const ov = profitRules.filter(r => r.company_name === co && (r.size_range !== '' || r.category !== ''));
-                    const isSel = selectedProfitCompany === co;
-                    return (
-                      <div key={co}
-                        onClick={() => selectProfitCompany(co)}
-                        style={{ padding: '9px 13px', cursor: 'pointer', borderLeft: `3px solid ${isSel ? '#3699ff' : 'transparent'}`, background: isSel ? '#eff6ff' : 'transparent', borderBottom: '1px solid #f3f4f6', transition: 'background 0.1s' }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.87rem', color: '#1e1e2d' }}>{co}</div>
-                        <div style={{ fontSize: '0.71rem', color: def ? '#3699ff' : '#9ca3af', marginTop: 2 }}>
-                          {def ? `${def.profit_pct}% default` : 'no default'}
-                          {ov.length > 0 && <span style={{ color: '#9ca3af' }}> · {ov.length} rule{ov.length > 1 ? 's' : ''}</span>}
+                {/* Left: brand search + company list */}
+                <div style={{ width: 192, borderRight: '1px solid #e4e6ef', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                  {/* Search */}
+                  <div style={{ padding: '8px 10px', borderBottom: '1px solid #e4e6ef' }}>
+                    <input
+                      type="text" value={brandSearchQuery}
+                      onChange={e => setBrandSearchQuery(e.target.value)}
+                      placeholder="🔍 Search brands..."
+                      style={{ width: '100%', padding: '6px 8px', border: '1px solid #e4e6ef', borderRadius: 5, fontSize: '0.82rem', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  {/* Brand list */}
+                  <div
+                    tabIndex={0}
+                    onKeyDown={handleCompanyNav}
+                    style={{ flex: 1, overflowY: 'auto', outline: 'none' }}
+                  >
+                    {filteredBrands.length === 0 && <div style={{ padding: 16, color: '#9ca3af', fontSize: '0.85rem' }}>{brandSearchQuery ? 'No matches' : 'No brands yet. Add brands first →'}</div>}
+                    {filteredBrands.map(brand => {
+                      const co = brand.name;
+                      const def = profitRules.find(r => r.company_name === co && r.category === '' && r.size_range === '');
+                      const ov = profitRules.filter(r => r.company_name === co && (r.size_range !== '' || r.category !== ''));
+                      const isSel = selectedProfitCompany === co;
+                      return (
+                        <div key={co}
+                          onClick={() => selectProfitCompany(co)}
+                          style={{ padding: '9px 13px', cursor: 'pointer', borderLeft: `3px solid ${isSel ? '#3699ff' : 'transparent'}`, background: isSel ? '#eff6ff' : 'transparent', borderBottom: '1px solid #f3f4f6', transition: 'background 0.1s' }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.87rem', color: '#1e1e2d' }}>{co}</div>
+                          <div style={{ fontSize: '0.71rem', color: def ? '#3699ff' : '#9ca3af', marginTop: 2 }}>
+                            {def ? `${def.profit_pct}% default` : 'no default'}
+                            {ov.length > 0 && <span style={{ color: '#9ca3af' }}> · {ov.length} rule{ov.length > 1 ? 's' : ''}</span>}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Right: rules editor */}
                 <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                  {/* Overall Profit & Discount */}
+                  <div style={{ background: overallEnabled ? '#fffbeb' : '#f9fafb', border: `1px solid ${overallEnabled ? '#fbbf24' : '#e4e6ef'}`, borderRadius: 8, padding: '11px 14px', transition: 'all 0.2s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#5e6278', textTransform: 'uppercase' }}>Overall Profit & Discount</div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.78rem', color: overallEnabled ? '#d97706' : '#9ca3af', fontWeight: 600 }}>
+                        <input type="checkbox" checked={overallEnabled} onChange={e => { setOverallEnabled(e.target.checked); }} style={{ accentColor: '#f59e0b' }} />
+                        {overallEnabled ? 'ON' : 'OFF'}
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: overallEnabled ? 1 : 0.5, pointerEvents: overallEnabled ? 'auto' : 'none' }}>
+                      <div>
+                        <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold' }}>Profit</span>
+                        <input type="number" value={overallProfitPct}
+                          onChange={e => setOverallProfitPct(e.target.value)}
+                          onBlur={saveOverallProfit}
+                          min="0" max="500" step="0.5"
+                          style={{ width: 60, padding: '7px 5px', border: '2px solid #4caf50', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
+                        />
+                        <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
+                      </div>
+                      <div style={{ marginLeft: 8 }}>
+                        <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold' }}>Discount</span>
+                        <input type="number" value={overallDiscountPct}
+                          onChange={e => setOverallDiscountPct(e.target.value)}
+                          onBlur={saveOverallProfit}
+                          min="0" max="100" step="0.5"
+                          style={{ width: 60, padding: '7px 5px', border: '2px solid #f44336', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
+                        />
+                        <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
+                      </div>
+                      <span style={{ fontSize: '0.68rem', color: '#9ca3af', marginLeft: 'auto' }}>Overridden by brand settings</span>
+                    </div>
+                  </div>
+
                   {!selectedProfitCompany ? (
-                    <div style={{ color: '#9ca3af', textAlign: 'center', paddingTop: 80, fontSize: '0.9rem' }}>Select a company ←</div>
+                    <div style={{ color: '#9ca3af', textAlign: 'center', paddingTop: 40, fontSize: '0.9rem' }}>Select a brand ←</div>
                   ) : (
                     <>
                       <div style={{ fontWeight: 700, fontSize: '1rem', color: '#1e1e2d', paddingBottom: 6, borderBottom: '2px solid #e4e6ef' }}>{selectedProfitCompany}</div>
 
-                      {/* Default % */}
+                      {/* Brand Default % */}
                       <div style={{ background: '#f8fafc', border: '1px solid #e4e6ef', borderRadius: 8, padding: '11px 14px' }}>
-                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#5e6278', textTransform: 'uppercase', marginBottom: 8 }}>Default % — all items from this company</div>
+                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#5e6278', textTransform: 'uppercase', marginBottom: 8 }}>Brand Default % — overrides overall</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div>
                             <span style={{fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold'}}>Profit</span>
@@ -722,7 +820,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                               onChange={e => setDefaultPctInput(e.target.value)}
                               onBlur={() => { if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); }}
                               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.defaultDisc?.focus(); } }}
-                              placeholder="e.g. 20" min="0" max="500" step="0.5"
+                              min="0" max="500" step="0.5"
                               style={{ width: 60, padding: '7px 5px', border: '2px solid #4caf50', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
                             />
                             <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
@@ -735,7 +833,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                               onChange={e => setDefaultDiscInput(e.target.value)}
                               onBlur={() => { if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); }}
                               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); profitModalRefs.current.newCat?.focus(); } }}
-                              placeholder="e.g. 5" min="0" max="100" step="0.5"
+                              min="0" max="100" step="0.5"
                               style={{ width: 60, padding: '7px 5px', border: '2px solid #f44336', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
                             />
                             <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
@@ -746,7 +844,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                               Remove
                             </button>
                           )}
-                          <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 'auto' }}>Enter or Tab to save</span>
                         </div>
                       </div>
 
@@ -830,7 +927,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                       {/* Add override */}
                       <div style={{ background: '#f8fafc', border: '1px dashed #d1d5db', borderRadius: 8, padding: '11px 14px' }}>
                         <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#5e6278', textTransform: 'uppercase', marginBottom: 8 }}>+ Add Override</div>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           <select
                             ref={el => profitModalRefs.current.newCat = el}
                             value={newRuleCategory}
@@ -848,31 +945,37 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                             <option value="">-- Size Range --</option>
                             {sizeRangesList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                           </select>
-                          <input
-                            ref={el => profitModalRefs.current.newPct = el}
-                            type="number" value={newRulePct}
-                            onChange={e => setNewRulePct(e.target.value)}
-                            onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.newDisc?.focus(); } }}
-                            placeholder="Profit %" min="0" max="500" step="0.5"
-                            style={{ ...mInput, width: 75, fontWeight: 700, border: '2px solid #4caf50' }}
-                          />
-                          <input
-                            ref={el => profitModalRefs.current.newDisc = el}
-                            type="number" value={newRuleDisc}
-                            onChange={e => setNewRuleDisc(e.target.value)}
-                            onKeyDown={async e => {
-                              if(e.key === 'Enter') {
-                                e.preventDefault();
-                                if (newRuleSizeRange && (newRulePct || newRuleDisc)) {
-                                  await saveProfitRule(selectedProfitCompany, newRuleCategory, newRuleSizeRange, newRulePct, newRuleDisc);
-                                  setNewRuleSizeRange(''); setNewRulePct(''); setNewRuleDisc('');
-                                  profitModalRefs.current.newRange?.focus();
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 700 }}>Profit</span>
+                            <input
+                              ref={el => profitModalRefs.current.newPct = el}
+                              type="number" value={newRulePct}
+                              onChange={e => setNewRulePct(e.target.value)}
+                              onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.newDisc?.focus(); } }}
+                              min="0" max="500" step="0.5"
+                              style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #4caf50' }}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <span style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 700 }}>Disc</span>
+                            <input
+                              ref={el => profitModalRefs.current.newDisc = el}
+                              type="number" value={newRuleDisc}
+                              onChange={e => setNewRuleDisc(e.target.value)}
+                              onKeyDown={async e => {
+                                if(e.key === 'Enter') {
+                                  e.preventDefault();
+                                  if (newRuleSizeRange && (newRulePct || newRuleDisc)) {
+                                    await saveProfitRule(selectedProfitCompany, newRuleCategory, newRuleSizeRange, newRulePct, newRuleDisc);
+                                    setNewRuleSizeRange(''); setNewRulePct(''); setNewRuleDisc('');
+                                    profitModalRefs.current.newRange?.focus();
+                                  }
                                 }
-                              }
-                            }}
-                            placeholder="Disc %" min="0" max="100" step="0.5"
-                            style={{ ...mInput, width: 75, fontWeight: 700, border: '2px solid #f44336' }}
-                          />
+                              }}
+                              min="0" max="100" step="0.5"
+                              style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #f44336' }}
+                            />
+                          </div>
                           <button
                             onClick={async () => {
                               if (!newRuleSizeRange || (!newRulePct && !newRuleDisc)) return;
@@ -883,7 +986,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                             className="btn btn-primary sm" disabled={!newRuleSizeRange || (!newRulePct && !newRuleDisc)}>
                             Add
                           </button>
-                          <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 4 }}>Enter in % to add</span>
                         </div>
                       </div>
                     </>

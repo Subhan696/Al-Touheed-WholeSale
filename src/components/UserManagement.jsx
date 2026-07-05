@@ -59,10 +59,11 @@ function UserManagement({ currentUser }) {
     else { setStatusMsg(`❌ ${result.error}`); setTimeout(() => setStatusMsg(''), 3000); }
   };
 
-  const handleDelete = async (id) => {
-    if (id === currentUser?.id) { alert('Cannot delete your own account.'); return; }
-    if (!window.confirm('Delete this user?')) return;
-    await ipcRenderer.invoke('delete-user', id);
+  const handleDelete = async (user) => {
+    if (user.id === currentUser?.id) { await ipcRenderer.invoke('alert-dialog', 'Cannot delete your own account.'); return; }
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this user?');
+    if (!confirmed) return;
+    await ipcRenderer.invoke('delete-user', user.id);
     load();
   };
 

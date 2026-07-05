@@ -136,7 +136,8 @@ function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
         const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
         const hasSelection = isInput && e.target.selectionStart !== e.target.selectionEnd;
-        if (!hasSelection) { e.preventDefault(); closeTopWindow(); }
+        const hasModal = document.querySelector('.modal-overlay');
+        if (!hasSelection && !hasModal) { e.preventDefault(); closeTopWindow(); }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         if (hasPermission('create_sale')) { e.preventDefault(); openWindow('sale', { forceNewInstance: true }); }

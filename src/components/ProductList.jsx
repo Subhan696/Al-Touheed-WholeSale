@@ -19,7 +19,8 @@ function ProductList({ onEditProduct, currentUser, isActive }) {
   };
 
   const handleDelete = async (p) => {
-    if (!window.confirm(`Delete "${p.item_code} - ${p.description}"?`)) return;
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete "${p.item_code} - ${p.description}"?`);
+    if (!confirmed) return;
     await ipcRenderer.invoke('delete-product', p.id);
     loadProducts();
   };

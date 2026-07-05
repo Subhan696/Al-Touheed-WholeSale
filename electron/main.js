@@ -250,6 +250,13 @@ async function initDatabase() {
       profit_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
       discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
       UNIQUE(company_name, category, size_range)
+    );
+
+    CREATE TABLE IF NOT EXISTS overall_profit (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      profit_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+      discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+      enabled BOOLEAN NOT NULL DEFAULT false
     )
   `);
 
@@ -266,6 +273,10 @@ async function initDatabase() {
   try {
     // Migration: if gender is empty and category has Boy/Girl, move it
     await query("UPDATE products SET gender = category, category = '' WHERE gender = '' AND category IN ('Boy', 'Girl')");
+    
+    // Migration: year should be TEXT, not INTEGER (e.g. '2024-25')
+    await query("ALTER TABLE products ALTER COLUMN year TYPE TEXT USING year::text");
+    await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''");
   } catch(e) { console.error('Migration error:', e); }
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
   try {
@@ -420,19 +431,19 @@ async function handleIPC(channel, ...args) {
       return String(num + 1).padStart(4, '0');
     }
     case 'save-product': {
-      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount } = data;
+      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount, note } = data;
       const r = await query(
-        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, item_code',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year ? parseInt(year) : null, brand || '', discount ? parseFloat(discount) : 0]
+        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, item_code',
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, brand || '', discount ? parseFloat(discount) : 0, note || '']
       );
       broadcast('products');
       return { success: true, id: r.rows[0].id, itemCode: r.rows[0].item_code };
     }
     case 'update-product': {
-      const { id, itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, photoPath, brand, discount } = data;
+      const { id, itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, photoPath, brand, discount, note } = data;
       await query(
-        'UPDATE products SET item_code=$1, description=$2, gender=$3, category=$4, size_range=$5, purchase_rate=$6, sale_rate=$7, packing_qty=$8, year=$9, photo_path=$10, brand=$11, discount=$12, updated_at=NOW() WHERE id=$13',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year ? parseInt(year) : null, photoPath || null, brand || '', discount ? parseFloat(discount) : 0, id]
+        'UPDATE products SET item_code=$1, description=$2, gender=$3, category=$4, size_range=$5, purchase_rate=$6, sale_rate=$7, packing_qty=$8, year=$9, photo_path=$10, brand=$11, discount=$12, note=$13, updated_at=NOW() WHERE id=$14',
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, photoPath || null, brand || '', discount ? parseFloat(discount) : 0, note || '', id]
       );
       broadcast('products');
       return { success: true };
@@ -506,6 +517,21 @@ async function handleIPC(channel, ...args) {
     }
     case 'delete-profit-rule': {
       await query('DELETE FROM profit_rules WHERE id=$1', [data]);
+      return { success: true };
+    }
+
+    // ─── OVERALL PROFIT ──────────────────────────────────────────────────────
+    case 'get-overall-profit': {
+      const r = await query('SELECT * FROM overall_profit WHERE id=1');
+      return r.rows[0] || { profit_pct: 0, discount_pct: 0, enabled: false };
+    }
+    case 'save-overall-profit': {
+      const { profit_pct, discount_pct, enabled } = data;
+      await query(
+        `INSERT INTO overall_profit (id, profit_pct, discount_pct, enabled) VALUES (1, $1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET profit_pct = EXCLUDED.profit_pct, discount_pct = EXCLUDED.discount_pct, enabled = EXCLUDED.enabled`,
+        [parseFloat(profit_pct) || 0, parseFloat(discount_pct) || 0, !!enabled]
+      );
       return { success: true };
     }
 
@@ -817,6 +843,28 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
 
+    // ─── UTILS ────────────────────────────────────────────────────────────────
+    case 'confirm-dialog': {
+      const result = await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
+        type: 'warning',
+        buttons: ['Cancel', 'Yes'],
+        defaultId: 1,
+        cancelId: 0,
+        title: 'Confirm',
+        message: data || 'Are you sure?'
+      });
+      return result.response === 1;
+    }
+    case 'alert-dialog': {
+      await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
+        type: 'info',
+        buttons: ['OK'],
+        title: 'Alert',
+        message: data || 'Alert'
+      });
+      return { success: true };
+    }
+
     // ─── NETWORK CONFIG (aliases used by NetworkSettings component) ───────────
     case 'get-network-config': {
       return {
@@ -953,6 +1001,7 @@ function registerIPC() {
     'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo',
     'get-companies', 'save-company', 'delete-company',
     'get-profit-rules', 'save-profit-rule', 'delete-profit-rule',
+    'get-overall-profit', 'save-overall-profit', 'confirm-dialog', 'alert-dialog',
     'get-stock-list', 'get-stock-single', 'adjust-stock',
     'save-purchase', 'update-purchase', 'get-purchases', 'get-purchase-items', 'delete-purchase',
     'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return',

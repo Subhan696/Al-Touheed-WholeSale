@@ -15,7 +15,8 @@ function PurchaseList({ onEditPurchase, isActive }) {
   };
 
   const handleDelete = async (p) => {
-    if (!window.confirm(`Delete purchase from "${p.supplier_name}"?`)) return;
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete purchase from "${p.supplier_name}"?`);
+    if (!confirmed) return;
     await ipcRenderer.invoke('delete-purchase', p.id);
     load();
   };

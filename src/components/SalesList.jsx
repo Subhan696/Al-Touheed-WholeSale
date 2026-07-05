@@ -59,10 +59,10 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
   useEffect(() => { setSelectedIndex(0); }, [filtered.length, search]);
   useEffect(() => { selectedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [selectedIndex]);
 
-  const handleDelete = async (id, e) => {
-    e.stopPropagation();
-    if (!window.confirm('Delete this sale?')) return;
-    await ipcRenderer.invoke('delete-sale', id);
+  const handleDelete = async (sale) => {
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this sale?');
+    if (!confirmed) return;
+    await ipcRenderer.invoke('delete-sale', sale.id);
     load();
   };
 

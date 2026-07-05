@@ -39,7 +39,7 @@ function PurchaseReturnList({ currentUser, onEditReturn, isActive }) {
                   <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>PKR {parseFloat(r.total_amount).toLocaleString()}</td>
                   <td style={{ ...td, textAlign: 'center' }}>
                     {onEditReturn && <button onClick={() => onEditReturn(r)} style={{ background: '#3699ff', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, marginRight: 4 }}>Edit</button>}
-                    <button onClick={async () => { if (window.confirm('Delete this return?')) { await ipcRenderer.invoke('delete-purchase-return', r.id); load(); } }} style={{ background: '#f64e60', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Del</button>
+                    <button onClick={async () => { const conf = await ipcRenderer.invoke('confirm-dialog', 'Delete this return?'); if (conf) { await ipcRenderer.invoke('delete-purchase-return', r.id); load(); } }} style={{ background: '#f64e60', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Del</button>
                   </td>
                 </tr>
               ))}
