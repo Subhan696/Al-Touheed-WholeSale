@@ -3,7 +3,7 @@ import './LoginPage.css';
 
 const { ipcRenderer } = window.require('electron');
 
-function LoginPage({ onLoginSuccess }) {
+function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
   const [isRegistering, setIsRegistering] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -11,9 +11,17 @@ function LoginPage({ onLoginSuccess }) {
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [usersExist, setUsersExist] = useState(true);
+  const [dbError, setDbError] = useState(null);
   const passwordRef = useRef(null);
 
   React.useEffect(() => {
+    // Check database status first
+    ipcRenderer.invoke('get-db-status').then(status => {
+      if (status && !status.connected && status.error) {
+        setDbError(status.error);
+      }
+    }).catch(() => {});
+
     ipcRenderer.invoke('check-any-users').then(exists => {
       setUsersExist(exists);
       if (!exists) setIsRegistering(true);
@@ -58,6 +66,17 @@ function LoginPage({ onLoginSuccess }) {
           <p className="app-subtitle" style={{ fontWeight: 700, color: '#3699ff', letterSpacing: 2 }}>WHOLESALE</p>
           <p className="app-subtitle">Inventory Management System</p>
         </div>
+
+        {dbError && (
+          <div className="db-error-banner">
+            <div className="db-error-icon">⚠️</div>
+            <div className="db-error-text">
+              <strong>Database not connected</strong>
+              <p>PostgreSQL is not running on this PC. If this is a client machine, click <strong>Network Settings</strong> below to connect to the server PC.</p>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={isRegistering ? handleRegister : handleLogin} className="login-form">
           <h2 className="form-title">{isRegistering ? 'Create Account' : 'Login'}</h2>
           <div className="form-group">
@@ -79,7 +98,7 @@ function LoginPage({ onLoginSuccess }) {
             </div>
           )}
           {message && <div className={`message ${message.includes('✅') ? 'success' : 'error'}`}>{message}</div>}
-          <button type="submit" className="btn-submit" disabled={isLoading}>
+          <button type="submit" className="btn-submit" disabled={isLoading || !!dbError}>
             {isLoading ? 'Loading...' : isRegistering ? 'Create Account' : 'Login'}
           </button>
         </form>
@@ -91,6 +110,13 @@ function LoginPage({ onLoginSuccess }) {
                 {isRegistering ? 'Login' : 'Sign Up'}
               </button>
             </p>
+          </div>
+        )}
+        {onOpenNetworkSettings && (
+          <div className="network-settings-footer">
+            <button type="button" className="btn-network-settings" onClick={onOpenNetworkSettings}>
+              ⚙️ Network Settings
+            </button>
           </div>
         )}
       </div>

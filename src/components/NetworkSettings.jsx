@@ -114,7 +114,7 @@ function NetworkSettings({ currentUser }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <label style={labelStyle}>Server Address (IP:Port of server machine)</label>
-            <input type="text" value={serverAddress} onChange={e => setServerAddress(e.target.value)} placeholder="e.g. 192.168.1.100:3002" style={inputStyle} />
+            <input type="text" value={serverAddress} onChange={e => setServerAddress(e.target.value)} placeholder="e.g. 192.168.1.100:3002 or http://192.168.1.100:3002" style={inputStyle} />
           </div>
           <div>
             <label style={labelStyle}>Network Token (must match server)</label>

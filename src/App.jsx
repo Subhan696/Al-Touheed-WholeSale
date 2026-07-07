@@ -68,6 +68,7 @@ function App() {
   const [windowStack, setWindowStack] = useState([]);
   const [purchaseMenuOpen, setPurchaseMenuOpen] = useState(false);
   const [purchaseMenuIndex, setPurchaseMenuIndex] = useState(0);
+  const [showNetworkSetup, setShowNetworkSetup] = useState(false);
 
   useEffect(() => {
     const { ipcRenderer } = window.require('electron');
@@ -147,7 +148,23 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [windowStack, activeTab]);
 
-  if (!isAuthenticated) return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  if (!isAuthenticated) {
+    if (showNetworkSetup) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f3f6f9' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 24px', background: '#1e1e2d', color: 'white' }}>
+            <button onClick={() => setShowNetworkSetup(false)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: 'white', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit', fontSize: '0.9rem' }}>← Back to Login</button>
+            <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>Network Setup</span>
+            <span style={{ fontSize: '0.85rem', opacity: 0.7, marginLeft: 'auto' }}>Restart app after saving settings</span>
+          </div>
+          <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
+            <NetworkSettings />
+          </div>
+        </div>
+      );
+    }
+    return <LoginPage onLoginSuccess={handleLoginSuccess} onOpenNetworkSettings={() => setShowNetworkSetup(true)} />;
+  }
 
   const handleEditProduct = (product) => openWindow('new-item', { editItemData: product });
   const handleEditPurchase = (purchase) => openWindow('new-purchase', { purchaseToEdit: purchase });

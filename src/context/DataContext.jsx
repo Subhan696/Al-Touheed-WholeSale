@@ -15,7 +15,8 @@ export function DataProvider({ children }) {
 
     ipcRenderer.invoke('get-network-settings').then(s => {
       if (!s) return;
-      const address = s.networkMode === 'server' ? 'http://localhost:3002' : (s.serverAddress || '');
+      let address = s.networkMode === 'server' ? 'http://localhost:3002' : (s.serverAddress || '');
+      if (address && !/^https?:\/\//i.test(address)) address = `http://${address}`;
       const token = s.networkToken || '';
       if (!address) return;
 

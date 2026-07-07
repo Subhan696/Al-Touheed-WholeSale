@@ -900,12 +900,13 @@ async function handleIPC(channel, ...args) {
       catch (e) { await testPool.end().catch(() => { }); return { success: false, error: e.message }; }
     }
     case 'test-client-connection': {
-      const { serverAddress: sa, networkToken: tok } = data || {};
+      let { serverAddress: sa, networkToken: tok } = data || {};
+      if (sa && !/^https?:\/\//i.test(sa)) sa = `http://${sa}`;
       const nodeFetch = require('node-fetch');
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await nodeFetch(`http://${sa}/api/events`, { headers: { 'x-token': tok || '' }, signal: controller.signal });
+        const res = await nodeFetch(`${sa}/api/events`, { headers: { 'x-token': tok || '' }, signal: controller.signal });
         clearTimeout(timer);
         return res.ok ? { success: true } : { success: false, error: `HTTP ${res.status}` };
       } catch (e) { clearTimeout(timer); return { success: false, error: e.message }; }
@@ -969,7 +970,8 @@ async function handleIPC(channel, ...args) {
 
 // ── Client mode forwarding ────────────────────────────────────────────────────
 async function forwardToServer(channel, data) {
-  const serverAddress = store.get('serverAddress', '');
+  let serverAddress = store.get('serverAddress', '');
+  if (serverAddress && !/^https?:\/\//i.test(serverAddress)) serverAddress = `http://${serverAddress}`;
   const token = store.get('networkToken', '');
   const nodeFetch = require('node-fetch');
   const res = await nodeFetch(`${serverAddress}/api/ipc`, {
@@ -1042,6 +1044,7 @@ function registerIPC() {
 
 // ── Electron app lifecycle ────────────────────────────────────────────────────
 let mainWindow;
+let dbStatus = { connected: false, error: null };
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -1066,6 +1069,9 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 }
 
+// IPC handler for DB status (always available, even before login)
+ipcMain.handle('get-db-status', () => dbStatus);
+
 app.whenReady().then(async () => {
   registerIPC();
 
@@ -1075,12 +1081,14 @@ app.whenReady().then(async () => {
       await pool.query('SELECT 1'); // test connection
       await initDatabase();
       startExpressServer();
+      dbStatus = { connected: true, error: null };
     } catch (err) {
       console.error('[DB] Failed to connect to PostgreSQL:', err.message);
-      dialog.showErrorBox('Database Error',
-        `Cannot connect to PostgreSQL.\n\nError: ${err.message}\n\nPlease ensure PostgreSQL is running and the .env file has correct credentials.\n\nYou can run as Client mode to connect to another PC's database.`
-      );
+      dbStatus = { connected: false, error: err.message };
     }
+  } else {
+    // Client mode — no local DB needed
+    dbStatus = { connected: true, error: null, clientMode: true };
   }
 
   createWindow();
