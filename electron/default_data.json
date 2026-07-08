@@ -1,0 +1,688 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "subhan",
+      "password_hash": "$2b$10$m5MQz2w18DzLpPszV6x/HuJNZrbeJ4CgPaGpgwbZ0RN7i2qou6j3a",
+      "role": "admin",
+      "permissions": "",
+      "created_at": "2026-06-27T18:15:31.712Z"
+    }
+  ],
+  "genders": [
+    {
+      "id": 7,
+      "name": "BOY"
+    },
+    {
+      "id": 8,
+      "name": "BABY"
+    }
+  ],
+  "categories": [
+    {
+      "id": 6,
+      "name": "F/S"
+    },
+    {
+      "id": 7,
+      "name": "H/S"
+    },
+    {
+      "id": 8,
+      "name": "WTR"
+    },
+    {
+      "id": 9,
+      "name": "Shirt"
+    },
+    {
+      "id": 10,
+      "name": "Pent"
+    },
+    {
+      "id": 11,
+      "name": "Romper"
+    },
+    {
+      "id": 12,
+      "name": "Gift Box"
+    },
+    {
+      "id": 13,
+      "name": "Kurta"
+    },
+    {
+      "id": 15,
+      "name": "Hanger Frock"
+    },
+    {
+      "id": 16,
+      "name": "Terry"
+    }
+  ],
+  "size_ranges": [
+    {
+      "id": 3,
+      "name": "Zero"
+    },
+    {
+      "id": 5,
+      "name": "2-3"
+    },
+    {
+      "id": 6,
+      "name": "1-2-3"
+    },
+    {
+      "id": 7,
+      "name": "S-M-L"
+    },
+    {
+      "id": 8,
+      "name": "S-M"
+    },
+    {
+      "id": 9,
+      "name": "M-L"
+    },
+    {
+      "id": 10,
+      "name": "M-L-XL"
+    },
+    {
+      "id": 11,
+      "name": "20-22"
+    },
+    {
+      "id": 12,
+      "name": "20-22-24"
+    },
+    {
+      "id": 13,
+      "name": "18-20-22"
+    },
+    {
+      "id": 15,
+      "name": "24-26-28"
+    },
+    {
+      "id": 16,
+      "name": "30-32-34"
+    },
+    {
+      "id": 17,
+      "name": "New Born"
+    },
+    {
+      "id": 18,
+      "name": "14-16-18"
+    },
+    {
+      "id": 19,
+      "name": "26-28-30"
+    },
+    {
+      "id": 20,
+      "name": "32-34-36"
+    },
+    {
+      "id": 21,
+      "name": "1-2"
+    }
+  ],
+  "packings": [
+    {
+      "id": 1,
+      "value": 6
+    },
+    {
+      "id": 2,
+      "value": 3
+    },
+    {
+      "id": 3,
+      "value": 4
+    },
+    {
+      "id": 4,
+      "value": 12
+    },
+    {
+      "id": 5,
+      "value": 1
+    },
+    {
+      "id": 6,
+      "value": 2
+    },
+    {
+      "id": 7,
+      "value": 5
+    },
+    {
+      "id": 8,
+      "value": 8
+    },
+    {
+      "id": 9,
+      "value": 7
+    },
+    {
+      "id": 10,
+      "value": 9
+    },
+    {
+      "id": 11,
+      "value": 10
+    },
+    {
+      "id": 12,
+      "value": 11
+    }
+  ],
+  "brands": [
+    {
+      "id": 4,
+      "name": "AD BOY"
+    },
+    {
+      "id": 5,
+      "name": "AIWA"
+    },
+    {
+      "id": 6,
+      "name": "AL HAMZA"
+    },
+    {
+      "id": 7,
+      "name": "AL MOIZ"
+    },
+    {
+      "id": 8,
+      "name": "ALI CARE"
+    },
+    {
+      "id": 9,
+      "name": "ANSARI"
+    },
+    {
+      "id": 10,
+      "name": "BABY ALIZA"
+    },
+    {
+      "id": 11,
+      "name": "BABY BRAND"
+    },
+    {
+      "id": 12,
+      "name": "BABY DREAM"
+    },
+    {
+      "id": 13,
+      "name": "BENGLER"
+    },
+    {
+      "id": 14,
+      "name": "BEST BOY"
+    },
+    {
+      "id": 15,
+      "name": "BG"
+    },
+    {
+      "id": 16,
+      "name": "BHATI"
+    },
+    {
+      "id": 17,
+      "name": "BLU EYES"
+    },
+    {
+      "id": 18,
+      "name": "BLUE MOON"
+    },
+    {
+      "id": 19,
+      "name": "BM KIDS"
+    },
+    {
+      "id": 20,
+      "name": "BOL BABY"
+    },
+    {
+      "id": 21,
+      "name": "BOLO BOY"
+    },
+    {
+      "id": 22,
+      "name": "BRIGHT STAR"
+    },
+    {
+      "id": 24,
+      "name": "CHARAM"
+    },
+    {
+      "id": 25,
+      "name": "CHERRY BERRY"
+    },
+    {
+      "id": 26,
+      "name": "CHICK SHOW"
+    },
+    {
+      "id": 27,
+      "name": "CHICOO"
+    },
+    {
+      "id": 28,
+      "name": "COCONUT"
+    },
+    {
+      "id": 29,
+      "name": "COOL BOY"
+    },
+    {
+      "id": 30,
+      "name": "CUTE BABY"
+    },
+    {
+      "id": 31,
+      "name": "CUTE N DOLL"
+    },
+    {
+      "id": 32,
+      "name": "DECENT KIDS"
+    },
+    {
+      "id": 33,
+      "name": "DISNEY"
+    },
+    {
+      "id": 34,
+      "name": "DT"
+    },
+    {
+      "id": 35,
+      "name": "EURO"
+    },
+    {
+      "id": 36,
+      "name": "EVER SMART"
+    },
+    {
+      "id": 37,
+      "name": "FAIR BABY"
+    },
+    {
+      "id": 38,
+      "name": "FAIZA"
+    },
+    {
+      "id": 39,
+      "name": "FINE UP"
+    },
+    {
+      "id": 40,
+      "name": "FULL TIME"
+    },
+    {
+      "id": 41,
+      "name": "GLAMOUR"
+    },
+    {
+      "id": 42,
+      "name": "GP CARE"
+    },
+    {
+      "id": 43,
+      "name": "GREAT BABA"
+    },
+    {
+      "id": 44,
+      "name": "GREAT BOY"
+    },
+    {
+      "id": 45,
+      "name": "HABIBA"
+    },
+    {
+      "id": 46,
+      "name": "HELLO NEHA"
+    },
+    {
+      "id": 47,
+      "name": "HELLO TOO"
+    },
+    {
+      "id": 48,
+      "name": "HELLO UP"
+    },
+    {
+      "id": 49,
+      "name": "HIGH CHASE"
+    },
+    {
+      "id": 50,
+      "name": "HOOR"
+    },
+    {
+      "id": 51,
+      "name": "HR"
+    },
+    {
+      "id": 52,
+      "name": "HURMAT"
+    },
+    {
+      "id": 53,
+      "name": "HUSH BABY"
+    },
+    {
+      "id": 54,
+      "name": "IDEAS"
+    },
+    {
+      "id": 55,
+      "name": "JD SAGHAR"
+    },
+    {
+      "id": 56,
+      "name": "JHUN JHUN"
+    },
+    {
+      "id": 57,
+      "name": "JJ"
+    },
+    {
+      "id": 58,
+      "name": "JS KIDS"
+    },
+    {
+      "id": 59,
+      "name": "KIDS KING"
+    },
+    {
+      "id": 60,
+      "name": "KIDS MASTER"
+    },
+    {
+      "id": 61,
+      "name": "KW"
+    },
+    {
+      "id": 62,
+      "name": "LAREAB"
+    },
+    {
+      "id": 63,
+      "name": "LITTLE BABY"
+    },
+    {
+      "id": 64,
+      "name": "LITTLE BORN"
+    },
+    {
+      "id": 65,
+      "name": "LITTLE GUL"
+    },
+    {
+      "id": 66,
+      "name": "LITTLE HAPPY"
+    },
+    {
+      "id": 67,
+      "name": "MAMA LINK"
+    },
+    {
+      "id": 68,
+      "name": "MINI STAR"
+    },
+    {
+      "id": 69,
+      "name": "MOM KID"
+    },
+    {
+      "id": 70,
+      "name": "MR SAGHAR"
+    },
+    {
+      "id": 71,
+      "name": "MUHEED"
+    },
+    {
+      "id": 72,
+      "name": "MUNNA PARTY"
+    },
+    {
+      "id": 73,
+      "name": "MY MOM"
+    },
+    {
+      "id": 74,
+      "name": "MY&ME"
+    },
+    {
+      "id": 75,
+      "name": "NADEEM"
+    },
+    {
+      "id": 76,
+      "name": "NANU"
+    },
+    {
+      "id": 77,
+      "name": "NEW DOLL"
+    },
+    {
+      "id": 78,
+      "name": "NEW LOOK"
+    },
+    {
+      "id": 79,
+      "name": "NICE MOM"
+    },
+    {
+      "id": 80,
+      "name": "NJ"
+    },
+    {
+      "id": 81,
+      "name": "ONE+ONE"
+    },
+    {
+      "id": 82,
+      "name": "OVO"
+    },
+    {
+      "id": 83,
+      "name": "PAPA"
+    },
+    {
+      "id": 84,
+      "name": "PENGUIN"
+    },
+    {
+      "id": 85,
+      "name": "PINE APPLE"
+    },
+    {
+      "id": 86,
+      "name": "PINK DOLL"
+    },
+    {
+      "id": 87,
+      "name": "PINKY"
+    },
+    {
+      "id": 88,
+      "name": "PK"
+    },
+    {
+      "id": 89,
+      "name": "PRETTY BABY"
+    },
+    {
+      "id": 90,
+      "name": "RAJA"
+    },
+    {
+      "id": 91,
+      "name": "RELAX"
+    },
+    {
+      "id": 92,
+      "name": "RELAX TIME"
+    },
+    {
+      "id": 93,
+      "name": "RIM JIM"
+    },
+    {
+      "id": 94,
+      "name": "RUFI"
+    },
+    {
+      "id": 95,
+      "name": "SHOKY"
+    },
+    {
+      "id": 96,
+      "name": "SMALL RABIT"
+    },
+    {
+      "id": 97,
+      "name": "SMART KIDS"
+    },
+    {
+      "id": 98,
+      "name": "SMARTIES"
+    },
+    {
+      "id": 99,
+      "name": "SNOW FALL"
+    },
+    {
+      "id": 100,
+      "name": "STAR LIGHT"
+    },
+    {
+      "id": 101,
+      "name": "TAYYAB"
+    },
+    {
+      "id": 102,
+      "name": "TM"
+    },
+    {
+      "id": 103,
+      "name": "TOP ONE"
+    },
+    {
+      "id": 104,
+      "name": "TOP TEN"
+    },
+    {
+      "id": 105,
+      "name": "TS"
+    },
+    {
+      "id": 106,
+      "name": "UP TIME"
+    },
+    {
+      "id": 107,
+      "name": "WELL DRESS"
+    },
+    {
+      "id": 108,
+      "name": "ZAID"
+    },
+    {
+      "id": 109,
+      "name": "ZAIN"
+    },
+    {
+      "id": 110,
+      "name": "ZAINAB"
+    },
+    {
+      "id": 111,
+      "name": "ZAM ZAM"
+    },
+    {
+      "id": 112,
+      "name": "ZOYA"
+    },
+    {
+      "id": 113,
+      "name": "PAK STAR"
+    },
+    {
+      "id": 114,
+      "name": "INDUS"
+    },
+    {
+      "id": 115,
+      "name": "ACTIVE KIDS"
+    }
+  ],
+  "companies": [
+    {
+      "id": 1,
+      "name": "starlight",
+      "created_at": "2026-07-01T07:15:38.500Z"
+    },
+    {
+      "id": 2,
+      "name": "new doll",
+      "created_at": "2026-07-01T07:15:42.412Z"
+    },
+    {
+      "id": 3,
+      "name": "zaid",
+      "created_at": "2026-07-01T07:15:44.813Z"
+    },
+    {
+      "id": 4,
+      "name": "new",
+      "created_at": "2026-07-04T10:46:25.208Z"
+    }
+  ],
+  "profit_rules": [
+    {
+      "id": 32,
+      "company_name": "new doll",
+      "category": "",
+      "size_range": "",
+      "profit_pct": "0.00",
+      "discount_pct": "5.00"
+    },
+    {
+      "id": 39,
+      "company_name": "zaid",
+      "category": "",
+      "size_range": "",
+      "profit_pct": "0.00",
+      "discount_pct": "9.00"
+    }
+  ],
+  "overall_profit": [
+    {
+      "id": 1,
+      "profit_pct": "0.00",
+      "discount_pct": "0.00",
+      "enabled": false
+    }
+  ],
+  "products": [],
+  "stock_adjustments": [],
+  "purchases": [],
+  "purchase_items": [],
+  "purchase_returns": [],
+  "purchase_return_items": [],
+  "sales": [],
+  "sale_items": [],
+  "sales_returns": [],
+  "sales_return_items": []
+}

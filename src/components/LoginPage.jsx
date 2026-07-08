@@ -12,6 +12,9 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
   const [isLoading, setIsLoading] = useState(false);
   const [usersExist, setUsersExist] = useState(true);
   const [dbError, setDbError] = useState(null);
+  const [masterPassword, setMasterPassword] = useState('');
+  const [isSettingUpDb, setIsSettingUpDb] = useState(false);
+  const [setupError, setSetupError] = useState('');
   const passwordRef = useRef(null);
 
   React.useEffect(() => {
@@ -27,6 +30,23 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
       if (!exists) setIsRegistering(true);
     }).catch(() => setUsersExist(true));
   }, []);
+
+  const handleSetupDatabase = async () => {
+    if (!masterPassword) { setSetupError('Please enter the PostgreSQL master password.'); return; }
+    setIsSettingUpDb(true);
+    setSetupError('');
+    const result = await ipcRenderer.invoke('setup-database', masterPassword);
+    if (result.success) {
+      setDbError(null);
+      // Recheck users
+      const exists = await ipcRenderer.invoke('check-any-users').catch(()=>true);
+      setUsersExist(exists);
+      if (!exists) setIsRegistering(true);
+    } else {
+      setSetupError(`Failed: ${result.error}`);
+    }
+    setIsSettingUpDb(false);
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -68,11 +88,36 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
         </div>
 
         {dbError && (
-          <div className="db-error-banner">
-            <div className="db-error-icon">⚠️</div>
-            <div className="db-error-text">
-              <strong>Database not connected</strong>
-              <p>PostgreSQL is not running on this PC. If this is a client machine, click <strong>Network Settings</strong> below to connect to the server PC.</p>
+          <div className="db-error-banner" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div className="db-error-icon">⚠️</div>
+              <div className="db-error-text">
+                <strong>Database not connected</strong>
+                <p>PostgreSQL is not running on this PC. If this is a client machine, click <strong>Network Settings</strong> below to connect to the server PC.</p>
+              </div>
+            </div>
+            <div style={{ marginTop: '10px', background: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #fca5a5' }}>
+              <strong style={{ color: '#991b1b', fontSize: '0.9rem' }}>Auto-Setup Database</strong>
+              <p style={{ color: '#7f1d1d', fontSize: '0.8rem', margin: '4px 0 8px 0' }}>Enter your PostgreSQL Master Password to automatically create the database.</p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input 
+                  type="password" 
+                  placeholder="Master Password" 
+                  value={masterPassword} 
+                  onChange={(e) => setMasterPassword(e.target.value)}
+                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  disabled={isSettingUpDb}
+                />
+                <button 
+                  type="button"
+                  onClick={handleSetupDatabase}
+                  disabled={isSettingUpDb}
+                  style={{ background: '#ef4444', color: 'white', border: 'none', padding: '0 12px', borderRadius: '4px', cursor: isSettingUpDb ? 'wait' : 'pointer' }}
+                >
+                  {isSettingUpDb ? 'Setting up...' : 'Setup DB'}
+                </button>
+              </div>
+              {setupError && <div style={{ color: '#dc2626', fontSize: '0.8rem', marginTop: '6px' }}>{setupError}</div>}
             </div>
           </div>
         )}

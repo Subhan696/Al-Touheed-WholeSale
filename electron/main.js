@@ -56,6 +56,149 @@ function broadcast(type) {
   });
 }
 
+// ── ADVANCED BACKUP LOGIC ──────────────────────────────────────────────────
+let isRestoring = false;
+
+function getSystemId() {
+  const os = require('os');
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+        return iface.mac;
+      }
+    }
+  }
+  return 'unknown-system-id';
+}
+
+function getLocalDateStr() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function findBackupDrive() {
+  const systemId = getSystemId();
+  const currentPath = store.get('backupDrivePath');
+
+  if (currentPath) {
+    try {
+      const atgDir = path.join(currentPath, 'SHOP_Backup');
+      const idFile = path.join(atgDir, '.shop_system_id');
+      if (fs.existsSync(idFile)) {
+        const usbId = fs.readFileSync(idFile, 'utf8').trim();
+        if (usbId === systemId) return currentPath;
+      } else if (fs.existsSync(atgDir)) {
+        fs.writeFileSync(idFile, systemId);
+        return currentPath;
+      }
+    } catch (e) { }
+  }
+  return null;
+}
+
+function saveDailySnapshotJSON(exportData, backupRoot) {
+  const today = getLocalDateStr();
+  const dailyDir = path.join(backupRoot, 'daily');
+  fs.mkdirSync(dailyDir, { recursive: true });
+
+  const dailyFile = path.join(dailyDir, `shop_${today}.json`);
+  fs.writeFileSync(dailyFile, JSON.stringify(exportData, null, 2));
+
+  // Keep last 30
+  const files = fs.readdirSync(dailyDir)
+    .filter(f => f.startsWith('shop_') && f.endsWith('.json'))
+    .sort();
+  if (files.length > 30) {
+    const toDelete = files.slice(0, files.length - 30);
+    toDelete.forEach(f => {
+      try { fs.unlinkSync(path.join(dailyDir, f)); } catch (e) { }
+    });
+  }
+}
+
+const BACKUP_TABLES = [
+  'users', 'genders', 'categories', 'size_ranges', 'packings', 'brands', 'companies', 'profit_rules', 'overall_profit',
+  'products', 'stock_adjustments', 'purchases', 'purchase_items', 'purchase_returns', 'purchase_return_items',
+  'sales', 'sale_items', 'sales_returns', 'sales_return_items'
+];
+
+async function executeAutoBackup() {
+  if (isRestoring) return;
+  try {
+    const backupRoot = findBackupDrive();
+    if (!backupRoot) {
+      store.set('lastBackupStatus', 'Drive not found (unplugged or missing)');
+      return;
+    }
+    const atgDir = path.join(backupRoot, 'SHOP_Backup');
+    fs.mkdirSync(atgDir, { recursive: true });
+
+    const exportData = {};
+    for (const t of BACKUP_TABLES) {
+      const res = await query(`SELECT * FROM ${t} ORDER BY id`);
+      exportData[t] = res.rows;
+    }
+
+    const liveFile = path.join(atgDir, 'shop.json');
+    fs.writeFileSync(liveFile, JSON.stringify(exportData, null, 2));
+
+    saveDailySnapshotJSON(exportData, atgDir);
+
+    store.set('lastBackupTime', new Date().toISOString());
+    store.set('lastBackupStatus', 'OK');
+  } catch (err) {
+    console.error('AutoBackup failed:', err);
+    store.set('lastBackupStatus', 'Error: ' + err.message);
+  }
+}
+
+async function runRestore(fileToRestore, skipBackup = false) {
+  if (isRestoring) return { success: false, error: 'A restore is already in progress.' };
+  if (!fs.existsSync(fileToRestore)) return { success: false, error: 'Backup file not found: ' + fileToRestore };
+
+  try {
+    isRestoring = true;
+    const raw = fs.readFileSync(fileToRestore, 'utf-8');
+    let parsed = JSON.parse(raw);
+    let fileData = parsed.data ? parsed : { data: parsed };
+
+    await query('BEGIN');
+    await query(`TRUNCATE ${BACKUP_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+    for (const table of BACKUP_TABLES) {
+      const rows = fileData.data[table] || fileData[table];
+      if (!rows || rows.length === 0) continue;
+      const columns = Object.keys(rows[0]);
+      const colNames = columns.map(c => `"${c}"`).join(', ');
+      for (const row of rows) {
+        const values = columns.map(c => row[c]);
+        const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+        await query(`INSERT INTO "${table}" (${colNames}) VALUES (${placeholders})`, values);
+      }
+      try {
+        await query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE(MAX(id), 1) + 1, false) FROM "${table}"`);
+      } catch(e) {}
+    }
+    await query('COMMIT');
+    
+    broadcast('stock'); broadcast('purchases'); broadcast('sales'); broadcast('purchase-returns'); broadcast('sales-returns');
+    isRestoring = false;
+
+    if (!skipBackup) {
+      executeAutoBackup().catch(err => console.error('[AutoBackup After Restore] Error:', err));
+    }
+
+    return { success: true, message: 'Database restored successfully!' };
+  } catch (err) {
+    isRestoring = false;
+    await query('ROLLBACK');
+    return { success: false, error: 'Restore failed: ' + err.message };
+  }
+}
+
 // ── Database Schema ──────────────────────────────────────────────────────────
 async function initDatabase() {
   await query(`
@@ -899,6 +1042,50 @@ async function handleIPC(channel, ...args) {
       try { await testPool.query('SELECT 1'); await testPool.end(); return { success: true }; }
       catch (e) { await testPool.end().catch(() => { }); return { success: false, error: e.message }; }
     }
+    case 'setup-database': {
+      const masterPassword = data;
+      const setupPool = new Pool({
+        host: 'localhost',
+        port: 5432,
+        database: 'postgres',
+        user: 'postgres',
+        password: masterPassword,
+        connectionTimeoutMillis: 5000
+      });
+      try {
+        const roleCheck = await setupPool.query("SELECT 1 FROM pg_roles WHERE rolname='atg_user'");
+        if (roleCheck.rowCount === 0) {
+          await setupPool.query("CREATE ROLE atg_user WITH LOGIN PASSWORD 'atg_pass123' SUPERUSER");
+        }
+        const dbCheck = await setupPool.query("SELECT 1 FROM pg_database WHERE datname='atg_wholesale'");
+        if (dbCheck.rowCount === 0) {
+          await setupPool.query("CREATE DATABASE atg_wholesale OWNER atg_user");
+        }
+        
+        // Now try to reconnect the main pool to the new database and initialize tables
+        if (pool) await pool.end().catch(()=>{});
+        pool = createPool();
+        await initDatabase();
+        
+        // Reconnect Express Server
+        if (expressServer) { expressServer.close(); expressServer = null; }
+        startExpressServer();
+        dbStatus = { connected: true, error: null };
+        
+        // Auto-load default data if present
+        const defaultDataPath = path.join(__dirname, 'default_data.json');
+        if (fs.existsSync(defaultDataPath)) {
+          console.log('[Setup] Found default_data.json, executing auto-restore...');
+          await runRestore(defaultDataPath, true);
+        }
+        
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      } finally {
+        await setupPool.end().catch(() => {});
+      }
+    }
     case 'test-client-connection': {
       let { serverAddress: sa, networkToken: tok } = data || {};
       if (sa && !/^https?:\/\//i.test(sa)) sa = `http://${sa}`;
@@ -919,52 +1106,101 @@ async function handleIPC(channel, ...args) {
     }
 
     // ─── BACKUP ───────────────────────────────────────────────────────────────
-    case 'create-backup': {
-      const tables = ['products', 'companies', 'purchases', 'purchase_items', 'purchase_returns', 'purchase_return_items', 'sales', 'sale_items', 'sales_returns', 'sales_return_items', 'stock_adjustments'];
-      const exportData = {};
-      for (const t of tables) { const r = await query(`SELECT * FROM ${t} ORDER BY id`); exportData[t] = r.rows; }
-      const backupDir = path.join(app.getPath('userData'), 'backups');
-      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
-      const filename = `backup_${ts}.json`;
-      const filepath = path.join(backupDir, filename);
-      fs.writeFileSync(filepath, JSON.stringify(exportData, null, 2));
-      return { success: true, path: filepath };
-    }
-    case 'restore-backup': {
-      const dlResult = await dialog.showOpenDialog(mainWindow, { filters: [{ name: 'JSON Backup', extensions: ['json'] }], properties: ['openFile'] });
-      if (dlResult.canceled) return { success: false, error: 'Cancelled' };
-      const raw = fs.readFileSync(dlResult.filePaths[0], 'utf-8');
-      const exportData = JSON.parse(raw);
-      const dropOrder = ['stock_adjustments', 'sales_return_items', 'sales_returns', 'sale_items', 'sales', 'purchase_return_items', 'purchase_returns', 'purchase_items', 'purchases', 'companies', 'products'];
-      await query('BEGIN');
-      try {
-        for (const t of dropOrder) await query(`DELETE FROM ${t}`);
-        for (const [table, rows] of Object.entries(exportData)) {
-          for (const row of rows) {
-            const cols = Object.keys(row).filter(k => k !== 'id');
-            if (!cols.length) continue;
-            const vals = cols.map(c => row[c]);
-            const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
-            await query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`, vals);
+    // ─── ADVANCED BACKUP ────────────────────────────────────────────────────────
+    case 'get-backup-settings': {
+      const backupRoot = findBackupDrive(); 
+      const configuredPath = store.get('backupDrivePath') || '';
+
+      let dailySnapshots = [];
+      if (backupRoot) {
+        const dailyDir = path.join(backupRoot, 'daily');
+        try {
+          if (fs.existsSync(dailyDir)) {
+            dailySnapshots = fs.readdirSync(dailyDir)
+              .filter(f => f.startsWith('shop_') && f.endsWith('.json'))
+              .sort().reverse() 
+              .map(f => ({
+                filename: f,
+                date: f.replace('shop_', '').replace('.json', ''),
+                path: path.join(dailyDir, f),
+                size: fs.statSync(path.join(dailyDir, f)).size,
+              }));
           }
-        }
-        await query('COMMIT');
-        return { success: true };
-      } catch (e) { await query('ROLLBACK'); return { success: false, error: e.message }; }
+        } catch (e) { }
+      }
+      return {
+        backupPath: backupRoot || configuredPath,
+        isDriveConnected: !!backupRoot,
+        lastBackupTime: store.get('lastBackupTime') || null,
+        lastBackupStatus: store.get('lastBackupStatus') || null,
+        dailySnapshots,
+      };
     }
-    case 'get-backup-history': {
-      const backupDir = path.join(app.getPath('userData'), 'backups');
-      if (!fs.existsSync(backupDir)) return [];
-      const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.json')).sort().reverse().slice(0, 10);
-      return files.map(f => {
-        const stats = fs.statSync(path.join(backupDir, f));
-        return { filename: f, size: `${(stats.size / 1024).toFixed(1)} KB`, date: stats.mtime.toLocaleDateString() };
-      });
+    case 'set-backup-path': {
+      const drivePath = data;
+      if (!drivePath) {
+        store.delete('backupDrivePath');
+        return { success: true, message: 'Backup disabled' };
+      }
+      if (!fs.existsSync(drivePath)) {
+        return { success: false, error: 'Path does not exist' };
+      }
+
+      store.set('backupDrivePath', drivePath);
+
+      const atgDir = path.join(drivePath, 'SHOP_Backup');
+      fs.mkdirSync(atgDir, { recursive: true });
+
+      const idFile = path.join(atgDir, '.shop_system_id');
+      if (!fs.existsSync(idFile)) {
+        fs.writeFileSync(idFile, getSystemId());
+      }
+
+      const liveBackupFile = path.join(atgDir, 'shop.json');
+      const hasExistingBackup = fs.existsSync(liveBackupFile);
+
+      return { success: true, hasExistingBackup, message: 'Backup drive connected.' };
+    }
+    case 'test-backup': {
+      const backupRoot = findBackupDrive(); 
+      if (!backupRoot) {
+        store.set('lastBackupStatus', 'Drive not found (unplugged or missing)');
+        return { success: false, error: 'No backup drive found. Please plug it in.' };
+      }
+      try {
+        const atgDir = path.join(backupRoot, 'SHOP_Backup');
+        fs.mkdirSync(atgDir, { recursive: true });
+
+        const exportData = {};
+        for (const t of BACKUP_TABLES) { 
+          const r = await query(`SELECT * FROM ${t} ORDER BY id`); 
+          exportData[t] = r.rows; 
+        }
+
+        const liveFile = path.join(atgDir, 'shop.json');
+        fs.writeFileSync(liveFile, JSON.stringify(exportData, null, 2));
+
+        saveDailySnapshotJSON(exportData, atgDir);
+
+        store.set('lastBackupTime', new Date().toISOString());
+        store.set('lastBackupStatus', 'OK');
+        return { success: true };
+      } catch (err) {
+        store.set('lastBackupStatus', 'Error: ' + err.message);
+        return { success: false, error: err.message };
+      }
+    }
+    case 'restore-from-backup': {
+      const specificFile = data;
+      const backupRoot = store.get('backupDrivePath');
+      if (!backupRoot && !specificFile) return { success: false, error: 'No backup path configured' };
+
+      const fileToRestore = specificFile || path.join(backupRoot, 'SHOP_Backup', 'shop.json');
+      return await runRestore(fileToRestore);
     }
 
     default:
-      throw new Error(`Unknown channel: ${channel}`);
+      throw new Error(`No handler registered for '${channel}'`);
   }
 }
 
@@ -987,8 +1223,8 @@ async function forwardToServer(channel, data) {
 // ── IPC registration ──────────────────────────────────────────────────────────
 const LOCAL_CHANNELS = new Set([
   'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
-  'get-local-ips', 'test-db-connection', 'test-client-connection',
-  'create-backup', 'restore-backup', 'get-backup-history',
+  'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
+  'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
   'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf',
 ]);
 
@@ -1012,16 +1248,38 @@ function registerIPC() {
     'get-report-summary', 'get-report-top-items',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
-    'get-local-ips', 'test-db-connection', 'test-client-connection',
-    'create-backup', 'restore-backup', 'get-backup-history',
+    'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
+    'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup'
   ];
+
+  const AUTO_BACKUP_TRIGGERS = new Set([
+    'save-product', 'update-product', 'delete-product',
+    'add-brand', 'update-brand', 'delete-brand',
+    'add-category', 'update-category', 'delete-category',
+    'add-packing', 'update-packing', 'delete-packing',
+    'add-gender', 'update-gender', 'delete-gender',
+    'add-size-range', 'update-size-range', 'delete-size-range',
+    'save-profit-rule', 'delete-profit-rule', 'save-overall-profit',
+    'save-purchase', 'update-purchase', 'delete-purchase',
+    'save-sale', 'update-sale', 'delete-sale',
+    'save-purchase-return', 'delete-purchase-return',
+    'save-sales-return', 'delete-sales-return'
+  ]);
 
   channels.forEach(channel => {
     ipcMain.handle(channel, async (event, data) => {
+      let result;
       if (isClientMode && !LOCAL_CHANNELS.has(channel)) {
-        return forwardToServer(channel, data);
+        result = await forwardToServer(channel, data);
+      } else {
+        result = await handleIPC(channel, data);
       }
-      return handleIPC(channel, data);
+      
+      if (AUTO_BACKUP_TRIGGERS.has(channel) && result && (result.success || result.id)) {
+        executeAutoBackup().catch(err => console.error('[AutoBackup] Error:', err));
+      }
+      
+      return result;
     });
   });
 
@@ -1050,6 +1308,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1366,
     height: 768,
+    icon: path.join(__dirname, '../build/icon.png'),
     minWidth: 1100,
     minHeight: 600,
     webPreferences: {
@@ -1093,7 +1352,6 @@ app.whenReady().then(async () => {
 
   createWindow();
 });
-
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     if (expressServer) expressServer.close();

@@ -87,3 +87,9 @@
 
 .modal-close { position: absolute; top: 12px; right: 12px; background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #7e8299; }
 .modal-close:hover { color: #f64e60; }
+
+.highlight-on-focus:focus {
+  border: 4px solid #66e2c3 !important;
+  outline: none !important;
+  box-shadow: 0 0 15px rgba(102, 226, 195, 0.4) !important;
+}

@@ -70,7 +70,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
         setOverallDiscountPct(parseFloat(data.discount_pct) ? String(parseFloat(data.discount_pct)) : '');
         setOverallEnabled(!!data.enabled);
       }
-    } catch {}
+    } catch { }
   };
 
   const saveOverallProfit = async () => {
@@ -80,7 +80,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
         discount_pct: parseFloat(overallDiscountPct) || 0,
         enabled: overallEnabled
       });
-    } catch {}
+    } catch { }
   };
 
   const loadLists = async () => {
@@ -154,7 +154,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       const edits = {};
       rules.forEach(r => { edits[r.id] = { pct: String(r.profit_pct || 0), disc: String(r.discount_pct || 0) }; });
       setRuleEdits(edits);
-    } catch {}
+    } catch { }
   };
 
   const saveProfitRule = async (company, cat, sr, pct, disc = 0) => {
@@ -253,11 +253,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   }, [editItemData]);
 
   const loadCompanies = async () => {
-    try { setCompanies(await ipcRenderer.invoke('get-companies') || []); } catch {}
+    try { setCompanies(await ipcRenderer.invoke('get-companies') || []); } catch { }
   };
 
   const loadNextCode = async () => {
-    try { setItemCode(await ipcRenderer.invoke('get-next-item-code')); } catch {}
+    try { setItemCode(await ipcRenderer.invoke('get-next-item-code')); } catch { }
   };
 
   const handleSubmit = async (e) => {
@@ -337,7 +337,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     if (isEditing) { onClearEdit?.(); return; }
     setItemCode('');
     setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
-    setBrand(''); setGender(''); setCategory(''); setSizeRange('');
+    setBrand(brandsList.length > 0 ? brandsList[0].name : '');
+    setGender(gendersList.length > 0 ? gendersList[0].name : '');
+    setCategory(categoriesList.length > 0 ? categoriesList[0].name : '');
+    setSizeRange(sizeRangesList.length > 0 ? sizeRangesList[0].name : '');
+    setPackingQty(packingsList.length > 0 ? parseInt(packingsList[0].value) : 6);
     setPhotoFile(null); setPhotoPreview(null);
     setYear('2024-25'); setNote('');
     setTimeout(() => refs.current.itemCode?.focus(), 100);
@@ -462,7 +466,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <select ref={el => refs.current.brand = el} value={brand}
                   onChange={e => setBrand(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (brand) setDescription(brand + ' D-'); refs.current.description?.focus(); } }} className="form-input">
-                  <option value="">-- Select --</option>
                   {brandsList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
@@ -482,7 +485,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <select ref={el => refs.current.category = el} value={category}
                   onChange={e => setCategory(e.target.value)}
                   onKeyDown={e => handleEnter(e, 'sizeRange')} className="form-input">
-                  <option value="">-- Select --</option>
                   {categoriesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
@@ -491,7 +493,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <select ref={el => refs.current.sizeRange = el} value={sizeRange}
                   onChange={e => setSizeRange(e.target.value)}
                   onKeyDown={e => handleEnter(e, 'gender')} className="form-input">
-                  <option value="">-- Select --</option>
                   {sizeRangesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
@@ -499,37 +500,44 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 <label>Gender</label>
                 <select ref={el => refs.current.gender = el} value={gender}
                   onChange={e => setGender(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'packing')} className="form-input">
-                  <option value="">-- Select --</option>
+                  onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
                   {gendersList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
 
-              {/* Row 4: Packing Qty */}
+              {/* Row 4: Rates (Left Column) + Packing (Middle Column) */}
+              <div className="span-third" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="form-group">
+                  <label>Purchase Rate (PKR)</label>
+                  <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
+                    onChange={e => setPurchaseRate(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); }
+                      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.packing?.focus(); }
+                    }}
+                    placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: purchaseRate ? '#000' : '#9ca3af', backgroundColor: '#9c9cfe', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
+                </div>
+
+                <div className="form-group">
+                  <label>Sale Rate (PKR)</label>
+                  <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
+                    onChange={e => setSaleRate(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.discount?.focus(); }
+                    }}
+                    placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: saleRate ? '#fff' : '#6b7280', backgroundColor: '#000', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
+                </div>
+              </div>
+
               <div className="form-group span-third">
                 <label>Packing Qty</label>
                 <select ref={el => refs.current.packing = el} value={packingQty}
                   onChange={e => setPackingQty(parseInt(e.target.value))}
-                  onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
-                  <option value="">-- Select --</option>
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); } }}
+                  className="form-input">
                   {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                 </select>
-              </div>
-
-              {/* Row 5: Rates */}
-              <div className="form-group span-half">
-                <label>Purchase Rate (PKR)</label>
-                <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
-                  onChange={e => setPurchaseRate(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'saleRate')}
-                  placeholder="0" className="form-input" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#be123c' }} />
-              </div>
-              <div className="form-group span-half">
-                <label>Sale Rate (PKR)</label>
-                <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
-                  onChange={e => setSaleRate(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'discount')}
-                  placeholder="0" className="form-input" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }} />
               </div>
             </div>
 
@@ -619,13 +627,13 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                 background: '#fff', border: '1px solid #e4e6ef', borderTop: 'none',
                 borderRadius: '0 0 10px 10px', padding: '14px 18px', gap: 12
               }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem', color: '#1e1e2d', flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e1e2d', flex: 1, minWidth: 0, whiteSpace: 'normal', wordWrap: 'break-word', lineHeight: '1.4' }}>
                   {`${description || ''} ${category || ''} ${sizeRange || ''} ${gender || ''}`.trim() || '\u2014'}
                 </span>
                 {saleRate && (
                   <span style={{
-                    background: '#2bbcb3', color: '#fff', fontWeight: 800, fontSize: '1.3rem',
-                    padding: '6px 18px', borderRadius: 8, letterSpacing: '0.5px', flexShrink: 0
+                    background: '#000', color: '#fff', fontWeight: 800, fontSize: '2.2rem',
+                    padding: '8px 24px', borderRadius: 8, letterSpacing: '0.5px', flexShrink: 0
                   }}>
                     {saleRate}
                   </span>
@@ -813,7 +821,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                         <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#5e6278', textTransform: 'uppercase', marginBottom: 8 }}>Brand Default % — overrides overall</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div>
-                            <span style={{fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold'}}>Profit</span>
+                            <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold' }}>Profit</span>
                             <input
                               ref={el => profitModalRefs.current.defaultPct = el}
                               type="number" value={defaultPctInput}
@@ -825,8 +833,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                             />
                             <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
                           </div>
-                          <div style={{marginLeft: 8}}>
-                            <span style={{fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold'}}>Discount</span>
+                          <div style={{ marginLeft: 8 }}>
+                            <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold' }}>Discount</span>
                             <input
                               ref={el => profitModalRefs.current.defaultDisc = el}
                               type="number" value={defaultDiscInput}
@@ -880,7 +888,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                                             const vals = ruleEdits[rule.id];
                                             if (vals) saveProfitRule(rule.company_name, rule.category, rule.size_range, vals.pct, vals.disc);
                                           }}
-                                          onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); profitModalRefs.current[`rule_${rule.id}_disc`]?.focus(); } }}
+                                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current[`rule_${rule.id}_disc`]?.focus(); } }}
                                           style={{ width: 55, padding: '5px 7px', border: '2px solid #4caf50', borderRadius: 4, fontSize: '0.92rem', fontFamily: 'inherit', fontWeight: 700 }}
                                         />
                                       </div>
@@ -897,7 +905,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                                             if (vals) saveProfitRule(rule.company_name, rule.category, rule.size_range, vals.pct, vals.disc);
                                           }}
                                           onKeyDown={e => {
-                                            if(e.key === 'Enter') {
+                                            if (e.key === 'Enter') {
                                               e.preventDefault();
                                               const vals = ruleEdits[rule.id];
                                               if (vals) saveProfitRule(rule.company_name, rule.category, rule.size_range, vals.pct, vals.disc);
@@ -951,7 +959,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                               ref={el => profitModalRefs.current.newPct = el}
                               type="number" value={newRulePct}
                               onChange={e => setNewRulePct(e.target.value)}
-                              onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.newDisc?.focus(); } }}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.newDisc?.focus(); } }}
                               min="0" max="500" step="0.5"
                               style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #4caf50' }}
                             />
@@ -963,7 +971,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
                               type="number" value={newRuleDisc}
                               onChange={e => setNewRuleDisc(e.target.value)}
                               onKeyDown={async e => {
-                                if(e.key === 'Enter') {
+                                if (e.key === 'Enter') {
                                   e.preventDefault();
                                   if (newRuleSizeRange && (newRulePct || newRuleDisc)) {
                                     await saveProfitRule(selectedProfitCompany, newRuleCategory, newRuleSizeRange, newRulePct, newRuleDisc);
@@ -1097,7 +1105,7 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{padding: 20, color: 'red', background: 'white', zIndex: 9999, position: 'relative'}}>
+        <div style={{ padding: 20, color: 'red', background: 'white', zIndex: 9999, position: 'relative' }}>
           <h2>NewItemForm Crashed</h2>
           <pre>{this.state.error.toString()}</pre>
           <pre>{this.state.error.stack}</pre>
