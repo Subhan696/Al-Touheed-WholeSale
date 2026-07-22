@@ -59,9 +59,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           itemCode:        r.item_code,
           itemDescription: r.item_description,
           packingQty:      r.packing_qty || 0,
-          packets:         r.packets,
+          packets:         Math.abs(r.packets),
           saleRate:        parseFloat(r.sale_rate),
           purchaseRate:    parseFloat(r.purchase_rate),
+          discount:        parseFloat(r.discount) || 0,
+          isReturn:        parseInt(r.packets) < 0,
           amount:          parseFloat(r.amount),
           stock:           r.available_stock ?? null
         })));
@@ -107,6 +109,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       packets:         pkts,
       saleRate:        rate,
       purchaseRate:    purRate,
+      discount:        0,
+      isReturn:        false,
       amount:          pkts * rate,
       stock:           product.available_stock ?? product.stock_qty ?? null
     }]);
@@ -167,6 +171,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       packets:         pkts,
       saleRate:        rate,
       purchaseRate:    purRate,
+      discount:        0,
+      isReturn:        false,
       amount:          pkts * rate,
       stock:           product.available_stock ?? product.stock_qty ?? null
     } : item));
@@ -196,19 +202,47 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   };
 
   // ── Packing / Rate row editing ────────────────────────────────────────────
+  const calcAmount = (item) => {
+    const p = parseInt(item.packets) || 0;
+    const actualP = item.isReturn ? -Math.abs(p) : Math.abs(p);
+    const r = parseFloat(item.saleRate) || 0;
+    const d = parseFloat(item.discount) || 0;
+    return actualP * (r - d);
+  };
+
+  function makeRow() {
+    return { id: nextId(), itemCode: '', itemDescription: '', packingQty: 0, packets: '', saleRate: 0, purchaseRate: 0, discount: 0, isReturn: false, amount: 0 };
+  }
+
   const updatePackets = (idx, val) => {
     setItems(prev => prev.map((item, i) => {
       if (i !== idx) return item;
-      const pkts = parseInt(val) || 0;
-      return { ...item, packets: pkts, amount: pkts * item.saleRate };
+      const newItem = { ...item, packets: val };
+      return { ...newItem, amount: calcAmount(newItem) };
     }));
   };
 
   const updateRate = (idx, val) => {
     setItems(prev => prev.map((item, i) => {
       if (i !== idx) return item;
-      const rate = parseFloat(val) || 0;
-      return { ...item, saleRate: rate, amount: item.packets * rate };
+      const newItem = { ...item, saleRate: val };
+      return { ...newItem, amount: calcAmount(newItem) };
+    }));
+  };
+
+  const updateDiscount = (idx, val) => {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const newItem = { ...item, discount: val };
+      return { ...newItem, amount: calcAmount(newItem) };
+    }));
+  };
+
+  const toggleReturn = (idx) => {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const newItem = { ...item, isReturn: !item.isReturn };
+      return { ...newItem, amount: calcAmount(newItem) };
     }));
   };
 
@@ -253,7 +287,10 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   // ── Totals ─────────────────────────────────────────────────────────────────
   const totals = useMemo(() => {
     const subTotal     = items.reduce((s, i) => s + i.amount, 0);
-    const totalPackets = items.reduce((s, i) => s + (parseInt(i.packets) || 0), 0);
+    const totalPackets = items.reduce((s, i) => {
+      const p = parseInt(i.packets) || 0;
+      return s + (i.isReturn ? -Math.abs(p) : Math.abs(p));
+    }, 0);
     const discountAmt  = parseFloat(discount)    || 0;
     const miscAmt      = parseFloat(miscCharges) || 0;
     const grandTotal   = Math.max(0, subTotal + miscAmt - discountAmt);
@@ -266,7 +303,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     setIsSubmitting(true);
     const payload = {
       saleDate:    new Date(saleDate.getTime() - saleDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
-      invoiceNo, customerName, customerPhone, items,
+      invoiceNo, customerName, customerPhone, 
+      items: items.map(i => ({...i, packets: i.isReturn ? -Math.abs(parseInt(i.packets) || 0) : Math.abs(parseInt(i.packets) || 0)})),
       discount:    parseFloat(discount)    || 0,
       miscCharges: parseFloat(miscCharges) || 0,
       paymentMethod, notes,
@@ -369,7 +407,9 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 <th style={{ width: '13%' }}>Code</th>
                 <th>Description</th>
                 <th className="center" style={{ width: '9%' }}>Packing</th>
-                <th className="right"  style={{ width: '11%' }}>Rate</th>
+                <th className="center" style={{ width: '6%' }}>Ret?</th>
+                <th className="right"  style={{ width: '10%' }}>Rate</th>
+                <th className="right"  style={{ width: '10%' }}>Disc.</th>
                 <th className="right"  style={{ width: '12%' }}>Amount</th>
                 <th style={{ width: 36 }}></th>
               </tr>
@@ -437,6 +477,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                     />
                   </td>
 
+                  {/* Return toggle */}
+                  <td className="center">
+                    <input type="checkbox" checked={item.isReturn || false} onChange={() => toggleReturn(idx)} tabIndex={-1} style={{ cursor: 'pointer', transform: 'scale(1.2)' }} />
+                  </td>
+
                   {/* Rate (editable, yellow) */}
                   <td className="right">
                     <input
@@ -451,10 +496,23 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                     />
                   </td>
 
-                  {/* Amount — green highlight */}
-                  <td className="right amount-cell">
-                    <span className="amount-badge">
-                      {item.amount > 0 ? Math.round(item.amount).toLocaleString() : '—'}
+                  {/* Discount (editable) */}
+                  <td className="right">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={item.discount}
+                      onChange={e => updateDiscount(idx, e.target.value.replace(/[^\d.]/g, ''))}
+                      onKeyDown={e => handleRowKD(e, idx, 'discount')}
+                      onFocus={e => { setFocusedItemIdx(idx); e.target.select(); }}
+                      className="rate-field right discount-input"
+                    />
+                  </td>
+
+                  {/* Amount */}
+                  <td className="right amount-cell" style={{ background: item.isReturn ? '#fee2e2' : undefined }}>
+                    <span className="amount-badge" style={{ color: item.isReturn ? '#dc2626' : undefined, background: item.isReturn ? 'transparent' : undefined }}>
+                      {item.amount !== 0 ? Math.round(item.amount).toLocaleString() : '—'}
                     </span>
                   </td>
 
@@ -547,3 +605,4 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 }
 
 export default NewSale;
+

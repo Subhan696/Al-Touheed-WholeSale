@@ -504,6 +504,7 @@ async function initDatabase() {
     await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''");
   } catch(e) { console.error('Migration error:', e); }
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
+  await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   try {
     await query('ALTER TABLE profit_rules ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0');
   } catch (e) {
@@ -1229,8 +1230,8 @@ async function handleIPC(channel, ...args) {
       for (const item of items) {
         const profit = (item.saleRate - item.purchaseRate) * item.packets;
         await query(
-          'INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-          [saleId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit]
+          'INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+          [saleId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit, item.discount || 0]
         );
       }
       broadcast('sales'); broadcast('stock');
@@ -1246,8 +1247,8 @@ async function handleIPC(channel, ...args) {
       await query('DELETE FROM sale_items WHERE sale_id=$1', [id]);
       for (const item of items) {
         const profit = (item.saleRate - item.purchaseRate) * item.packets;
-        await query('INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-          [id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit]);
+        await query('INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+          [id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit, item.discount || 0]);
       }
       broadcast('sales'); broadcast('stock');
       return { success: true };
