@@ -273,7 +273,12 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       return;
     }
     if (e.key === 'Escape') { setShowCodeRowDrop(false); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); packetsRefs.current[idx]?.focus(); return; }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (idx < itemsRef.current.length - 1) codeRefs.current[idx + 1]?.focus();
+      else scanRef.current?.focus();
+      return;
+    }
     if (e.key === 'ArrowUp' && idx > 0) { e.preventDefault(); codeRefs.current[idx - 1]?.focus(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
       e.preventDefault();
