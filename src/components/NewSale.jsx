@@ -613,6 +613,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 onChange={e => handleScanChange(e.target.value)}
                 onKeyDown={handleScanKD}
                 onBlur={() => setTimeout(() => setShowScanDrop(false), 200)}
+                onFocus={() => setFocusedItemIdx(null)}
                 placeholder="Scan or type item code…"
                 className="scan-input-inline"
                 autoFocus
