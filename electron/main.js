@@ -677,11 +677,11 @@ async function handleIPC(channel, ...args) {
       return String(num + 1).padStart(4, '0');
     }
     case 'check-duplicate-product': {
-      const { description, gender, category, sizeRange, purchaseRate, saleRate, year, excludeId } = data;
-      let sql = `SELECT * FROM products WHERE description ILIKE $1 AND gender ILIKE $2 AND category ILIKE $3 AND size_range ILIKE $4 AND purchase_rate = $5 AND sale_rate = $6 AND year = $7`;
-      const params = [description.trim(), gender || '', category || '', sizeRange || '', purchaseRate, saleRate, year || ''];
+      const { description, gender, category, sizeRange, purchaseRate, saleRate, year, brand, excludeId } = data;
+      let sql = `SELECT * FROM products WHERE description ILIKE $1 AND gender ILIKE $2 AND category ILIKE $3 AND size_range ILIKE $4 AND purchase_rate = $5 AND sale_rate = $6 AND year = $7 AND brand ILIKE $8`;
+      const params = [description.trim(), gender || '', category || '', sizeRange || '', purchaseRate, saleRate, year || '', brand || ''];
       if (excludeId) {
-        sql += ` AND id != $8`;
+        sql += ` AND id != $9`;
         params.push(excludeId);
       }
       sql += ` LIMIT 1`;

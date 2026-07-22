@@ -395,7 +395,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     setIsSubmitting(true);
     setStatusMsg('Merging...');
     try {
-      const newPacking = (parseInt(duplicateItem.packing_qty) || 0) + (pendingPayload.packingQty || 0);
+      const newPacking = pendingPayload.packingQty || parseInt(duplicateItem.packing_qty) || 0;
       await ipcRenderer.invoke('update-product', {
         id: duplicateItem.id,
         itemCode: duplicateItem.item_code,
@@ -1236,7 +1236,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
               </div>
 
               <p style={{ fontSize: '0.88rem', color: '#475569', margin: '0 0 4px', lineHeight: 1.5 }}>
-                <strong>Merge</strong> will add packing qty ({pendingPayload?.packingQty || 0}) to the existing item.<br />
+                <strong>Merge</strong> will update the existing item with the entered brand and packing qty.<br />
                 <strong>Create New</strong> will save as a separate item with a new code.
               </p>
             </div>
