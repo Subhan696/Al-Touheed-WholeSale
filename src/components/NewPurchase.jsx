@@ -365,8 +365,8 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     if (e.key === 'Enter') {
       e.preventDefault();
       const row = rows[idx];
-      // In auto mode, empty code field = done adding manual items → open freight
-      if (autoMode && autoImported && !row.itemCode && !row.description) {
+      // Empty code field = done adding items -> open freight
+      if (!row.itemCode && !row.description) {
         setShowExpensesModal(true);
         return;
       }
