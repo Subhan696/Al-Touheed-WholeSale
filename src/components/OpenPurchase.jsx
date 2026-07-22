@@ -494,12 +494,32 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
     setImportingSession(true);
     try {
       const products = await ipcRenderer.invoke('get-products');
-      // Sort older products first so they match the sequence they were added
       products.sort((a, b) => a.id - b.id);
       appendProductsToGrid(products, `Imported all ${products.length} stock items`);
     } catch (err) {
       console.error(err);
       setStatusMsg('Error importing all stock');
+    } finally {
+      setImportingSession(false);
+    }
+  };
+
+  const handleAddMissingStock = async () => {
+    setImportingSession(true);
+    try {
+      const products = await ipcRenderer.invoke('get-products');
+      products.sort((a, b) => a.id - b.id);
+      const existingCodes = new Set(itemsRef.current.map(i => i.itemCode));
+      const missingProducts = products.filter(p => !existingCodes.has(p.item_code));
+      if (missingProducts.length > 0) {
+        appendProductsToGrid(missingProducts, `Added ${missingProducts.length} missing stock items`);
+      } else {
+        setStatusMsg('All stock items are already in the list');
+        setTimeout(() => setStatusMsg(''), 3000);
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Error fetching missing stock');
     } finally {
       setImportingSession(false);
     }
@@ -517,9 +537,15 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
           )}
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: 8 }}>
-          <button type="button" onClick={handleImportAllStock} className="btn btn-secondary sm" disabled={isSubmitting || isEditing || importingSession} style={{ background: '#10b981', color: 'white', borderColor: '#10b981' }}>
-            ⬇️ Import All Stock
-          </button>
+          {!isEditing ? (
+            <button type="button" onClick={handleImportAllStock} className="btn btn-secondary sm" disabled={isSubmitting || importingSession} style={{ background: '#10b981', color: 'white', borderColor: '#10b981' }}>
+              📦 Import All Stock
+            </button>
+          ) : (
+            <button type="button" onClick={handleAddMissingStock} className="btn btn-secondary sm" disabled={isSubmitting || importingSession} style={{ background: '#10b981', color: 'white', borderColor: '#10b981' }}>
+              ➕ Add Missing Stock
+            </button>
+          )}
           <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting || isEditing || importingSession} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
             📦 Import Session
           </button>
