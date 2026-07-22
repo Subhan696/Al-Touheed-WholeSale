@@ -59,8 +59,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       setDiscount(s.discount || 0);
       setMiscCharges(s.misc_charges || 0);
       setNotes(s.notes || '');
-      ipcRenderer.invoke('get-sale-items', s.id).then(rows => {
-        setItems(rows.map(r => ({
+      ipcRenderer.invoke('get-sale-items', s.id).then(async rows => {
+        const mapped = rows.map(r => ({
           itemCode:        r.item_code,
           itemDescription: r.item_description,
           packingQty:      r.packing_qty || 0,
@@ -71,7 +71,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           isReturn:        parseInt(r.packets) < 0,
           amount:          parseFloat(r.amount),
           stock:           r.available_stock ?? null
-        })));
+        }));
+        setItems(mapped);
+        for (let i = 0; i < mapped.length; i++) {
+          try {
+            const st = await ipcRenderer.invoke('get-stock-single', mapped[i].itemCode);
+            setItems(prev => prev.map((item, idx) => idx === i ? { ...item, stock: st } : item));
+          } catch(e) {}
+        }
       });
     } else {
       ipcRenderer.invoke('get-next-invoice-no').then(n => setInvoiceNo(n)).catch(() => {});
@@ -132,9 +139,12 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     setReturnSearch('');
     setReturnResults([]);
     setTimeout(() => {
-      // Focus the packets input for the new row so they can edit the return quantity
       if (packetsRefs.current[newIdx]) packetsRefs.current[newIdx].focus();
     }, 100);
+
+    ipcRenderer.invoke('get-stock-single', product.item_code)
+      .then(st => setItems(prev => prev.map((item, i) => i === newIdx ? { ...item, stock: st } : item)))
+      .catch(() => {});
   };
 
   const handleReturnKD = (e) => {
@@ -173,6 +183,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     setScanCode('');
     setScanResults([]);
     setShowScanDrop(false);
+
+    ipcRenderer.invoke('get-stock-single', product.item_code)
+      .then(st => setItems(prev => prev.map((item, i) => i === newIdx ? { ...item, stock: st } : item)))
+      .catch(() => {});
+
     // Return focus to scan so next item can be typed immediately
     setTimeout(() => scanRef.current?.focus(), 50);
   };
@@ -192,6 +207,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       e.preventDefault();
       // Mirror garments: ArrowUp goes to code field of last row
       codeRefs.current[items.length - 1]?.focus();
+      return;
+    }
+    if (e.key === 'Tab' && e.shiftKey) {
+      if (items.length > 0) {
+        e.preventDefault();
+        packetsRefs.current[items.length - 1]?.focus();
+        packetsRefs.current[items.length - 1]?.select();
+      }
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
@@ -235,6 +258,10 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     setActiveCodeRow(null);
     setFocusedItemIdx(idx);
     setTimeout(() => packetsRefs.current[idx]?.focus(), 30);
+
+    ipcRenderer.invoke('get-stock-single', product.item_code)
+      .then(st => setItems(prev => prev.map((item, i) => i === idx ? { ...item, stock: st } : item)))
+      .catch(() => {});
   };
 
   const handleCodeKD = (e, idx) => {
@@ -312,7 +339,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (field === 'packets') { rateRefs.current[idx]?.focus(); return; }
+      if (field === 'packets') { scanRef.current?.focus(); return; }
       if (field === 'rate') {
         if (idx >= rows.length - 1) scanRef.current?.focus();
         else packetsRefs.current[idx + 1]?.focus();
@@ -463,7 +490,6 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 <th style={{ width: '13%' }}>Code</th>
                 <th>Description</th>
                 <th className="center" style={{ width: '9%' }}>Packing</th>
-                <th className="center" style={{ width: '6%' }}>Ret?</th>
                 <th className="right"  style={{ width: '10%' }}>Rate</th>
                 <th className="right"  style={{ width: '10%' }}>Disc.</th>
                 <th className="right"  style={{ width: '12%' }}>Amount</th>
@@ -477,7 +503,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 </tr>
               )}
               {items.map((item, idx) => (
-                <tr key={idx} className={focusedItemIdx === idx ? 'row-active' : ''}>
+                <tr key={idx} className={focusedItemIdx === idx ? 'row-active' : ''} style={{ backgroundColor: item.isReturn ? '#fee2e2' : undefined }}>
 
                   {/* Row number */}
                   <td className="center" style={{ fontWeight: 700, color: '#6b7280', fontSize: '0.85rem' }}>{idx + 1}</td>
@@ -533,9 +559,6 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                     />
                   </td>
 
-                  {/* Return toggle */}
-                  <td className="center">
-                    <input type="checkbox" checked={item.isReturn || false} onChange={() => toggleReturn(idx)} tabIndex={-1} style={{ cursor: 'pointer', transform: 'scale(1.2)' }} />
                   </td>
 
                   {/* Rate (editable, yellow) */}
@@ -566,7 +589,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                   </td>
 
                   {/* Amount */}
-                  <td className="right amount-cell" style={{ background: item.isReturn ? '#fee2e2' : undefined }}>
+                  <td className="right amount-cell" style={{ background: item.isReturn ? 'transparent' : undefined }}>
                     <span className="amount-badge" style={{ color: item.isReturn ? '#dc2626' : undefined, background: item.isReturn ? 'transparent' : undefined }}>
                       {item.amount !== 0 ? Math.round(item.amount).toLocaleString() : '—'}
                     </span>

@@ -388,6 +388,14 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     if (e.key === 'Escape') setActiveDrop(null);
     if (e.key === 'ArrowDown') { e.preventDefault(); focusInput(idx + 1, codeRefs); }
     if (e.key === 'ArrowUp') { e.preventDefault(); focusInput(idx - 1, codeRefs); }
+    if (e.key === 'Tab' && e.shiftKey) {
+      if (idx > 0) {
+        e.preventDefault();
+        const prevRowId = rows[idx - 1].id;
+        packetsRefs.current[prevRowId]?.focus();
+        packetsRefs.current[prevRowId]?.select();
+      }
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
   };
 
