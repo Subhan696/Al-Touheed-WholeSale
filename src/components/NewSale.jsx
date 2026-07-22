@@ -559,8 +559,6 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                     />
                   </td>
 
-                  </td>
-
                   {/* Rate (editable, yellow) */}
                   <td className="right">
                     <input
