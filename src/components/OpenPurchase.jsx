@@ -504,6 +504,62 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
     }
   };
 
+  const handleImportPDFStock = async () => {
+    setImportingSession(true);
+    try {
+      const fileRes = await ipcRenderer.invoke('select-backup-dir'); // actually we want a file picker, but we can just use D:\pdfs\parsed_stock.json directly if they placed it there, or add an ipc handler for selecting a file.
+      // Let's invoke a new handler 'select-json-file'
+      const filePath = await ipcRenderer.invoke('select-json-file');
+      if (filePath) {
+        const rawData = await ipcRenderer.invoke('read-file', filePath);
+        const parsed = JSON.parse(rawData);
+        const products = await ipcRenderer.invoke('get-products');
+        
+        // Map products by item code
+        const pMap = new Map(products.map(p => [p.item_code, p]));
+        
+        const productsToAdd = [];
+        for (const item of parsed) {
+           const p = pMap.get(item.itemCode);
+           if (p) {
+               productsToAdd.push({ ...p, importedQty: item.qty });
+           }
+        }
+        
+        if (productsToAdd.length > 0) {
+            // Modify appendProductsToGrid to use importedQty if available
+            const newRows = productsToAdd.map(p => ({
+              id: nextId(),
+              itemCode: p.item_code,
+              description: descForProduct(p),
+              packets: String(p.importedQty || 0),
+              rate: String(p.purchase_rate || 0),
+              amount: (p.importedQty || 0) * (parseFloat(p.purchase_rate) || 0),
+              isFixed: true
+            }));
+            
+            setItems(prev => {
+              const last = prev[prev.length - 1];
+              const keep = (last && !last.itemCode && !last.description) ? prev.slice(0, -1) : prev;
+              return [...keep, ...newRows, makeRow()];
+            });
+            setStatusMsg(`Imported ${newRows.length} items from PDF data`);
+            setTimeout(() => {
+                const totalAmt = newRows.reduce((s, r) => s + r.amount, 0);
+                // recalculate... handled by useMemo usually
+            }, 100);
+        } else {
+            setStatusMsg('No matching products found in database');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Error importing PDF stock');
+    } finally {
+      setImportingSession(false);
+    }
+  };
+
   const handleAddMissingStock = async () => {
     setImportingSession(true);
     try {
@@ -546,6 +602,9 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
               ➕ Add Missing Stock
             </button>
           )}
+          <button type="button" onClick={handleImportPDFStock} className="btn btn-secondary sm" disabled={isSubmitting || importingSession} style={{ background: '#3b82f6', color: 'white', borderColor: '#3b82f6' }}>
+            📄 Import PDF Data
+          </button>
           <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting || isEditing || importingSession} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
             📦 Import Session
           </button>

@@ -1669,7 +1669,8 @@ const LOCAL_CHANNELS = new Set([
   'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
   'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
   'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
-  'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf', 'print-barcodes-pdf', 'print-raw'
+  'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf', 'print-barcodes-pdf', 'print-raw',
+  'select-json-file', 'read-file'
 ]);
 
 function registerIPC() {
@@ -2008,6 +2009,19 @@ if (-not $winspoolOk) {
       properties: ['openDirectory']
     });
     return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('select-json-file', async (event) => {
+    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+      properties: ['openFile'],
+      filters: [{ name: 'JSON Files', extensions: ['json'] }]
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('read-file', async (event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) throw new Error('File not found');
+    return fs.readFileSync(filePath, 'utf-8');
   });
 }
 
