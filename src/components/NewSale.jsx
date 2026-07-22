@@ -423,6 +423,24 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     }
   };
 
+  const handleDeleteSale = async () => {
+    if (!saleToEdit) return;
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete invoice ${saleToEdit.invoice_no}? This will permanently remove this sale.`);
+    if (!confirmed) return;
+
+    try {
+      const result = await ipcRenderer.invoke('delete-sale', saleToEdit.id);
+      if (result?.success) {
+        setMessage('Sale deleted successfully');
+        setTimeout(() => onSaveSuccess?.(), 1000);
+      } else {
+        setMessage('Failed to delete sale');
+      }
+    } catch (err) {
+      setMessage('Error deleting sale');
+    }
+  };
+
   const handlePaymentConfirm = async (paymentData) => {
     const paymentsObj = {};
     const paymentMethodStr = paymentData.payments.map(p => {
