@@ -507,7 +507,6 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
   const handleImportPDFStock = async () => {
     setImportingSession(true);
     try {
-      const fileRes = await ipcRenderer.invoke('select-backup-dir'); // actually we want a file picker, but we can just use D:\pdfs\parsed_stock.json directly if they placed it there, or add an ipc handler for selecting a file.
       // Let's invoke a new handler 'select-json-file'
       const filePath = await ipcRenderer.invoke('select-json-file');
       if (filePath) {
