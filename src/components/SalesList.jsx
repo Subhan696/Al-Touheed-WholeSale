@@ -36,7 +36,8 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
     const s = search.toLowerCase();
     return rows.filter(r => {
       const matchSearch = !search || (r.invoice_no || '').toLowerCase().includes(s) || (r.customer_name || '').toLowerCase().includes(s);
-      const matchDate = showAll || (r.sale_date || '').startsWith(filterDate);
+      const dateStr = r.sale_date instanceof Date ? r.sale_date.toISOString() : (typeof r.sale_date === 'string' ? r.sale_date : '');
+      const matchDate = showAll || dateStr.startsWith(filterDate);
       return matchSearch && matchDate;
     });
   }, [rows, search, filterDate, showAll]);
@@ -124,7 +125,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
                       {expandedId === s.id ? '▼' : '▶'}
                     </td>
                     <td className="font-bold">{s.invoice_no}</td>
-                    <td>{(s.sale_date || '').split('T')[0]}</td>
+                    <td>{s.sale_date instanceof Date ? s.sale_date.toISOString().split('T')[0] : (typeof s.sale_date === 'string' ? s.sale_date.split('T')[0] : '')}</td>
                     <td>{s.customer_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Walk-in</span>}</td>
                     <td>
                       <span style={{ background: paymentColor(s.payment_method) + '18', color: paymentColor(s.payment_method), padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem', fontWeight: 600 }}>

@@ -34,7 +34,7 @@ function PurchaseReturnList({ currentUser, onEditReturn, isActive }) {
               : filtered.map(r => (
                 <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><span style={{ fontWeight: 700, color: '#f64e60' }}>#{r.return_no}</span></td>
-                  <td style={td}>{r.return_date?.split('T')[0]}</td>
+                  <td style={td}>{r.return_date instanceof Date ? r.return_date.toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '')}</td>
                   <td style={td}>{r.supplier_name}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>PKR {parseFloat(r.total_amount).toLocaleString()}</td>
                   <td style={{ ...td, textAlign: 'center' }}>
