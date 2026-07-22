@@ -30,6 +30,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const [scanResults, setScanResults]   = useState([]);
   const [showScanDrop, setShowScanDrop] = useState(false);
 
+  // Return modal state
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnSearch, setReturnSearch]       = useState('');
+  const [returnResults, setReturnResults]     = useState([]);
+
   // Per-row code editing
   const [activeCodeRow, setActiveCodeRow]     = useState(null);
   const [codeRowResults, setCodeRowResults]   = useState([]);
@@ -97,6 +102,56 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     setShowScanDrop((results || []).length > 0);
   };
 
+  const handleReturnSearch = async (val) => {
+    setReturnSearch(val);
+    if (!val.trim()) { setReturnResults([]); return; }
+    const results = await ipcRenderer.invoke('search-products', val);
+    setReturnResults(results || []);
+  };
+
+  const addReturnProduct = (product) => {
+    const pkts    = product.packing_qty || 1;
+    const rate    = parseFloat(product.sale_rate)    || 0;
+    const purRate = parseFloat(product.purchase_rate) || 0;
+    const disc    = parseFloat(product.discount) || 0;
+    const newIdx  = itemsRef.current.length;
+    setItems(prev => [...prev, {
+      itemCode:        product.item_code,
+      itemDescription: descForProduct(product),
+      packingQty:      pkts,
+      packets:         pkts,
+      saleRate:        rate,
+      purchaseRate:    purRate,
+      discount:        disc,
+      isReturn:        true,
+      amount:          -Math.abs(pkts) * (rate - disc),
+      stock:           product.available_stock ?? product.stock_qty ?? null
+    }]);
+    setFocusedItemIdx(newIdx);
+    setShowReturnModal(false);
+    setReturnSearch('');
+    setReturnResults([]);
+    setTimeout(() => {
+      // Focus the packets input for the new row so they can edit the return quantity
+      if (packetsRefs.current[newIdx]) packetsRefs.current[newIdx].focus();
+    }, 100);
+  };
+
+  const handleReturnKD = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (returnResults.length > 0) { addReturnProduct(returnResults[0]); return; }
+      if (returnSearch.trim()) {
+        setMessage(`Product not found: ${returnSearch}`);
+        setTimeout(() => setMessage(''), 3000);
+      }
+    }
+    if (e.key === 'Escape') { 
+      setShowReturnModal(false); 
+      setReturnSearch('');
+    }
+  };
+
   const addProduct = (product) => {
     const pkts    = product.packing_qty || 1;
     const rate    = parseFloat(product.sale_rate)    || 0;
@@ -109,9 +164,9 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       packets:         pkts,
       saleRate:        rate,
       purchaseRate:    purRate,
-      discount:        0,
+      discount:        parseFloat(product.discount) || 0,
       isReturn:        false,
-      amount:          pkts * rate,
+      amount:          pkts * (rate - (parseFloat(product.discount) || 0)),
       stock:           product.available_stock ?? product.stock_qty ?? null
     }]);
     setFocusedItemIdx(newIdx);
@@ -171,9 +226,9 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       packets:         pkts,
       saleRate:        rate,
       purchaseRate:    purRate,
-      discount:        0,
+      discount:        parseFloat(product.discount) || 0,
       isReturn:        false,
-      amount:          pkts * rate,
+      amount:          pkts * (rate - (parseFloat(product.discount) || 0)),
       stock:           product.available_stock ?? product.stock_qty ?? null
     } : item));
     setShowCodeRowDrop(false);
@@ -354,6 +409,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           <span className="topbar-title yellow">New Sale</span>
         </div>
         <div className="topbar-right">
+          <button type="button" className="topbar-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={() => setShowReturnModal(true)}>Add Return Item</button>
           <button type="button" className="topbar-btn topbar-btn-tertiary" onClick={onExit}>Exit</button>
           <button type="button" className="topbar-btn topbar-btn-primary" onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting ? 'Saving...' : isEditing ? 'Update Sale' : 'Save Sale'}
@@ -600,6 +656,45 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           <strong>{Math.round(totals.grandTotal).toLocaleString()}</strong>
         </div>
       </footer>
+
+      {/* Return Item Modal */}
+      {showReturnModal && (
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal-content" style={{ background: '#fff', padding: '2rem', borderRadius: '8px', width: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ marginTop: 0, color: '#dc2626' }}>Add Return Item</h3>
+            <p style={{ color: '#4b5563', fontSize: '0.9rem', marginBottom: '1rem' }}>Scan or type the item code to return it.</p>
+            
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                autoFocus
+                value={returnSearch}
+                onChange={e => handleReturnSearch(e.target.value)}
+                onKeyDown={handleReturnKD}
+                placeholder="Scan or type item code..."
+                style={{ width: '100%', padding: '0.75rem', fontSize: '1.1rem', border: '2px solid #ef4444', borderRadius: '4px', outline: 'none' }}
+              />
+              {returnResults.length > 0 && (
+                <div className="autocomplete-dropdown" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1100, border: '1px solid #e5e7eb', maxHeight: '250px', overflowY: 'auto' }}>
+                  {returnResults.slice(0, 8).map(p => (
+                    <div key={p.id} className="suggestion-item"
+                      onMouseDown={e => { e.preventDefault(); addReturnProduct(p); }}>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#4f46e5', marginRight: 8, minWidth: 80 }}>{p.item_code}</span>
+                      <span style={{ flex: 1 }}>{descForProduct(p)}</span>
+                      <span style={{ fontWeight: 700, color: '#dc2626', marginLeft: 8, minWidth: 70, textAlign: 'right' }}>PKR {Math.round(p.sale_rate).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+              <button type="button" className="btn-secondary" onClick={() => { setShowReturnModal(false); setReturnSearch(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
