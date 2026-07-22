@@ -969,7 +969,7 @@ async function handleIPC(channel, ...args) {
     // ─── PURCHASES ────────────────────────────────────────────────────────────
     case 'save-purchase': {
       const { purchaseDate, invoiceNo, supplierName, items, expenses, discount, miscCharges, purchaseExpenseTotal, notes, supplierInvNo, supplierDate, vehicleNo, godown, bltNumber } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0) + (purchaseExpenseTotal || 0);
+      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
       const pr = await query(
         'INSERT INTO purchases (purchase_date, invoice_no, supplier_name, total_amount, discount, misc_charges, notes, is_posted, supplier_inv_no, supplier_date, vehicle_no, godown, blt_number) VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,$10,$11,$12) RETURNING id',
         [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', bltNumber || null]
@@ -1000,7 +1000,7 @@ async function handleIPC(channel, ...args) {
     }
     case 'update-purchase': {
       const { id, purchaseDate, invoiceNo, supplierName, items, expenses, discount, miscCharges, purchaseExpenseTotal, notes, supplierInvNo, supplierDate, vehicleNo, godown, bltNumber } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0) + (purchaseExpenseTotal || 0);
+      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
       await query(
         'UPDATE purchases SET purchase_date=$1, invoice_no=$2, supplier_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7, supplier_inv_no=$8, supplier_date=$9, vehicle_no=$10, godown=$11, is_posted=0, blt_number=$13 WHERE id=$12',
         [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', id, bltNumber || null]

@@ -157,15 +157,26 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   }, [purchaseToEdit]);
 
   useEffect(() => {
-    ipcRenderer.invoke('get-manufacturers').then(res => setCompanies(res.map(c => c.name))).catch(() => { });
-    ipcRenderer.invoke('get-raw-manufacturer-brands').then(res => setMfgDiscounts(res || [])).catch(() => { });
-    ipcRenderer.invoke('get-expense-accounts').then(res => {
-      setExpenseAccounts(res || []);
-      if (!isEditing) {
-        setPurchaseExpenses(res.map(a => ({ ...a, expense_account_id: a.id, cartons: '', amount: '' })));
-      }
-    }).catch(() => {});
-  }, []);
+    const loadDropdowns = () => {
+      ipcRenderer.invoke('get-manufacturers').then(res => setCompanies(res.map(c => c.name))).catch(() => { });
+      ipcRenderer.invoke('get-raw-manufacturer-brands').then(res => setMfgDiscounts(res || [])).catch(() => { });
+      ipcRenderer.invoke('get-expense-accounts').then(res => {
+        setExpenseAccounts(res || []);
+        if (!isEditing) {
+          setPurchaseExpenses(prev => {
+            const existingIds = new Set(prev.map(p => p.expense_account_id));
+            const newAccs = (res || []).filter(a => !existingIds.has(a.id));
+            if (newAccs.length === 0 && prev.length > 0) return prev;
+            return [...prev, ...newAccs.map(a => ({ ...a, expense_account_id: a.id, cartons: '', amount: '' }))];
+          });
+        }
+      }).catch(() => {});
+    };
+
+    loadDropdowns();
+    window.addEventListener('focus', loadDropdowns);
+    return () => window.removeEventListener('focus', loadDropdowns);
+  }, [isEditing]);
 
   const handleDateChange = (e) => {
     let val = e.target.value;
