@@ -629,7 +629,20 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
       const products = await ipcRenderer.invoke('get-products-by-session-range', { from: fromId, to: toId });
       
       if (products && products.length > 0) {
-        const newRows = products.map(p => {
+        const existingCodes = new Set(itemsRef.current.map(i => i.itemCode).filter(Boolean));
+        const newProducts = products.filter(p => !existingCodes.has(p.item_code));
+
+        if (newProducts.length === 0) {
+          setStatusMsg(`All items from selected session(s) are already added.`);
+          setTimeout(() => setStatusMsg(''), 3000);
+          setShowSessionModal(false);
+          setFromSession(''); 
+          setToSession('');
+          setImportingSession(false);
+          return;
+        }
+
+        const newRows = newProducts.map(p => {
           let flatD = 0, pctD = 0;
           if (supplierName && p.brand) {
             const rule = mfgDiscounts.find(d => d.company_name.toLowerCase() === supplierName.toLowerCase() && d.brand_name.toLowerCase() === p.brand.toLowerCase());
@@ -659,7 +672,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         if (autoMode) setAutoImported(true);
         
         const sessionMsg = fromId === toId ? `Session ${fromId}` : `Sessions ${fromId} to ${toId}`;
-        setStatusMsg(`✓ Imported ${products.length} items from ${sessionMsg}`);
+        setStatusMsg(`✓ Imported ${newProducts.length} new items from ${sessionMsg}`);
         setTimeout(() => setStatusMsg(''), 3000);
 
         // Focus the first newly imported item's quantity input
@@ -706,7 +719,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           >
             ⚡ {autoMode ? 'Auto ON' : 'Auto OFF'}
           </button>
-          <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting || isEditing} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
+          <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
             📦 Import Session
           </button>
           <button type="button" onClick={onCancelEdit} className="btn btn-secondary sm" disabled={isSubmitting} style={{ background: '#f64e60', color: 'white', borderColor: '#f64e60' }}>
