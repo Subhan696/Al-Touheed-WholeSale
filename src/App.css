@@ -62,6 +62,25 @@ body {
   height: 100vh;
   position: sticky;
   top: 0;
+  transition: width 0.2s ease;
+}
+
+.app-sidebar.mini-sidebar {
+  width: 140px;
+}
+
+.app-sidebar.mini-sidebar .nav-item {
+  font-size: 0.8rem;
+  padding: 6px 6px;
+}
+
+.app-sidebar.mini-sidebar .nav-item .icon {
+  margin-right: 6px;
+  font-size: 1rem;
+}
+
+.app-sidebar.mini-sidebar .brand-main {
+  font-size: 1rem;
 }
 
 .sidebar-header {

@@ -21,6 +21,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [sizeRangesList, setSizeRangesList] = useState([]);
   const [packingsList, setPackingsList] = useState([]);
   const [brandsList, setBrandsList] = useState([]);
+  const [manufacturersList, setManufacturersList] = useState([]);
   const [brand, setBrand] = useState('');
   const [manageListType, setManageListType] = useState('');
   const [showManageModal, setShowManageModal] = useState(false);
@@ -37,6 +38,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [duplicateItem, setDuplicateItem] = useState(null);
+  const [pendingPayload, setPendingPayload] = useState(null);
+  
+  // Session tracking
+  const [sessionId, setSessionId] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
 
   // Profit sheet state
   const [profitRules, setProfitRules] = useState([]);
@@ -59,6 +66,25 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const companyRef = useRef(null);
   const newCompanyInputRef = useRef(null);
   const profitModalRefs = useRef({});
+
+  // Clock and Session Initialization
+  useEffect(() => {
+    let interval;
+    if (isActive) {
+      interval = setInterval(() => {
+        setCurrentTime(new Date().toLocaleTimeString());
+      }, 1000);
+      
+      // Start a new session only if not editing and we don't have one
+      if (!isEditing && !sessionId) {
+        ipcRenderer.invoke('start-new-item-session').then(id => {
+          setSessionId(id);
+        }).catch(err => console.error('Failed to get session ID:', err));
+      }
+    }
+    // No longer clearing session on isActive = false so it persists until tab closed (ctrl+x)
+    return () => clearInterval(interval);
+  }, [isActive, isEditing, sessionId]);
 
   useEffect(() => { loadCompanies(); loadProfitRules(); loadLists(); loadOverallProfit(); }, []);
 
@@ -89,12 +115,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     const sizeRanges = await ipcRenderer.invoke('get-size-ranges') || [];
     const packings = await ipcRenderer.invoke('get-packings') || [];
     const brands = await ipcRenderer.invoke('get-brands') || [];
+    const manufacturers = await ipcRenderer.invoke('get-manufacturers') || [];
 
     setGendersList(genders);
     setCategoriesList(categories);
     setSizeRangesList(sizeRanges);
     setPackingsList(packings);
     setBrandsList(brands);
+    setManufacturersList(manufacturers);
 
     if (!editItemData) {
       setBrand(prev => prev || (brands.length > 0 ? brands[0].name : ''));
@@ -123,12 +151,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     if (manageListType === 'size_ranges') await ipcRenderer.invoke('add-size-range', val);
     if (manageListType === 'packings') await ipcRenderer.invoke('add-packing', val);
     if (manageListType === 'brands') await ipcRenderer.invoke('add-brand', val);
+    if (manageListType === 'manufacturers') await ipcRenderer.invoke('add-manufacturer', val);
     setNewItemName('');
     if (manageListType === 'genders') setManageListItems(await ipcRenderer.invoke('get-genders') || []);
     if (manageListType === 'categories') setManageListItems(await ipcRenderer.invoke('get-categories') || []);
     if (manageListType === 'size_ranges') setManageListItems(await ipcRenderer.invoke('get-size-ranges') || []);
     if (manageListType === 'packings') setManageListItems(await ipcRenderer.invoke('get-packings') || []);
     if (manageListType === 'brands') setManageListItems(await ipcRenderer.invoke('get-brands') || []);
+    if (manageListType === 'manufacturers') setManageListItems(await ipcRenderer.invoke('get-manufacturers') || []);
     await loadLists();
     setTimeout(() => refs.current.manageListInput?.focus(), 0);
   };
@@ -139,11 +169,13 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     if (manageListType === 'size_ranges') await ipcRenderer.invoke('delete-size-range', id);
     if (manageListType === 'packings') await ipcRenderer.invoke('delete-packing', id);
     if (manageListType === 'brands') await ipcRenderer.invoke('delete-brand', id);
+    if (manageListType === 'manufacturers') await ipcRenderer.invoke('delete-manufacturer', id);
     if (manageListType === 'genders') setManageListItems(await ipcRenderer.invoke('get-genders') || []);
     if (manageListType === 'categories') setManageListItems(await ipcRenderer.invoke('get-categories') || []);
     if (manageListType === 'size_ranges') setManageListItems(await ipcRenderer.invoke('get-size-ranges') || []);
     if (manageListType === 'packings') setManageListItems(await ipcRenderer.invoke('get-packings') || []);
     if (manageListType === 'brands') setManageListItems(await ipcRenderer.invoke('get-brands') || []);
+    if (manageListType === 'manufacturers') setManageListItems(await ipcRenderer.invoke('get-manufacturers') || []);
     await loadLists();
   };
 
@@ -275,9 +307,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       return;
     }
 
-    setIsSubmitting(true);
-    setStatusMsg('Saving...');
-
     const payload = {
       itemCode: itemCode.trim().toUpperCase(),
       description: description.trim(),
@@ -293,6 +322,35 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       note: note.trim(),
     };
 
+    // For new items (not editing), check for duplicates first
+    if (!isEditing) {
+      try {
+        const dup = await ipcRenderer.invoke('check-duplicate-product', {
+          description: payload.description,
+          gender: payload.gender,
+          category: payload.category,
+          sizeRange: payload.sizeRange,
+          purchaseRate: payload.purchaseRate,
+          saleRate: payload.saleRate,
+          year: payload.year,
+        });
+        if (dup) {
+          setDuplicateItem(dup);
+          setPendingPayload(payload);
+          return; // Wait for user decision
+        }
+      } catch (err) {
+        console.error('Duplicate check failed', err);
+      }
+    }
+
+    await doSave(payload);
+  };
+
+  const doSave = async (payload) => {
+    setIsSubmitting(true);
+    setStatusMsg('Saving...');
+
     try {
       let result;
       if (isEditing) {
@@ -307,13 +365,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
         if (result.success) { setStatusMsg(`✅ Updated! ${payload.itemCode}`); setTimeout(() => onClearEdit?.(), 500); }
         else setStatusMsg(`❌ ${result.error}`);
       } else {
-        result = await ipcRenderer.invoke('save-product', payload);
+        result = await ipcRenderer.invoke('save-product', { ...payload, sessionId });
         if (result.success) {
           if (photoFile) await ipcRenderer.invoke('save-product-photo', { productId: result.id, photoData: photoPreview });
           setStatusMsg(`✅ Saved! ${result.itemCode}`);
           setTimeout(() => {
             setStatusMsg('');
-            // Clear only item-specific fields, retain selects/year/packing
             setItemCode('');
             setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
             setPhotoFile(null); setPhotoPreview(null);
@@ -331,6 +388,53 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleDuplicateMerge = async () => {
+    if (!duplicateItem || !pendingPayload) return;
+    setIsSubmitting(true);
+    setStatusMsg('Merging...');
+    try {
+      const newPacking = (parseInt(duplicateItem.packing_qty) || 0) + (pendingPayload.packingQty || 0);
+      await ipcRenderer.invoke('update-product', {
+        id: duplicateItem.id,
+        itemCode: duplicateItem.item_code,
+        description: duplicateItem.description,
+        gender: duplicateItem.gender,
+        category: duplicateItem.category,
+        brand: duplicateItem.brand || pendingPayload.brand,
+        sizeRange: duplicateItem.size_range,
+        purchaseRate: duplicateItem.purchase_rate,
+        saleRate: duplicateItem.sale_rate,
+        packingQty: newPacking,
+        year: duplicateItem.year,
+        photoPath: duplicateItem.photo_path,
+        discount: duplicateItem.discount,
+        note: duplicateItem.note,
+      });
+      setStatusMsg(`✅ Merged into existing item ${duplicateItem.item_code} (Packing: ${newPacking})`);
+      setTimeout(() => {
+        setStatusMsg('');
+        setItemCode(''); setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
+        setPhotoFile(null); setPhotoPreview(null); setNote('');
+        setTimeout(() => refs.current.itemCode?.focus(), 50);
+      }, 1000);
+    } catch (err) {
+      setStatusMsg(`❌ Merge failed: ${err.message}`);
+      setTimeout(() => setStatusMsg(''), 4000);
+    } finally {
+      setIsSubmitting(false);
+      setDuplicateItem(null);
+      setPendingPayload(null);
+    }
+  };
+
+  const handleDuplicateCreateNew = async () => {
+    setDuplicateItem(null);
+    if (pendingPayload) {
+      await doSave(pendingPayload);
+    }
+    setPendingPayload(null);
   };
 
   const handleReset = () => {
@@ -381,7 +485,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, itemCode, description, purchaseRate, saleRate, packingQty, gender, category, sizeRange, isEditing, showManageModal, showProfitModal, showCompanyModal, selectedProfitCompany, defaultPctInput, defaultDiscInput, note, overallProfitPct, overallDiscountPct, overallEnabled]);
+  }, [isActive, itemCode, description, purchaseRate, saleRate, packingQty, gender, category, sizeRange, isEditing, showManageModal, showProfitModal, showCompanyModal, selectedProfitCompany, defaultPctInput, defaultDiscInput, note, overallProfitPct, overallDiscountPct, overallEnabled, sessionId]);
 
   // Round a number to the nearest multiple of 5 (so last digit is 0 or 5)
   const roundToFive = (n) => Math.round(n / 5) * 5;
@@ -419,9 +523,16 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const margin = purchaseRate && saleRate ? Math.round(((parseFloat(saleRate) - parseFloat(purchaseRate)) / parseFloat(purchaseRate)) * 100) : null;
 
   return (
-    <div className="new-item-dashboard">
+    <div className="new-item-wrapper fade-in">
       <header className="page-header">
-        <h2 className="page-title">{isEditing ? 'Edit Stock Entry' : 'New Stock Entry'}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <h2 className="page-title" style={{ margin: 0 }}>{isEditing ? 'Edit Stock Entry' : 'New Stock Entry'}</h2>
+          {isActive && sessionId && !isEditing && (
+            <div className="session-banner" style={{ background: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '4px', fontSize: '0.9rem', fontWeight: 'bold' }}>
+              Session: {sessionId} | {currentTime}
+            </div>
+          )}
+        </div>
         {statusMsg && (
           <span style={{
             padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: '0.9rem',
@@ -1087,6 +1198,64 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
             </div>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <button className="btn btn-secondary" onClick={() => setShowCompanyModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Item Detection Modal */}
+      {duplicateItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: 12, width: 520, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            
+            {/* Header */}
+            <div style={{ background: '#f59e0b', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: '1.6rem' }}>⚠️</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>Duplicate Item Detected</h3>
+                <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'rgba(255,255,255,0.85)' }}>An item with identical details already exists</p>
+              </div>
+            </div>
+
+            {/* Comparison */}
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#92400e', marginBottom: 8 }}>Existing Item — Code: {duplicateItem.item_code}</div>
+                <table style={{ width: '100%', fontSize: '0.85rem', color: '#78350f' }}>
+                  <tbody>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600, width: 100 }}>Description</td><td>{duplicateItem.description}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Gender</td><td>{duplicateItem.gender}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Category</td><td>{duplicateItem.category}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Size</td><td>{duplicateItem.size_range}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Purchase</td><td>Rs. {parseFloat(duplicateItem.purchase_rate).toFixed(2)}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Sale</td><td>Rs. {parseFloat(duplicateItem.sale_rate).toFixed(2)}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Packing</td><td>{duplicateItem.packing_qty}</td></tr>
+                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Year</td><td>{duplicateItem.year}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <p style={{ fontSize: '0.88rem', color: '#475569', margin: '0 0 4px', lineHeight: 1.5 }}>
+                <strong>Merge</strong> will add packing qty ({pendingPayload?.packingQty || 0}) to the existing item.<br />
+                <strong>Create New</strong> will save as a separate item with a new code.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div style={{ padding: '14px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                onClick={() => { setDuplicateItem(null); setPendingPayload(null); }}
+                style={{ padding: '9px 18px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.88rem' }}
+              >Cancel</button>
+              <button
+                autoFocus
+                onClick={handleDuplicateMerge}
+                style={{ padding: '9px 22px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.88rem' }}
+              >🔀 Merge</button>
+              <button
+                onClick={handleDuplicateCreateNew}
+                style={{ padding: '9px 22px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.88rem' }}
+              >➕ Create New</button>
             </div>
           </div>
         </div>

@@ -1,0 +1,200 @@
+.manufacturer-discounts-page {
+  padding: 24px;
+  background: #f8fafc;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.md-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.md-title {
+  margin: 0 0 4px 0;
+  font-size: 1.5rem;
+  color: #1e293b;
+}
+
+.md-subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.md-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.md-status {
+  color: #059669;
+  font-weight: 600;
+  font-size: 0.9rem;
+  animation: fadeInOut 3s forwards;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.md-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-size: 0.9rem;
+  transition: 0.2s;
+}
+
+.md-btn-primary {
+  background: #2563eb;
+  color: white;
+}
+
+.md-btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.md-btn-primary:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.md-btn-secondary {
+  background: white;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.md-btn-secondary:hover {
+  background: #f1f5f9;
+}
+
+.md-grid-container {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  overflow: auto;
+  flex: 1;
+}
+
+.md-grid-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.md-grid-table th {
+  background: #f1f5f9;
+  padding: 12px;
+  text-align: left;
+  font-size: 0.85rem;
+  color: #475569;
+  font-weight: 600;
+  border-bottom: 2px solid #cbd5e1;
+}
+
+.md-grid-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0; 
+}
+
+.md-grid-table td.center-text,
+.md-grid-table th.center-text {
+  text-align: center;
+}
+
+.md-grid-table input,
+.md-grid-table select {
+  width: 100%;
+  border: 2px solid transparent; 
+  padding: 10px; 
+  outline: none;
+  font-size: 0.9rem;
+  background: transparent;
+  box-sizing: border-box;
+  transition: border-color 0.1s ease, background 0.1s ease;
+}
+
+.md-grid-table input:focus,
+.md-grid-table select:focus {
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  border-radius: 4px;
+}
+
+.md-btn-del {
+  background: transparent;
+  border: none;
+  color: #ef4444;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.md-btn-del:hover {
+  background: #fee2e2;
+}
+
+/* Visually Grouping rows by Manufacturer */
+
+.md-grid-grouped tr.md-group-start td {
+  border-top: 2px solid #94a3b8;
+}
+
+.md-grid-grouped tr.md-group-end td {
+  border-bottom: 2px solid #94a3b8;
+}
+
+/* Hide the text of the manufacturer if it's the same as the previous row */
+.md-grid-grouped tr.md-mfg-hide .md-cell-mfg select {
+  color: transparent;
+}
+
+.md-grid-grouped tr.md-mfg-hide .md-cell-mfg select:focus {
+  color: #334155; 
+}
+
+/* Brands Dropdown */
+.md-brands-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.md-brand-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  gap: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.md-brand-item:hover,
+.md-brand-item-highlight {
+  background: #eff6ff; /* Highlight color for keyboard navigation */
+}
+
+.md-brand-item span {
+  font-size: 0.9rem;
+  color: #334155;
+  user-select: none;
+}

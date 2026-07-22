@@ -1,0 +1,34 @@
+/* BarcodePrint.css - Supplemental styles only */
+
+.barcode-purchase-split {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+}
+
+.purchase-item-card {
+  transition: all 0.15s ease;
+}
+
+.purchase-item-card:hover:not(.active) {
+  border-color: #c7d2fe !important;
+  background-color: #f9fafb !important;
+}
+
+.empty-table-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.barcode-revamp-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #1e1e2d;
+  letter-spacing: -0.5px;
+}

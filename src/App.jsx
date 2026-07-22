@@ -5,6 +5,7 @@ import NewItemForm from './components/NewItemForm';
 import ProductList from './components/ProductList';
 import StockList from './components/StockList';
 import NewPurchase from './components/NewPurchase';
+import OpenPurchase from './components/OpenPurchase';
 import PurchaseList from './components/PurchaseList';
 import PurchaseReturn from './components/PurchaseReturn';
 import PurchaseReturnList from './components/PurchaseReturnList';
@@ -16,6 +17,10 @@ import Reports from './components/Reports';
 import UserManagement from './components/UserManagement';
 import NetworkSettings from './components/NetworkSettings';
 import BackupSettings from './components/BackupSettings';
+import ManufacturerDiscounts from './components/ManufacturerDiscounts';
+import ExpenseAccounts from './components/ExpenseAccounts';
+import BarcodePrint from './components/BarcodePrint';
+import SupplierLedger from './components/SupplierLedger';
 import './App.css';
 
 const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWindow, hasPermission, handleEditProduct, handleEditPurchase, handleEditReturn, handleEditSale, handleEditSalesReturn, setShowLayoutTabs }) => {
@@ -30,7 +35,12 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
       onSaveSuccess={() => { closeTopWindow(); openWindow('purchases'); }}
       onCancelEdit={closeTopWindow} isActive={isActive} />
   );
-  if (tabKey === 'purchases') return <PurchaseList onEditPurchase={hasPermission('manage_purchases') ? handleEditPurchase : undefined} isActive={isActive} />;
+  if (tabKey === 'purchases') return <PurchaseList currentUser={currentUser} onEditPurchase={hasPermission('manage_purchases') ? handleEditPurchase : undefined} isActive={isActive} />;
+  if (tabKey === 'open-purchase') return (
+    <OpenPurchase currentUser={currentUser} purchaseToEdit={win.purchaseToEdit}
+      onSaveSuccess={() => { closeTopWindow(); openWindow('purchases'); }}
+      onCancelEdit={closeTopWindow} isActive={isActive} />
+  );
   if (tabKey === 'purchase-return') return (
     <PurchaseReturn currentUser={currentUser} returnToEdit={win.returnToEdit}
       onSaveSuccess={() => { closeTopWindow(); openWindow('purchase-return-list'); }}
@@ -52,11 +62,16 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
       onNewReturn={() => openWindow('sales-return', { forceNewInstance: true })} />
   );
   if (tabKey === 'sales-return-list') return <SalesReturnList onEditReturn={handleEditSalesReturn} currentUser={currentUser} isActive={isActive} />;
+  
+  if (tabKey === 'barcode-print') return <BarcodePrint isActive={isActive} />;
 
   if (tabKey === 'reports') return <Reports currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'users') return <UserManagement currentUser={currentUser} />;
   if (tabKey === 'network-settings') return <NetworkSettings />;
   if (tabKey === 'backup') return <BackupSettings />;
+  if (tabKey === 'manufacturer-discounts') return <ManufacturerDiscounts />;
+  if (tabKey === 'expense-accounts') return <ExpenseAccounts />;
+  if (tabKey === 'supplier-ledger') return <SupplierLedger />;
 
   return <div style={{ padding: 20 }}>Unknown view</div>;
 }, (prev, next) => prev.isActive === next.isActive && prev.win === next.win && prev.currentUser === next.currentUser);
@@ -88,9 +103,11 @@ function App() {
 
   const purchaseMenuOptions = [
     { label: 'New Purchase', tab: 'new-purchase', icon: '🛒', perm: 'manage_purchases' },
+    { label: 'Open Purchase', tab: 'open-purchase', icon: '📦', perm: 'manage_purchases' },
     { label: 'Purchase List', tab: 'purchases', icon: '📋', perm: 'view_purchases' },
     { label: 'Purchase Return', tab: 'purchase-return', icon: '🔙', perm: 'manage_purchase_returns' },
     { label: 'Returns List', tab: 'purchase-return-list', icon: '📋', perm: 'manage_purchase_returns' },
+    { label: 'Barcode Print', tab: 'barcode-print', icon: '🏷️', perm: 'view_purchases' },
   ].filter(opt => hasPermission(opt.perm));
 
   const handleLoginSuccess = (userId, username, password, role, permissions) => {
@@ -167,17 +184,24 @@ function App() {
   }
 
   const handleEditProduct = (product) => openWindow('new-item', { editItemData: product });
-  const handleEditPurchase = (purchase) => openWindow('new-purchase', { purchaseToEdit: purchase });
+  const handleEditPurchase = (purchase) => {
+    if (purchase.supplier_name === 'Opening Stock') {
+      openWindow('open-purchase', { purchaseToEdit: purchase });
+    } else {
+      openWindow('new-purchase', { purchaseToEdit: purchase });
+    }
+  };
   const handleEditReturn = (ret) => openWindow('purchase-return', { returnToEdit: ret });
   const handleEditSale = (sale) => openWindow('sale', { saleToEdit: sale });
   const handleEditSalesReturn = (ret) => openWindow('sales-return', { returnToEdit: ret });
 
   const activeBaseKey = windowStack[windowStack.length - 1]?.rootKey || activeTab;
   const isFullScreenMode = ['sale', 'sales-return'].includes(activeBaseKey);
+  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'open-purchase';
 
   return (
     <div className="app-container">
-      <aside className="app-sidebar">
+      <aside className={`app-sidebar ${isFullScreenMode ? 'hidden-sidebar' : ''} ${isMiniSidebar ? 'mini-sidebar' : ''}`}>
         <div className="sidebar-header">
           <div className="logo-text">
             <span className="brand-main">ATG</span>
@@ -277,6 +301,21 @@ function App() {
           {currentUser?.role === 'admin' && (
             <button className={`nav-item ${activeTab === 'network-settings' ? 'active' : ''}`} onClick={() => openWindow('network-settings')}>
               <span className="icon">🌐</span> Network
+            </button>
+          )}
+          {hasPermission('view_reports') && (
+            <button className={`nav-item ${activeTab === 'supplier-ledger' ? 'active' : ''}`} onClick={() => openWindow('supplier-ledger')}>
+              <span className="icon">📓</span> Supplier Ledger
+            </button>
+          )}
+          {currentUser?.role === 'admin' && (
+            <button className={`nav-item ${activeTab === 'manufacturer-discounts' ? 'active' : ''}`} onClick={() => openWindow('manufacturer-discounts')}>
+              <span className="icon">🏭</span> Mfg Discounts
+            </button>
+          )}
+          {currentUser?.role === 'admin' && (
+            <button className={`nav-item ${activeTab === 'expense-accounts' ? 'active' : ''}`} onClick={() => openWindow('expense-accounts')}>
+              <span className="icon">🚚</span> Freight Expense
             </button>
           )}
         </nav>

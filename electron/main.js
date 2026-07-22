@@ -121,7 +121,7 @@ function saveDailySnapshotJSON(exportData, backupRoot) {
 }
 
 const BACKUP_TABLES = [
-  'users', 'genders', 'categories', 'size_ranges', 'packings', 'brands', 'companies', 'profit_rules', 'overall_profit',
+  'users', 'genders', 'categories', 'size_ranges', 'packings', 'brands', 'manufacturers', 'companies', 'profit_rules', 'overall_profit', 'manufacturer_brands',
   'products', 'stock_adjustments', 'purchases', 'purchase_items', 'purchase_returns', 'purchase_return_items',
   'sales', 'sale_items', 'sales_returns', 'sales_return_items'
 ];
@@ -212,6 +212,7 @@ async function initDatabase() {
       sale_rate NUMERIC(10,2) NOT NULL DEFAULT 0,
       packing_qty INTEGER NOT NULL DEFAULT 6,
       photo_path TEXT,
+      session_id INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     )
@@ -236,6 +237,10 @@ async function initDatabase() {
     )
   `);
 
+  try {
+    await query('ALTER TABLE products ADD COLUMN session_id INTEGER DEFAULT 0');
+  } catch (err) { /* Column might already exist */ }
+
   await query(`
     CREATE TABLE IF NOT EXISTS purchases (
       id SERIAL PRIMARY KEY,
@@ -249,6 +254,14 @@ async function initDatabase() {
       is_posted INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW()
     )
+  `);
+
+  await query(`
+    ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_inv_no TEXT;
+    ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_date DATE;
+    ALTER TABLE purchases ADD COLUMN IF NOT EXISTS vehicle_no TEXT;
+    ALTER TABLE purchases ADD COLUMN IF NOT EXISTS godown TEXT;
+    ALTER TABLE purchases ADD COLUMN IF NOT EXISTS blt_number TEXT;
   `);
 
   await query(`
@@ -381,9 +394,26 @@ async function initDatabase() {
         name TEXT UNIQUE NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS manufacturers (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL
+      );
+
       ALTER TABLE products ADD COLUMN IF NOT EXISTS year INTEGER;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT '';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0;
+
+      CREATE TABLE IF NOT EXISTS manufacturer_brands (
+        id SERIAL PRIMARY KEY,
+        company_name TEXT NOT NULL,
+        brand_name TEXT NOT NULL,
+        purchase_discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+        net_discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+        discount_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+        UNIQUE(company_name, brand_name)
+      );
+
+      ALTER TABLE manufacturer_brands ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) NOT NULL DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS profit_rules (
       id SERIAL PRIMARY KEY,
@@ -400,7 +430,50 @@ async function initDatabase() {
       profit_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
       discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
       enabled BOOLEAN NOT NULL DEFAULT false
-    )
+    );
+
+    CREATE TABLE IF NOT EXISTS expense_accounts (
+      id SERIAL PRIMARY KEY,
+      account_name TEXT UNIQUE NOT NULL,
+      default_rate NUMERIC(10,2) NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_expenses (
+      id SERIAL PRIMARY KEY,
+      purchase_id INTEGER REFERENCES purchases(id) ON DELETE CASCADE,
+      expense_account_id INTEGER REFERENCES expense_accounts(id) ON DELETE RESTRICT,
+      account_name TEXT NOT NULL,
+      cartons INTEGER NOT NULL DEFAULT 0,
+      rate NUMERIC(10,2) NOT NULL DEFAULT 0,
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      remarks TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      phone TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      initial_balance NUMERIC(15,2) NOT NULL DEFAULT 0,
+      opening_date DATE
+    );
+
+    CREATE TABLE IF NOT EXISTS supplier_payments (
+      id SERIAL PRIMARY KEY,
+      supplier_name TEXT NOT NULL,
+      payment_date DATE NOT NULL,
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      payment_mode TEXT DEFAULT 'Cash',
+      notes TEXT DEFAULT ''
+    );
+  `);
+
+  // Auto-migrate unique suppliers from purchases
+  await query(`
+    INSERT INTO suppliers (name, initial_balance)
+    SELECT DISTINCT supplier_name, 0 FROM purchases
+    WHERE supplier_name IS NOT NULL AND trim(supplier_name) != ''
+    ON CONFLICT (name) DO NOTHING
   `);
 
   // Indexes
@@ -411,7 +484,16 @@ async function initDatabase() {
   await query('CREATE INDEX IF NOT EXISTS idx_stock_adj_item_code ON stock_adjustments(item_code)');
 
   // Migrations — add columns that may not exist in older DBs
+  await query('ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_inv_no TEXT');
+  await query('ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_date DATE');
+  await query('ALTER TABLE purchases ADD COLUMN IF NOT EXISTS vehicle_no TEXT');
+  await query("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS godown TEXT DEFAULT '1-SHOP'");
   await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
+  await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS pre_disc_price NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS flat_discount NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS disc_pct NUMERIC(5,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS net_rate NUMERIC(12,5) DEFAULT 0');
   await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT ''");
   try {
     // Migration: if gender is empty and category has Boy/Girl, move it
@@ -451,7 +533,7 @@ async function initDatabase() {
 async function getStock(itemCode) {
   const r = await query(`
     SELECT
-      COALESCE((SELECT SUM(packets) FROM purchase_items WHERE item_code=$1),0) -
+      COALESCE((SELECT SUM(pi.packets) FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE pi.item_code=$1 AND p.is_posted = 1),0) -
       COALESCE((SELECT SUM(packets) FROM sale_items WHERE item_code=$1),0) +
       COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE item_code=$1),0) * -1 +
       COALESCE((SELECT SUM(packets) FROM sales_return_items WHERE item_code=$1),0) +
@@ -535,6 +617,27 @@ async function handleIPC(channel, ...args) {
       case 'update-brand': { await query('UPDATE brands SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('brands'); return { success: true }; }
       case 'delete-brand': { await query('DELETE FROM brands WHERE id=$1', [data]); broadcast('brands'); return { success: true }; }
 
+      case 'get-expense-accounts': { const r = await query('SELECT * FROM expense_accounts ORDER BY account_name'); return r.rows; }
+      case 'add-expense-account': { 
+        try {
+          await query('INSERT INTO expense_accounts (account_name, default_rate) VALUES ($1, $2) ON CONFLICT (account_name) DO UPDATE SET default_rate = EXCLUDED.default_rate', [data.account_name, data.default_rate]); 
+          broadcast('expense_accounts'); 
+          return { success: true }; 
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }
+      case 'update-expense-account': { 
+        await query('UPDATE expense_accounts SET account_name=$1, default_rate=$2 WHERE id=$3', [data.account_name, data.default_rate, data.id]); 
+        broadcast('expense_accounts'); 
+        return { success: true }; 
+      }
+      case 'delete-expense-account': { 
+        await query('DELETE FROM expense_accounts WHERE id=$1', [data]); 
+        broadcast('expense_accounts'); 
+        return { success: true }; 
+      }
+
       case 'check-any-users': {
       const r = await query('SELECT COUNT(*) FROM users');
       return parseInt(r.rows[0].count) > 0;
@@ -573,11 +676,23 @@ async function handleIPC(channel, ...args) {
       const num = parseInt(last.replace(/\D/g, '')) || 0;
       return String(num + 1).padStart(4, '0');
     }
+    case 'check-duplicate-product': {
+      const { description, gender, category, sizeRange, purchaseRate, saleRate, year, excludeId } = data;
+      let sql = `SELECT * FROM products WHERE description ILIKE $1 AND gender ILIKE $2 AND category ILIKE $3 AND size_range ILIKE $4 AND purchase_rate = $5 AND sale_rate = $6 AND year = $7`;
+      const params = [description.trim(), gender || '', category || '', sizeRange || '', purchaseRate, saleRate, year || ''];
+      if (excludeId) {
+        sql += ` AND id != $8`;
+        params.push(excludeId);
+      }
+      sql += ` LIMIT 1`;
+      const r = await query(sql, params);
+      return r.rows.length > 0 ? r.rows[0] : null;
+    }
     case 'save-product': {
-      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount, note } = data;
+      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount, note, sessionId } = data;
       const r = await query(
-        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, item_code',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, brand || '', discount ? parseFloat(discount) : 0, note || '']
+        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note, session_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, item_code',
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, brand || '', discount ? parseFloat(discount) : 0, note || '', sessionId || 0]
       );
       broadcast('products');
       return { success: true, id: r.rows[0].id, itemCode: r.rows[0].item_code };
@@ -595,13 +710,78 @@ async function handleIPC(channel, ...args) {
       const r = await query('SELECT * FROM products ORDER BY id DESC');
       return r.rows;
     }
+    case 'get-products-chunked': {
+      const { limit, offset } = data;
+      const countRes = await query('SELECT COUNT(*) as total FROM products');
+      const r = await query('SELECT * FROM products ORDER BY id DESC LIMIT $1 OFFSET $2', [limit, offset]);
+      return { products: r.rows, total: parseInt(countRes.rows[0].total) };
+    }
     case 'get-product-by-code': {
       const r = await query('SELECT * FROM products WHERE item_code ILIKE $1', [data]);
       return r.rows[0] || null;
     }
+    case 'get-product-photo': {
+      const r = await query('SELECT photo_path FROM products WHERE id=$1', [data]);
+      if (r.rows.length && r.rows[0].photo_path && fs.existsSync(r.rows[0].photo_path)) {
+        return `file://${r.rows[0].photo_path}?t=${Date.now()}`;
+      }
+      return null;
+    }
+
+    case 'start-new-item-session': {
+      const today = new Date().toISOString().split('T')[0];
+      const lastSessionDate = store.get('last_item_session_date');
+      
+      if (lastSessionDate !== today) {
+        store.set('last_item_session_date', today);
+        store.set('last_item_session_id', 1);
+        
+        // Clean up previous days' sessions by setting them to 0 so they don't persist
+        query('UPDATE products SET session_id = 0 WHERE session_id > 0 AND created_at < CURRENT_DATE').catch(console.error);
+      } else {
+        const current = store.get('last_item_session_id') || 0;
+        store.set('last_item_session_id', current + 1);
+      }
+      return store.get('last_item_session_id');
+    }
+    
+    case 'get-item-sessions': {
+      const r = await query(`
+        SELECT session_id, MIN(created_at) as started_at 
+        FROM products 
+        WHERE session_id > 0 AND created_at >= CURRENT_DATE
+        GROUP BY session_id 
+        ORDER BY session_id DESC 
+        LIMIT 50
+      `);
+      return r.rows;
+    }
+    
+    case 'get-products-by-session': {
+      const r = await query('SELECT * FROM products WHERE session_id = $1 ORDER BY id ASC', [data]);
+      return r.rows;
+    }
+    
+    case 'get-products-by-session-range': {
+      const { from, to } = data;
+      // Fetch products between from and to (inclusive)
+      const r = await query('SELECT * FROM products WHERE session_id >= $1 AND session_id <= $2 ORDER BY session_id ASC, id ASC', [from, to]);
+      return r.rows;
+    }
+
     case 'search-products': {
       const q = `%${data}%`;
-      const r = await query('SELECT * FROM products WHERE item_code ILIKE $1 OR description ILIKE $1 ORDER BY id DESC LIMIT 50', [q]);
+      const exact = data;
+      const prefix = `${data}%`;
+      const r = await query(`
+        SELECT * FROM products 
+        WHERE item_code ILIKE $1 OR description ILIKE $1 
+        ORDER BY 
+          (item_code ILIKE $2) DESC,
+          (item_code ILIKE $3) DESC,
+          id DESC 
+        LIMIT 50
+      `, [q, exact, prefix]);
       return r.rows;
     }
     case 'delete-product': {
@@ -663,6 +843,42 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
 
+    // ── MANUFACTURER BRANDS (PURCHASE DISCOUNTS) ──
+    case 'get-manufacturer-brands': {
+      const r = await query('SELECT * FROM manufacturer_brands ORDER BY company_name, brand_name');
+      return r.rows;
+    }
+    case 'get-raw-manufacturer-brands': {
+      const r = await query('SELECT * FROM manufacturer_brands');
+      return r.rows;
+    }
+    case 'save-manufacturer-discounts-bulk': {
+      await query('BEGIN');
+      try {
+        await query('DELETE FROM manufacturer_brands');
+        const rows = data;
+        for (const row of rows) {
+          const mfg = row.manufacturer;
+          const b = row.brand || '';
+          const pd = parseFloat(row.discount_pct) || 0;
+          const da = parseFloat(row.discount_amount) || 0;
+          if (!mfg || !b) continue;
+          
+          await query(
+            `INSERT INTO manufacturer_brands (company_name, brand_name, purchase_discount_pct, discount_amount)
+             VALUES ($1,$2,$3,$4)
+             ON CONFLICT (company_name, brand_name) DO NOTHING`,
+            [mfg, b, pd, da]
+          );
+        }
+        await query('COMMIT');
+        return { success: true };
+      } catch (err) {
+        await query('ROLLBACK');
+        throw err;
+      }
+    }
+
     // ─── OVERALL PROFIT ──────────────────────────────────────────────────────
     case 'get-overall-profit': {
       const r = await query('SELECT * FROM overall_profit WHERE id=1');
@@ -680,13 +896,65 @@ async function handleIPC(channel, ...args) {
 
     // ─── STOCK ────────────────────────────────────────────────────────────────
     case 'get-stock-list': {
-      const prods = await query('SELECT * FROM products ORDER BY id DESC');
-      const result = [];
-      for (const p of prods.rows) {
-        const stock = await getStock(p.item_code);
-        result.push({ ...p, stock_packets: stock });
-      }
-      return result;
+      const prods = await query(`
+        SELECT p.*,
+          COALESCE(CAST((
+            COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
+          ) AS INTEGER), 0) AS stock_packets
+        FROM products p
+        LEFT JOIN (
+          SELECT pi.item_code, SUM(pi.packets) as qty 
+          FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
+          WHERE pu.is_posted = 1 
+          GROUP BY pi.item_code
+        ) purchases ON purchases.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sale_items GROUP BY item_code
+        ) sales ON sales.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM purchase_return_items GROUP BY item_code
+        ) returns_out ON returns_out.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sales_return_items GROUP BY item_code
+        ) returns_in ON returns_in.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
+        ) adjustments ON adjustments.item_code = p.item_code
+        ORDER BY p.id DESC
+      `);
+      return prods.rows;
+    }
+    case 'get-stock-list-chunked': {
+      const { limit, offset } = data;
+      const countRes = await query('SELECT COUNT(*) as total FROM products');
+      const prods = await query(`
+        SELECT p.*,
+          COALESCE(CAST((
+            COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
+          ) AS INTEGER), 0) AS stock_packets
+        FROM products p
+        LEFT JOIN (
+          SELECT pi.item_code, SUM(pi.packets) as qty 
+          FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
+          WHERE pu.is_posted = 1 
+          GROUP BY pi.item_code
+        ) purchases ON purchases.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sale_items GROUP BY item_code
+        ) sales ON sales.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM purchase_return_items GROUP BY item_code
+        ) returns_in ON returns_in.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sales_return_items GROUP BY item_code
+        ) returns_out ON returns_out.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
+        ) adjustments ON adjustments.item_code = p.item_code
+        ORDER BY p.id DESC
+        LIMIT $1 OFFSET $2
+      `, [limit, offset]);
+      return { items: prods.rows, total: parseInt(countRes.rows[0].total) };
     }
     case 'get-stock-single': {
       return await getStock(data);
@@ -700,49 +968,116 @@ async function handleIPC(channel, ...args) {
 
     // ─── PURCHASES ────────────────────────────────────────────────────────────
     case 'save-purchase': {
-      const { purchaseDate, invoiceNo, supplierName, items, discount, miscCharges, notes } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
+      const { purchaseDate, invoiceNo, supplierName, items, expenses, discount, miscCharges, purchaseExpenseTotal, notes, supplierInvNo, supplierDate, vehicleNo, godown, bltNumber } = data;
+      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0) + (purchaseExpenseTotal || 0);
       const pr = await query(
-        'INSERT INTO purchases (purchase_date, invoice_no, supplier_name, total_amount, discount, misc_charges, notes, is_posted) VALUES ($1,$2,$3,$4,$5,$6,$7,1) RETURNING id',
-        [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null]
+        'INSERT INTO purchases (purchase_date, invoice_no, supplier_name, total_amount, discount, misc_charges, notes, is_posted, supplier_inv_no, supplier_date, vehicle_no, godown, blt_number) VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,$10,$11,$12) RETURNING id',
+        [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', bltNumber || null]
       );
       const purchaseId = pr.rows[0].id;
       for (const item of items) {
+        if (item.itemCode) {
+          await query(
+            'INSERT INTO products (item_code, description, purchase_rate, sale_rate) VALUES ($1, $2, $3, $4) ON CONFLICT (item_code) DO NOTHING',
+            [item.itemCode, item.itemDescription || 'Unknown', parseFloat(item.rate) || 0, (parseFloat(item.rate) || 0) * 1.2]
+          );
+        }
         await query(
-          'INSERT INTO purchase_items (purchase_id, item_code, item_description, packets, packing_qty, rate, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-          [purchaseId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.rate, item.amount]
+          'INSERT INTO purchase_items (purchase_id, item_code, item_description, packets, packing_qty, rate, amount, pre_disc_price, flat_discount, disc_pct, discount_amount, net_rate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+          [purchaseId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.rate, item.amount, item.preDiscPrice || 0, item.flatDiscount || 0, item.discPct || 0, item.discountAmount || 0, item.netRate || 0]
         );
+      }
+      if (expenses && expenses.length > 0) {
+        for (const exp of expenses) {
+          await query(
+            'INSERT INTO purchase_expenses (purchase_id, expense_account_id, account_name, cartons, rate, amount) VALUES ($1, $2, $3, $4, $5, $6)',
+            [purchaseId, exp.expense_account_id, exp.account_name || '', exp.cartons || 0, exp.rate || 0, exp.amount || 0]
+          );
+        }
       }
       broadcast('purchases'); broadcast('stock');
       return { success: true, id: purchaseId };
     }
     case 'update-purchase': {
-      const { id, purchaseDate, invoiceNo, supplierName, items, discount, miscCharges, notes } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
+      const { id, purchaseDate, invoiceNo, supplierName, items, expenses, discount, miscCharges, purchaseExpenseTotal, notes, supplierInvNo, supplierDate, vehicleNo, godown, bltNumber } = data;
+      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0) + (purchaseExpenseTotal || 0);
       await query(
-        'UPDATE purchases SET purchase_date=$1, invoice_no=$2, supplier_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7 WHERE id=$8',
-        [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, id]
+        'UPDATE purchases SET purchase_date=$1, invoice_no=$2, supplier_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7, supplier_inv_no=$8, supplier_date=$9, vehicle_no=$10, godown=$11, is_posted=0, blt_number=$13 WHERE id=$12',
+        [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', id, bltNumber || null]
       );
       await query('DELETE FROM purchase_items WHERE purchase_id=$1', [id]);
       for (const item of items) {
+        if (item.itemCode) {
+          await query(
+            'INSERT INTO products (item_code, description, purchase_rate, sale_rate) VALUES ($1, $2, $3, $4) ON CONFLICT (item_code) DO NOTHING',
+            [item.itemCode, item.itemDescription || 'Unknown', parseFloat(item.rate) || 0, (parseFloat(item.rate) || 0) * 1.2]
+          );
+        }
         await query(
-          'INSERT INTO purchase_items (purchase_id, item_code, item_description, packets, packing_qty, rate, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-          [id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.rate, item.amount]
+          'INSERT INTO purchase_items (purchase_id, item_code, item_description, packets, packing_qty, rate, amount, pre_disc_price, flat_discount, disc_pct, discount_amount, net_rate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+          [id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.rate, item.amount, item.preDiscPrice || 0, item.flatDiscount || 0, item.discPct || 0, item.discountAmount || 0, item.netRate || 0]
         );
+      }
+      await query('DELETE FROM purchase_expenses WHERE purchase_id=$1', [id]);
+      if (expenses && expenses.length > 0) {
+        for (const exp of expenses) {
+          await query(
+            'INSERT INTO purchase_expenses (purchase_id, expense_account_id, account_name, cartons, rate, amount) VALUES ($1, $2, $3, $4, $5, $6)',
+            [id, exp.expense_account_id, exp.account_name || '', exp.cartons || 0, exp.rate || 0, exp.amount || 0]
+          );
+        }
       }
       broadcast('purchases'); broadcast('stock');
       return { success: true };
     }
     case 'get-purchases': {
-      const r = await query('SELECT * FROM purchases ORDER BY id DESC');
-      return r.rows;
+      const res = await query(`
+        SELECT p.*, 
+               (SELECT SUM(pi.packets) FROM purchase_items pi WHERE pi.purchase_id = p.id) as total_qty
+        FROM purchases p ORDER BY p.id DESC LIMIT 500
+      `);
+      return res.rows;
     }
     case 'get-purchase-items': {
       const r = await query('SELECT * FROM purchase_items WHERE purchase_id=$1 ORDER BY id', [data]);
       return r.rows;
     }
+    case 'get-purchase-expenses': {
+      const r = await query('SELECT * FROM purchase_expenses WHERE purchase_id=$1 ORDER BY id', [data]);
+      return r.rows;
+    }
+    case 'get-purchase-barcode-data': {
+      const r = await query(`
+        SELECT 
+          pi.item_code, 
+          COALESCE(p.brand, '') as brand,
+          COALESCE(p.description, pi.item_description, 'Unknown') as description,
+          COALESCE(p.category, '') as category,
+          COALESCE(p.size_range, '') as size_range,
+          COALESCE(p.gender, '') as gender,
+          pi.packets as quantity, 
+          COALESCE(p.sale_rate, 0) as sale_rate, 
+          COALESCE(p.packing_qty, 1) as packing_qty
+        FROM purchase_items pi
+        LEFT JOIN products p ON pi.item_code = p.item_code
+        WHERE pi.purchase_id = $1
+      `, [data]);
+      console.log('Barcode Data:', r.rows);
+      return r.rows;
+    }
     case 'delete-purchase': {
       await query('DELETE FROM purchases WHERE id=$1', [data]);
+      broadcast('purchases'); broadcast('stock');
+      return { success: true };
+    }
+    case 'post-purchase': {
+      await query('UPDATE purchases SET is_posted=1 WHERE id=$1', [data]);
+      broadcast('purchases'); broadcast('stock');
+      return { success: true };
+    }
+    case 'post-purchase-bulk': {
+      const { fromId, toId } = data;
+      await query('UPDATE purchases SET is_posted=1 WHERE id BETWEEN $1 AND $2 AND is_posted=0', [fromId, toId]);
       broadcast('purchases'); broadcast('stock');
       return { success: true };
     }
@@ -792,6 +1127,92 @@ async function handleIPC(channel, ...args) {
       await query('DELETE FROM purchase_returns WHERE id=$1', [data]);
       broadcast('purchase-returns'); broadcast('stock');
       return { success: true };
+    }
+
+    // ─── SUPPLIER LEDGER ──────────────────────────────────────────────────────
+    case 'get-suppliers-ledger': {
+      const res = await query(`
+        SELECT 
+          s.id,
+          s.name,
+          s.phone,
+          s.address,
+          s.initial_balance,
+          s.opening_date,
+          COALESCE(p.total_purchases, 0) as total_purchases,
+          COALESCE(pr.total_returns, 0) as total_returns,
+          COALESCE(sp.total_paid, 0) as total_paid,
+          (s.initial_balance + COALESCE(p.total_purchases, 0) - COALESCE(pr.total_returns, 0) - COALESCE(sp.total_paid, 0)) as net_balance
+        FROM suppliers s
+        LEFT JOIN (
+          SELECT supplier_name, SUM(total_amount) as total_purchases
+          FROM purchases WHERE is_posted = 1 GROUP BY supplier_name
+        ) p ON p.supplier_name = s.name
+        LEFT JOIN (
+          SELECT supplier_name, SUM(total_amount) as total_returns
+          FROM purchase_returns WHERE is_posted = 1 GROUP BY supplier_name
+        ) pr ON pr.supplier_name = s.name
+        LEFT JOIN (
+          SELECT supplier_name, SUM(amount) as total_paid
+          FROM supplier_payments GROUP BY supplier_name
+        ) sp ON sp.supplier_name = s.name
+        ORDER BY s.name ASC
+      `);
+      return res.rows;
+    }
+    case 'update-supplier-balance': {
+      const { id, initial_balance } = data;
+      await query('UPDATE suppliers SET initial_balance = $1 WHERE id = $2', [parseFloat(initial_balance) || 0, id]);
+      return { success: true };
+    }
+    case 'add-supplier-payment': {
+      const { supplier_name, payment_date, amount, payment_mode, notes } = data;
+      await query('INSERT INTO supplier_payments (supplier_name, payment_date, amount, payment_mode, notes) VALUES ($1,$2,$3,$4,$5)',
+        [supplier_name, payment_date, parseFloat(amount) || 0, payment_mode || 'Cash', notes || '']
+      );
+      return { success: true };
+    }
+    case 'get-supplier-statement': {
+      const { supplier_name } = data;
+      const supplierRow = await query('SELECT initial_balance FROM suppliers WHERE name = $1', [supplier_name]);
+      const initial_balance = supplierRow.rows[0]?.initial_balance || 0;
+      
+      const res = await query(`
+        SELECT 
+          'Purchase' as type,
+          purchase_date as txn_date,
+          invoice_no as ref_no,
+          total_amount as amount,
+          notes
+        FROM purchases
+        WHERE supplier_name = $1 AND is_posted = 1
+        
+        UNION ALL
+        
+        SELECT 
+          'Return' as type,
+          return_date as txn_date,
+          return_no as ref_no,
+          total_amount as amount,
+          notes
+        FROM purchase_returns
+        WHERE supplier_name = $1 AND is_posted = 1
+        
+        UNION ALL
+        
+        SELECT 
+          'Payment' as type,
+          payment_date as txn_date,
+          'PAY-' || id as ref_no,
+          amount,
+          notes
+        FROM supplier_payments
+        WHERE supplier_name = $1
+        
+        ORDER BY txn_date ASC
+      `, [supplier_name]);
+      
+      return { initial_balance, transactions: res.rows };
     }
 
     // ─── SALES ────────────────────────────────────────────────────────────────
@@ -968,6 +1389,20 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
 
+    // ── MANUFACTURERS ──
+    case 'get-manufacturers': {
+      const r = await query('SELECT * FROM manufacturers ORDER BY name');
+      return r.rows;
+    }
+    case 'add-manufacturer': {
+      await query('INSERT INTO manufacturers (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]);
+      return { success: true };
+    }
+    case 'delete-manufacturer': {
+      await query('DELETE FROM manufacturers WHERE id=$1', [data]);
+      return { success: true };
+    }
+
     // ─── NETWORK ──────────────────────────────────────────────────────────────
     case 'get-network-settings': {
       return {
@@ -1072,12 +1507,7 @@ async function handleIPC(channel, ...args) {
         startExpressServer();
         dbStatus = { connected: true, error: null };
         
-        // Auto-load default data if present
-        const defaultDataPath = path.join(__dirname, 'default_data.json');
-        if (fs.existsSync(defaultDataPath)) {
-          console.log('[Setup] Found default_data.json, executing auto-restore...');
-          await runRestore(defaultDataPath, true);
-        }
+        // Auto-load default data removed as per request
         
         return { success: true };
       } catch (e) {
@@ -1225,7 +1655,7 @@ const LOCAL_CHANNELS = new Set([
   'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
   'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
   'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
-  'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf',
+  'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf', 'print-barcodes-pdf', 'print-raw'
 ]);
 
 function registerIPC() {
@@ -1236,13 +1666,18 @@ function registerIPC() {
     'get-size-ranges', 'add-size-range', 'update-size-range', 'delete-size-range',
     'get-packings', 'add-packing', 'update-packing', 'delete-packing',
     'get-brands', 'add-brand', 'update-brand', 'delete-brand',
-    'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo',
+    'get-expense-accounts', 'add-expense-account', 'update-expense-account', 'delete-expense-account',
+    'get-purchase-expenses',
+    'get-manufacturers', 'add-manufacturer', 'delete-manufacturer',
+    'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-products-chunked', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo', 'start-new-item-session', 'get-item-sessions', 'get-products-by-session', 'get-products-by-session-range', 'check-duplicate-product',
     'get-companies', 'save-company', 'delete-company',
     'get-profit-rules', 'save-profit-rule', 'delete-profit-rule',
+    'get-manufacturer-brands', 'get-raw-manufacturer-brands', 'save-manufacturer-discounts-bulk',
     'get-overall-profit', 'save-overall-profit', 'confirm-dialog', 'alert-dialog',
-    'get-stock-list', 'get-stock-single', 'adjust-stock',
-    'save-purchase', 'update-purchase', 'get-purchases', 'get-purchase-items', 'delete-purchase',
+    'get-stock-list', 'get-stock-list-chunked', 'get-stock-single', 'adjust-stock',
+    'save-purchase', 'update-purchase', 'get-purchases', 'get-purchase-items', 'delete-purchase', 'post-purchase', 'post-purchase-bulk', 'get-purchase-barcode-data',
     'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return',
+    'get-suppliers-ledger', 'update-supplier-balance', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
     'get-report-summary', 'get-report-top-items',
@@ -1287,6 +1722,267 @@ function registerIPC() {
   ipcMain.handle('print-receipt', async (event, receiptData) => {
     return { success: true }; // placeholder — implement if thermal printer needed
   });
+
+  // Print barcode handler - use PDF to avoid Windows print dialog crash
+  ipcMain.handle('print-barcodes-pdf', async () => {
+    try {
+      if (mainWindow) {
+        // Generate PDF instead of showing print dialog
+        const data = await mainWindow.webContents.printToPDF({
+          printBackground: true,
+          marginsType: 1, // No margins
+          pageSize: 'A4',
+          landscape: false
+        });
+
+        // Save PDF to temp location
+        const tempPath = path.join(app.getPath('temp'), `barcodes_${Date.now()}.pdf`);
+        fs.writeFileSync(tempPath, data);
+
+        // Open PDF in Chrome
+        const { exec } = require('child_process');
+        const chromePaths = [
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe')
+        ];
+
+        let chromeFound = false;
+        for (const chromePath of chromePaths) {
+          if (fs.existsSync(chromePath)) {
+            exec(`"${chromePath}" "${tempPath}"`);
+            chromeFound = true;
+            break;
+          }
+        }
+
+        // Fallback to default if Chrome not found
+        if (!chromeFound) {
+          require('electron').shell.openPath(tempPath);
+        }
+        return { success: true };
+      }
+      return { success: false, error: 'No main window' };
+    } catch (error) {
+      console.error('PDF print error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-printers', async (event) => {
+    // Try Electron's native API first
+    try {
+      const printers = await event.sender.getPrintersAsync();
+      if (printers && printers.length > 0) return printers;
+    } catch (e) {
+      console.warn('[GET-PRINTERS] Electron native API failed, trying WMI fallback:', e.message);
+    }
+
+    // Fallback: WMI query — works on Windows 7 and all later versions
+    const { exec } = require('child_process');
+    return new Promise((resolve) => {
+      const cmd = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-WmiObject Win32_Printer | Select-Object Name,Default | ConvertTo-Json"`;
+      exec(cmd, { windowsHide: true }, (err, stdout) => {
+        if (err) {
+          console.error('[GET-PRINTERS] WMI fallback also failed:', err.message);
+          resolve([]);
+          return;
+        }
+        try {
+          let parsed = JSON.parse(stdout.trim());
+          // PowerShell returns a single object (not array) when there's only one printer
+          if (!Array.isArray(parsed)) parsed = [parsed];
+          const list = parsed.map(p => ({
+            name: p.Name,
+            displayName: p.Name,
+            isDefault: !!p.Default
+          }));
+          resolve(list);
+        } catch {
+          console.error('[GET-PRINTERS] Could not parse WMI output');
+          resolve([]);
+        }
+      });
+    });
+  });
+
+  ipcMain.handle('print-raw', async (event, { printerName, data }) => {
+    const { exec } = require('child_process');
+    try {
+      const tempDir = app.getPath('temp');
+      const stamp = Date.now();
+      const tempPath = path.join(tempDir, `label_${stamp}.prn`);
+      const scriptPath = path.join(tempDir, `print_${stamp}.ps1`);
+
+      // Write the raw TSPL bytes to a temp file. TSPL is ASCII so utf8 is fine;
+      // the spooler sends these bytes through untouched (RAW datatype).
+      fs.writeFileSync(tempPath, data);
+
+      // PowerShell script that uses the winspool.drv RAW API to send bytes to
+      // any locally-installed printer by its DISPLAY NAME (exactly as Electron's
+      // getPrintersAsync returns it). This works regardless of whether the
+      // printer is shared, and handles names with spaces/special chars.
+      //
+      // If the C# Add-Type compilation fails (e.g. older .NET, restricted env),
+      // it falls back to resolving the printer's port via WMI (Win32_Printer),
+      // which works on Windows 7 / PowerShell 2.0+ and all later versions.
+      const psEsc = (s) => String(s).replace(/'/g, "''"); // escape for PS single-quoted string
+      const psScript = `$ErrorActionPreference = 'Stop'
+$printerName = '${psEsc(printerName)}'
+$filePath = '${psEsc(tempPath)}'
+
+# ---- Attempt 1: winspool.drv RAW API (most reliable) ----
+$winspoolOk = $false
+if ($PSVersionTable.PSVersion.Major -ge 3) {
+  try {
+    Add-Type @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public class RawPrinterHelper {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DOCINFOA {
+        [MarshalAs(UnmanagedType.LPWStr)] public string pDocName;
+        [MarshalAs(UnmanagedType.LPWStr)] public string pOutputFile;
+        [MarshalAs(UnmanagedType.LPWStr)] public string pDataType;
+    }
+    [DllImport("winspool.Drv", EntryPoint="OpenPrinterW", SetLastError=true, CharSet=CharSet.Unicode, ExactSpelling=true)]
+    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPWStr)] string szPrinter, out IntPtr hPrinter, IntPtr pd);
+    [DllImport("winspool.Drv", EntryPoint="ClosePrinter", SetLastError=true, ExactSpelling=true)]
+    public static extern bool ClosePrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint="StartDocPrinterW", SetLastError=true, CharSet=CharSet.Unicode, ExactSpelling=true)]
+    public static extern bool StartDocPrinter(IntPtr hPrinter, Int32 level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOA di);
+    [DllImport("winspool.Drv", EntryPoint="EndDocPrinter", SetLastError=true, ExactSpelling=true)]
+    public static extern bool EndDocPrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint="StartPagePrinter", SetLastError=true, ExactSpelling=true)]
+    public static extern bool StartPagePrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint="EndPagePrinter", SetLastError=true, ExactSpelling=true)]
+    public static extern bool EndPagePrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint="WritePrinter", SetLastError=true, ExactSpelling=true)]
+    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, Int32 dwCount, out Int32 dwWritten);
+
+    public static void SendBytesToPrinter(string szPrinterName, byte[] bytes) {
+        IntPtr hPrinter;
+        DOCINFOA di = new DOCINFOA();
+        di.pDocName = "ATG Label";
+        di.pDataType = "RAW";
+        if (!OpenPrinter(szPrinterName, out hPrinter, IntPtr.Zero))
+            throw new Exception("OpenPrinter failed (Win32 error " + Marshal.GetLastWin32Error() + "). Printer not found: " + szPrinterName);
+        try {
+            if (!StartDocPrinter(hPrinter, 1, di)) throw new Exception("StartDocPrinter failed (" + Marshal.GetLastWin32Error() + ")");
+            try {
+                if (!StartPagePrinter(hPrinter)) throw new Exception("StartPagePrinter failed (" + Marshal.GetLastWin32Error() + ")");
+                IntPtr p = Marshal.AllocCoTaskMem(bytes.Length);
+                Marshal.Copy(bytes, 0, p, bytes.Length);
+                int written;
+                bool ok = WritePrinter(hPrinter, p, bytes.Length, out written);
+                Marshal.FreeCoTaskMem(p);
+                EndPagePrinter(hPrinter);
+                if (!ok) throw new Exception("WritePrinter failed (" + Marshal.GetLastWin32Error() + ")");
+            } finally { EndDocPrinter(hPrinter); }
+        } finally { ClosePrinter(hPrinter); }
+    }
+}
+'@
+    $bytes = [System.IO.File]::ReadAllBytes($filePath)
+    [RawPrinterHelper]::SendBytesToPrinter($printerName, $bytes)
+    $winspoolOk = $true
+    Write-Output 'PRINT_OK'
+  } catch {
+    Write-Output ('WINSPOOL_ERR: ' + $_.Exception.Message)
+  }
+}
+
+# ---- Attempt 2: Resolve printer port via WMI (Win7+ compatible) ----
+if (-not $winspoolOk) {
+  try {
+    # Get-WmiObject works on Windows 7 (PowerShell 2.0+), unlike Get-Printer (Win8+)
+    $wmiPrinter = Get-WmiObject Win32_Printer -Filter "Name='$($printerName -replace "'","''")'" -ErrorAction Stop
+    if (-not $wmiPrinter) {
+      # Try case-insensitive partial match as a fallback
+      $wmiPrinter = Get-WmiObject Win32_Printer | Where-Object { $_.Name -eq $printerName } | Select-Object -First 1
+    }
+    if ($wmiPrinter -and $wmiPrinter.PortName) {
+      $port = $wmiPrinter.PortName
+      # Check if port is a file-system path (e.g., USB001:, LPT1:, COM1:)
+      Copy-Item -Path $filePath -Destination $port -Force -ErrorAction Stop
+      Write-Output 'PRINT_OK'
+    } else {
+      Write-Output 'PORT_ERR: Could not resolve printer port via WMI'
+    }
+  } catch {
+    Write-Output ('PORT_ERR: ' + $_.Exception.Message)
+  }
+}
+`;
+      fs.writeFileSync(scriptPath, psScript, 'utf8');
+
+      const cleanup = () => {
+        setTimeout(() => {
+          try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+          try { if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath); } catch {}
+        }, 5000);
+      };
+
+      const command = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}"`;
+      console.log(`[PRINT-RAW] Sending raw to "${printerName}" via spooler API`);
+
+      return await new Promise((resolve) => {
+        // 15 second timeout to prevent hanging indefinitely
+        exec(command, { windowsHide: true, timeout: 15000 }, (error, stdout, stderr) => {
+          const out = (stdout || '').trim();
+          console.log('[PRINT-RAW] Result:', out, '| Stderr:', stderr, '| Error:', error && error.message);
+
+          if (out.includes('PRINT_OK')) {
+            cleanup();
+            resolve({ success: true });
+            return;
+          }
+
+          // Check if it timed out
+          let timeoutMsg = '';
+          if (error && error.killed) {
+            timeoutMsg = ' (Timed out while communicating with the printer)';
+            console.error('[PRINT-RAW] Process killed due to timeout (Attempt 1 & 2)');
+          }
+
+          // Both winspool and port-based approaches failed — try legacy share path
+          // as a last resort (only works if printer is shared).
+          const computerName = process.env.COMPUTERNAME || 'localhost';
+          let dest = printerName;
+          if (!printerName.startsWith('\\\\') && !printerName.includes(':')) {
+            dest = `\\\\${computerName}\\${printerName}`;
+          }
+          const fallbackCmd = `print /d:"${dest}" "${tempPath}"`;
+          console.log(`[PRINT-RAW] Primary methods failed${timeoutMsg}, trying share fallback: ${fallbackCmd}`);
+
+          // 10 second timeout for fallback
+          exec(fallbackCmd, { windowsHide: true, timeout: 10000 }, (err2, out2) => {
+            cleanup();
+            if (!err2 && !(out2 && out2.includes('Unable to initialize'))) {
+              resolve({ success: true, message: out2 });
+            } else {
+              if (err2 && err2.killed) {
+                timeoutMsg = ' (Timed out on share fallback)';
+              }
+              // Collect all error details for a helpful message
+              const winspoolErr = out.match(/WINSPOOL_ERR:\s*(.*)/)?.[1] || '';
+              const portErr = out.match(/PORT_ERR:\s*(.*)/)?.[1] || '';
+              const detail = winspoolErr || portErr || (error && error.message) || stderr || 'Unknown error';
+              resolve({
+                success: false,
+                error: `Could not print to "${printerName}".\n\n${detail}${timeoutMsg}\n\nCheck that the printer is powered on, has labels loaded, and is not in an error/paused state in Windows.`
+              });
+            }
+          });
+        });
+      });
+    } catch (err) {
+      console.error('Print Raw Error:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
 
   // Relaunch
   ipcMain.handle('relaunch-app', () => { app.relaunch(); app.quit(); });

@@ -1,13 +1,17 @@
 .product-list-container { display: flex; flex-direction: column; height: 100%; }
 .list-header { display: flex; align-items: center; justify-content: space-between; padding: 0 0 12px; border-bottom: 2px solid #e4e6ef; margin-bottom: 12px; flex-shrink: 0; }
 .list-header h2 { font-size: 1.3rem; font-weight: 700; color: #1e1e2d; margin: 0; }
-.search-bar { padding: 8px 12px; border: 1px solid #e4e6ef; border-radius: 6px; font-size: 0.9rem; width: 260px; font-family: inherit; background: #f9fafb; }
-.search-bar:focus { border-color: #3699ff; outline: none; background: #fff; }
+.search-filters-group { display: flex; gap: 8px; align-items: center; }
+.search-bar { padding: 8px 12px; border: 1px solid #e4e6ef; border-radius: 6px; font-size: 0.9rem; width: 220px; font-family: inherit; background: #f9fafb; transition: all 0.2s; }
+.search-bar:focus { border-color: #3699ff; outline: none; background: #fff; box-shadow: 0 0 0 2px rgba(54,153,255,0.1); }
+.filter-bar { padding: 8px 10px; border: 1px solid #e4e6ef; border-radius: 6px; font-size: 0.9rem; width: 120px; font-family: inherit; background: #f9fafb; transition: all 0.2s; }
+.filter-bar:focus { border-color: #3699ff; outline: none; background: #fff; box-shadow: 0 0 0 2px rgba(54,153,255,0.1); }
 .table-wrapper { flex: 1; overflow-y: auto; border: 1px solid #e4e6ef; border-radius: 8px; background: #fff; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 .data-table thead { position: sticky; top: 0; background: #f5f7fa; z-index: 1; }
 .data-table th { padding: 10px 12px; text-align: left; font-weight: 700; color: #5e6278; border-bottom: 2px solid #e4e6ef; white-space: nowrap; }
 .data-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; color: #1e1e2d; font-weight: 500; }
+.data-table tr { scroll-margin-top: 45px; }
 .data-table tr:hover { background: #f8f9fb; }
 .data-table tr.selected-row { background: #eff6ff; border-left: 3px solid #3699ff; }
 .data-table tr.selected-row td:first-child { border-left-color: #3699ff; }

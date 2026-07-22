@@ -4,10 +4,7 @@ import './NewSale.css';
 const { ipcRenderer } = window.require('electron');
 
 function descForProduct(p) {
-  let d = p.description || '';
-  if (p.category) d += ` — ${p.category}`;
-  if (p.size_range) d += ` (${p.size_range})`;
-  return d;
+  return `${p.description || ''} ${p.category || ''} ${p.size_range || ''} ${p.gender || ''}`.replace(/\s+/g, ' ').trim();
 }
 
 function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, isActive }) {

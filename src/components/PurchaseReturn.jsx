@@ -47,7 +47,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   useEffect(() => {
     if (isEditing) {
       const r = returnToEdit;
-      const raw = r.return_date?.split('T')[0] || '';
+      const raw = r.return_date instanceof Date ? r.return_date.toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '');
       if (raw) {
         const [y, m, d] = raw.split('-');
         setReturnDate(`${d}-${m}-${y}`);
@@ -74,12 +74,19 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   }, [returnToEdit]);
 
   const handleDateChange = (e) => {
-    const raw = e.target.value.replace(/[^0-9]/g, '');
-    if (raw.length > 8) return;
-    let val = raw;
-    if (raw.length >= 5) val = raw.slice(0,2) + '-' + raw.slice(2,4) + '-' + raw.slice(4);
-    else if (raw.length >= 3) val = raw.slice(0,2) + '-' + raw.slice(2);
-    setReturnDate(val);
+    let val = e.target.value;
+    // Allow user to delete back
+    if (val.length < returnDate.length) {
+      setReturnDate(val);
+      return;
+    }
+
+    // Auto-insert hyphen
+    val = val.replace(/[^0-9-]/g, '');
+    if (val.length === 2 && !val.includes('-')) val += '-';
+    if (val.length === 5 && val.split('-').length === 2) val += '-';
+    // Limit length to DD-MM-YYYY (10 chars)
+    if (val.length <= 10) setReturnDate(val);
   };
 
   const handleHeaderKD = (e, field) => {
