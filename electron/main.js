@@ -1404,6 +1404,19 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
 
+    // ─── PAYMENTS ─────────────────────────────────────────────────────────────
+    case 'get-payment-accounts': {
+      return {
+        savedAccounts: store.get('savedAccounts', []),
+        defaultAccounts: store.get('defaultAccounts', {})
+      };
+    }
+    case 'save-payment-accounts': {
+      store.set('savedAccounts', data.savedAccounts || []);
+      store.set('defaultAccounts', data.defaultAccounts || {});
+      return { success: true };
+    }
+
     // ─── NETWORK ──────────────────────────────────────────────────────────────
     case 'get-network-settings': {
       return {
@@ -1683,6 +1696,7 @@ function registerIPC() {
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
     'get-report-summary', 'get-report-top-items',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
+    'get-payment-accounts', 'save-payment-accounts',
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
     'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
     'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup'

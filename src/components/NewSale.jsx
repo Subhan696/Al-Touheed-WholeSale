@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './NewSale.css';
+import PaymentModal from './PaymentModal';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -18,6 +19,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const [discount, setDiscount]           = useState(0);
   const [miscCharges, setMiscCharges]     = useState(0);
   const [notes, setNotes]                 = useState('');
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [receivedPayments, setReceivedPayments] = useState(null);
   const [items, setItems]                 = useState([]);
   const [message, setMessage]             = useState('');
   const [isSubmitting, setIsSubmitting]   = useState(false);
@@ -56,6 +59,18 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       setCustomerName(s.customer_name || '');
       setCustomerPhone(s.customer_phone || '');
       setPaymentMethod(s.payment_method || 'Cash');
+      
+      if (s.payment_method) {
+        const payments = {};
+        const pairs = s.payment_method.split(', ');
+        pairs.forEach(pair => {
+          if (pair.includes(':')) {
+            const [type, amount] = pair.split(': ');
+            if (type && amount) payments[type] = parseFloat(amount);
+          }
+        });
+        setReceivedPayments(payments);
+      }
       setDiscount(s.discount || 0);
       setMiscCharges(s.misc_charges || 0);
       setNotes(s.notes || '');
@@ -385,8 +400,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   }, [items, discount, miscCharges]);
 
   // ── Submit ────────────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
-    if (items.length === 0) { setMessage('Add at least one item'); return; }
+  const executeSave = async (paymentMethodStr) => {
     setIsSubmitting(true);
     const payload = {
       saleDate:    new Date(saleDate.getTime() - saleDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
@@ -394,7 +408,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       items: items.map(i => ({...i, packets: i.isReturn ? -Math.abs(parseInt(i.packets) || 0) : Math.abs(parseInt(i.packets) || 0)})),
       discount:    parseFloat(discount)    || 0,
       miscCharges: parseFloat(miscCharges) || 0,
-      paymentMethod, notes,
+      paymentMethod: paymentMethodStr, notes,
       userId: currentUser?.id
     };
     try {
@@ -407,6 +421,27 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       setMessage(err.message || 'Error');
       setIsSubmitting(false);
     }
+  };
+
+  const handlePaymentConfirm = async (paymentData) => {
+    const paymentsObj = {};
+    const paymentMethodStr = paymentData.payments.map(p => {
+      const accStr = p.accNo ? ` (${p.accNo})` : '';
+      const methodKey = `${p.method}${accStr}`;
+      paymentsObj[methodKey] = p.amount;
+      return `${methodKey}: ${p.amount}`;
+    }).join(', ');
+    
+    setReceivedPayments(paymentsObj);
+    setPaymentMethod(paymentMethodStr);
+    
+    await executeSave(paymentMethodStr);
+    setPaymentModalOpen(false);
+  };
+
+  const handleSubmit = () => {
+    if (items.length === 0) { setMessage('Add at least one item'); return; }
+    setPaymentModalOpen(true);
   };
 
   useEffect(() => {
@@ -465,16 +500,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
               <label>Phone</label>
               <input value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="03XX-XXXXXXX" />
             </div>
-            <div className="field">
-              <label>Payment Method</label>
-              <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
-                style={{ padding: '4px 6px', border: '1px solid #e5e7eb', borderRadius: 4, fontSize: '0.8rem', height: 28 }}>
-                <option>Cash</option>
-                <option>Bank Transfer</option>
-                <option>Cheque</option>
-                <option>Credit</option>
-              </select>
-            </div>
+
             <div className="field">
               <label>Notes</label>
               <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional..." />
@@ -721,6 +747,18 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           </div>
         </div>
       )}
+
+      <PaymentModal
+        open={paymentModalOpen}
+        invoiceNo={invoiceNo}
+        grandTotal={totals.grandTotal}
+        isEditMode={isEditing}
+        existingPayments={isEditing && receivedPayments ? receivedPayments : null}
+        onConfirm={handlePaymentConfirm}
+        onCancel={() => setPaymentModalOpen(false)}
+        onChange={() => {}}
+        cashOnly={false}
+      />
 
     </div>
   );
