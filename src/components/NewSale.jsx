@@ -470,14 +470,23 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           <span className="topbar-dt">
             {`${String(saleDate.getDate()).padStart(2,'0')}-${String(saleDate.getMonth()+1).padStart(2,'0')}-${saleDate.getFullYear()}, ${saleDate.toLocaleString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}).toUpperCase()}`}
           </span>
-          {!isEditing && onNewSale && (
-            <button type="button" className="topbar-btn topbar-btn-secondary" onClick={onNewSale} style={{ marginLeft: 10 }}>+ New Sale</button>
+          {saleToEdit?.updated_at && saleToEdit.updated_at !== saleToEdit.created_at && (
+            <span className="topbar-dt" style={{ marginLeft: '15px', color: '#dc2626', fontWeight: 'bold' }}>
+              (Updated: {`${String(new Date(saleToEdit.updated_at).getDate()).padStart(2, '0')}-${String(new Date(saleToEdit.updated_at).getMonth() + 1).padStart(2, '0')}-${new Date(saleToEdit.updated_at).getFullYear()}, ${new Date(saleToEdit.updated_at).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}`})
+            </span>
           )}
-          <span className="topbar-title yellow">New Sale</span>
+          {!isEditing && onNewSale && (
+            <button type="button" className="topbar-btn topbar-btn-primary" onClick={onNewSale} style={{ marginLeft: 10 }}>+ New Sale</button>
+          )}
+          <span className="topbar-title yellow">{isEditing ? 'Edit Sale' : 'New Sale'}</span>
         </div>
         <div className="topbar-right">
           <button type="button" className="topbar-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={() => setShowReturnModal(true)}>Add Return Item</button>
+          <button type="button" className="topbar-btn topbar-btn-secondary" onClick={() => isEditing ? onExit() : window.location.reload()}>{isEditing ? 'Cancel' : 'Reset'}</button>
           <button type="button" className="topbar-btn topbar-btn-tertiary" onClick={onExit}>Exit</button>
+          {isEditing && (
+            <button type="button" className="topbar-btn" style={{ background: '#b91c1c', color: '#fff' }} onClick={handleDeleteSale}>Delete</button>
+          )}
           <button type="button" className="topbar-btn topbar-btn-primary" onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting ? 'Saving...' : isEditing ? 'Update Sale' : 'Save Sale'}
           </button>

@@ -50,7 +50,7 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
 
   if (tabKey === 'sale') return (
     <NewSale currentUser={currentUser} saleToEdit={win.saleToEdit}
-      onSaveSuccess={() => { closeTopWindow(); openWindow('sales-list'); }}
+      onSaveSuccess={() => { closeTopWindow(); openWindow('sale', { forceNewInstance: true }); }}
       onExit={closeTopWindow} isActive={isActive}
       onNewSale={() => { openWindow('sale', { forceNewInstance: true }); }} />
   );
