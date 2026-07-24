@@ -201,7 +201,21 @@ async function runRestore(fileToRestore, skipBackup = false) {
 
 // ── Database Schema ──────────────────────────────────────────────────────────
 async function initDatabase() {
-  await query(`
+    await query(`
+      CREATE TABLE IF NOT EXISTS daily_sessions (
+        date DATE PRIMARY KEY,
+        last_id INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS global_counters (
+        name TEXT PRIMARY KEY,
+        value INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    await query(`
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
       item_code TEXT UNIQUE NOT NULL,
@@ -502,6 +516,7 @@ async function initDatabase() {
     // Migration: year should be TEXT, not INTEGER (e.g. '2024-25')
     await query("ALTER TABLE products ALTER COLUMN year TYPE TEXT USING year::text");
     await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''");
+    await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''");
   } catch(e) { console.error('Migration error:', e); }
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
@@ -671,7 +686,7 @@ async function handleIPC(channel, ...args) {
 
     // ─── PRODUCTS ────────────────────────────────────────────────────────────
     case 'get-next-item-code': {
-      const r = await query("SELECT item_code FROM products ORDER BY id DESC LIMIT 1");
+      const r = await query("SELECT item_code FROM products WHERE (NULLIF(regexp_replace(item_code, '\\D', '', 'g'), '')::numeric) < 185342 ORDER BY (NULLIF(regexp_replace(item_code, '\\D', '', 'g'), '')::numeric) DESC LIMIT 1");
       if (!r.rows.length) return '0001';
       const last = r.rows[0].item_code;
       const num = parseInt(last.replace(/\D/g, '')) || 0;
@@ -690,10 +705,10 @@ async function handleIPC(channel, ...args) {
       return r.rows.length > 0 ? r.rows[0] : null;
     }
     case 'save-product': {
-      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount, note, sessionId } = data;
+      const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount, note, sessionId, createdBy } = data;
       const r = await query(
-        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note, session_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, item_code',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, brand || '', discount ? parseFloat(discount) : 0, note || '', sessionId || 0]
+        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note, session_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, item_code',
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, brand || '', discount ? parseFloat(discount) : 0, note || '', sessionId || 0, createdBy || 'Unknown']
       );
       broadcast('products');
       return { success: true, id: r.rows[0].id, itemCode: r.rows[0].item_code };
@@ -730,29 +745,37 @@ async function handleIPC(channel, ...args) {
     }
 
     case 'start-new-item-session': {
-      const today = new Date().toISOString().split('T')[0];
-      const lastSessionDate = store.get('last_item_session_date');
-      
-      if (lastSessionDate !== today) {
-        store.set('last_item_session_date', today);
-        store.set('last_item_session_id', 1);
+      try {
+        const res = await query(`
+          INSERT INTO daily_sessions (date, last_id)
+          VALUES (CURRENT_DATE, 1)
+          ON CONFLICT (date) DO UPDATE SET last_id = daily_sessions.last_id + 1
+          RETURNING last_id
+        `);
+        const newId = res.rows[0].last_id;
         
         // Clean up previous days' sessions by setting them to 0 so they don't persist
+        // We do this silently in the background
         query('UPDATE products SET session_id = 0 WHERE session_id > 0 AND created_at < CURRENT_DATE').catch(console.error);
-      } else {
-        const current = store.get('last_item_session_id') || 0;
-        store.set('last_item_session_id', current + 1);
+        
+        return newId;
+      } catch (err) {
+        console.error('Error getting next session ID:', err);
+        return 1; // Fallback
       }
-      return store.get('last_item_session_id');
     }
     
     case 'get-item-sessions': {
+      const showAll = data?.showAll || false;
       const r = await query(`
-        SELECT session_id, MIN(created_at) as started_at 
-        FROM products 
-        WHERE session_id > 0 AND created_at >= CURRENT_DATE
-        GROUP BY session_id 
-        ORDER BY session_id DESC 
+        SELECT p.session_id, MIN(p.created_at) as started_at, MAX(p.brand) as brand, MAX(p.created_by) as created_by
+        FROM products p
+        WHERE p.session_id > 0 AND p.created_at >= CURRENT_DATE
+        ${showAll ? '' : `AND NOT EXISTS (
+          SELECT 1 FROM purchase_items pi WHERE pi.item_code = p.item_code
+        )`}
+        GROUP BY p.session_id 
+        ORDER BY p.session_id DESC 
         LIMIT 50
       `);
       return r.rows;
@@ -1255,12 +1278,12 @@ async function handleIPC(channel, ...args) {
     }
     case 'get-sales': {
       const { startDate, endDate, searchTerm } = data || {};
-      let q = 'SELECT * FROM sales WHERE 1=1';
+      let q = 'SELECT sales.*, users.username FROM sales LEFT JOIN users ON sales.user_id = users.id WHERE 1=1';
       const params = [];
-      if (startDate) { params.push(startDate); q += ` AND sale_date >= $${params.length}`; }
-      if (endDate) { params.push(endDate); q += ` AND sale_date <= $${params.length}`; }
-      if (searchTerm) { params.push(`%${searchTerm}%`); q += ` AND (customer_name ILIKE $${params.length} OR invoice_no ILIKE $${params.length})`; }
-      q += ' ORDER BY id DESC';
+      if (startDate) { params.push(startDate); q += ` AND sales.sale_date >= $${params.length}`; }
+      if (endDate) { params.push(endDate); q += ` AND sales.sale_date <= $${params.length}`; }
+      if (searchTerm) { params.push(`%${searchTerm}%`); q += ` AND (sales.customer_name ILIKE $${params.length} OR sales.invoice_no ILIKE $${params.length})`; }
+      q += ' ORDER BY sales.id DESC';
       const r = await query(q, params);
       return r.rows;
     }
@@ -1274,8 +1297,19 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
     case 'get-next-invoice-no': {
-      const r = await query("SELECT MAX(CAST(invoice_no AS INTEGER)) FROM sales WHERE invoice_no ~ '^[0-9]+$'");
-      return String((parseInt(r.rows[0].max) || 0) + 1);
+      try {
+        await query(`INSERT INTO global_counters (name, value)
+          SELECT 'invoice_no', COALESCE(MAX(CAST(invoice_no AS INTEGER)), 0) FROM sales WHERE invoice_no ~ '^[0-9]+$'
+          ON CONFLICT (name) DO NOTHING
+        `);
+        const res = await query(`UPDATE global_counters SET value = value + 1 WHERE name = 'invoice_no' RETURNING value
+        `);
+        return String(res.rows[0].value);
+      } catch (err) {
+        console.error('Error getting next invoice no:', err);
+        const r = await query("SELECT MAX(CAST(invoice_no AS INTEGER)) FROM sales WHERE invoice_no ~ '^[0-9]+$'");
+        return String((parseInt(r.rows[0].max) || 0) + 1);
+      }
     }
 
     // ─── SALES RETURNS ────────────────────────────────────────────────────────
@@ -1643,6 +1677,391 @@ async function handleIPC(channel, ...args) {
       return await runRestore(fileToRestore);
     }
 
+
+    case 'get-freight-report': {
+      const { startDate, endDate } = data;
+      const res = await query(`
+        SELECT p.id, p.invoice_date, p.freight, p.supplier_id, p.invoice_no, s.name as supplier_name
+        FROM purchases p
+        LEFT JOIN suppliers s ON p.supplier_id = s.id
+        WHERE p.freight > 0 AND p.invoice_date BETWEEN $1 AND $2
+        ORDER BY p.invoice_date DESC
+      `, [startDate, endDate]);
+      return res.rows;
+    }
+
+    case 'get-daily-report': {
+      try {
+        const { startDate, endDate, startTime, endTime, userId } = data;
+        const start = startDate;
+        const end = endDate;
+
+        const hasTimeFilter = !!(startTime || endTime);
+        let timeClause = '';
+        if (hasTimeFilter) {
+          const tStart = startTime ? `${startTime}:00` : '00:00:00';
+          const tEnd = endTime ? `${endTime}:59` : '23:59:59';
+          timeClause = ` AND sales.created_at::time >= '${tStart}' AND sales.created_at::time <= '${tEnd}'`;
+        }
+
+        let userClause = '';
+        const params = [start, end];
+        if (userId && userId !== 'all') {
+          params.push(userId);
+          userClause = ` AND sales.user_id = $${params.length}`;
+        }
+
+        const salesRes = await query(`
+          SELECT sales.id, sales.invoice_no, sales.sale_date, sales.created_at, sales.customer_name, sales.total_amount, sales.total_packets as total_quantity, sales.payment_method, sales.discount, sales.misc_charges, users.username as sold_by
+          FROM sales
+          LEFT JOIN users ON sales.user_id = users.id
+          WHERE sales.sale_date::date BETWEEN $1 AND $2${timeClause}${userClause}
+          ORDER BY sales.sale_date ASC, sales.created_at ASC
+        `, params);
+        const sales = salesRes.rows;
+
+        const enrichedSales = [];
+        for (const sale of sales) {
+          const itemsRes = await query(`
+            SELECT item_code, item_description, packets as quantity, sale_rate, purchase_rate, amount, profit
+            FROM sale_items
+            WHERE sale_id = $1
+            ORDER BY id
+          `, [sale.id]);
+          const items = itemsRes.rows;
+
+          let digital = 0;
+          const breakdown = {};
+          if (sale.payment_method) {
+            const parts = sale.payment_method.split(',');
+            for (const part of parts) {
+              const colonIdx = part.lastIndexOf(':');
+              if (colonIdx === -1) continue;
+              const fullMethod = part.slice(0, colonIdx).trim();
+              const methodName = fullMethod.toLowerCase();
+              const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+
+              if (methodName.includes('jazzcash') || methodName.includes('easypais') || methodName.includes('raast') || methodName.includes('transfer') || methodName.includes('bank')) {
+                digital += amt;
+                breakdown[fullMethod] = (breakdown[fullMethod] || 0) + amt;
+              }
+            }
+          }
+          if (digital === 0 && sale.payment_method) {
+            const pm = sale.payment_method.toLowerCase();
+            const netAmt = (parseFloat(sale.total_amount) || 0) + (parseFloat(sale.misc_charges) || 0) - (parseFloat(sale.discount) || 0);
+            if (pm.includes('jazzcash') || pm.includes('easypais') || pm.includes('raast') || pm.includes('transfer') || pm.includes('bank')) {
+              digital = netAmt;
+              breakdown[sale.payment_method] = netAmt;
+            }
+          }
+
+          const billAmt = (parseFloat(sale.total_amount) || 0) + (parseFloat(sale.misc_charges) || 0) - (parseFloat(sale.discount) || 0);
+          const cash = billAmt - digital;
+
+          const totalProfit = items.reduce((s, i) => s + (parseFloat(i.profit) || 0), 0) + (parseFloat(sale.misc_charges) || 0) - (parseFloat(sale.discount) || 0);
+          enrichedSales.push({ ...sale, items, cash, digital, profit: totalProfit, breakdown });
+        }
+
+        const returnsRes = await query(`
+          SELECT id, return_no, invoice_no, return_date, created_at, customer_name, total_amount
+          FROM sales_returns
+          WHERE return_date::date BETWEEN $1 AND $2${timeClause}
+          ORDER BY return_date ASC, created_at ASC
+        `, [start, end]);
+        const returns = returnsRes.rows;
+
+        const enrichedReturns = [];
+        for (const ret of returns) {
+          const itemsRes = await query(`
+            SELECT 
+              sri.item_code, sri.item_description, sri.packets as quantity, sri.price as sale_rate, sri.amount,
+              COALESCE(
+                (SELECT purchase_rate FROM sale_items WHERE item_code = sri.item_code LIMIT 1),
+                0
+              ) as purchase_rate
+            FROM sales_return_items sri
+            WHERE sri.sales_return_id = $1
+            ORDER BY sri.id
+          `, [ret.id]);
+          const items = itemsRes.rows.map(i => ({
+            ...i,
+            profit: ((parseFloat(i.sale_rate) || 0) - (parseFloat(i.purchase_rate) || 0)) * (parseFloat(i.quantity) || 0)
+          }));
+          enrichedReturns.push({ ...ret, items });
+        }
+
+        const totalSales = enrichedSales.reduce((sum, s) => sum + ((parseFloat(s.total_amount) || 0) + (parseFloat(s.misc_charges) || 0) - (parseFloat(s.discount) || 0)), 0);
+        const totalSoldItems = enrichedSales.reduce((sum, s) => sum + (parseFloat(s.total_quantity) || 0), 0);
+        const totalReturns = enrichedReturns.reduce((sum, r) => sum + (parseFloat(r.total_amount) || 0), 0);
+        const totalReturnedItems = enrichedReturns.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0), 0);
+        const grossProfit = enrichedSales.reduce((sum, s) => sum + (parseFloat(s.profit) || 0), 0);
+        const profitLostOnReturns = enrichedReturns.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (parseFloat(i.profit) || 0), 0), 0);
+        const netProfit = grossProfit - profitLostOnReturns;
+        const totalCash = enrichedSales.reduce((sum, s) => sum + s.cash, 0);
+        const totalDigital = enrichedSales.reduce((sum, s) => sum + s.digital, 0);
+        const netCash = totalCash - totalReturns;
+
+        const digitalBreakdown = {};
+        enrichedSales.forEach(s => {
+          if (s.breakdown) {
+            Object.keys(s.breakdown).forEach(method => {
+              if (!digitalBreakdown[method]) digitalBreakdown[method] = { amount: 0, count: 0 };
+              digitalBreakdown[method].amount += s.breakdown[method];
+              digitalBreakdown[method].count += 1;
+            });
+          }
+        });
+
+        return {
+          sales: enrichedSales,
+          returns: enrichedReturns,
+          summary: {
+            totalSales, totalSoldItems, totalReturns, totalReturnedItems,
+            netSales: totalSales - totalReturns,
+            totalCash, netCash, totalDigital, digitalBreakdown,
+            grossProfit, profitLostOnReturns, netProfit
+          }
+        };
+      } catch (err) {
+        console.error('Error getting daily report:', err);
+        return { error: err.message };
+      }
+    }
+
+    case 'get-user-report': {
+      try {
+        const { startDate, endDate } = data;
+        const usersRes = await query('SELECT id, username FROM users');
+        const users = usersRes.rows;
+
+        const report = [];
+        for (const user of users) {
+          const sRes = await query(`
+            SELECT 
+                COUNT(id) as invoice_count,
+                SUM(total_packets) as item_count,
+                SUM(total_amount) as total_sales
+            FROM sales
+            WHERE user_id = $1 AND sale_date::date BETWEEN $2 AND $3
+          `, [user.id, startDate, endDate]);
+          const salesStats = sRes.rows[0] || {};
+
+          const rRes = await query(`
+            SELECT 
+                COUNT(id) as return_count,
+                SUM(total_amount) as total_returned
+            FROM sales_returns
+            WHERE user_id = $1 AND return_date::date BETWEEN $2 AND $3
+          `, [user.id, startDate, endDate]);
+          const returnStats = rRes.rows[0] || {};
+
+          const iRes = await query(`
+            SELECT 
+                sale_date, created_at, invoice_no, total_packets as total_quantity, total_amount, discount, misc_charges, payment_method
+            FROM sales 
+            WHERE user_id = $1 AND sale_date::date BETWEEN $2 AND $3
+            ORDER BY created_at DESC
+          `, [user.id, startDate, endDate]);
+          
+          let userCash = 0, userDigital = 0;
+          iRes.rows.forEach(row => {
+            let digital = 0;
+            if (row.payment_method) {
+              const parts = row.payment_method.split(',');
+              for (const part of parts) {
+                const colonIdx = part.lastIndexOf(':');
+                if (colonIdx === -1) continue;
+                const methodName = part.slice(0, colonIdx).trim().toLowerCase();
+                const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+                if (methodName.includes('jazzcash') || methodName.includes('easypais') || methodName.includes('raast') || methodName.includes('transfer') || methodName.includes('bank')) {
+                  digital += amt;
+                }
+              }
+            }
+            if (digital === 0 && row.payment_method) {
+              const pm = row.payment_method.toLowerCase();
+              const netAmt = (parseFloat(row.total_amount) || 0) + (parseFloat(row.misc_charges) || 0) - (parseFloat(row.discount) || 0);
+              if (pm.includes('jazzcash') || pm.includes('easypais') || pm.includes('raast') || pm.includes('transfer') || pm.includes('bank')) {
+                digital = netAmt;
+              }
+            }
+            userDigital += digital;
+            const billAmt = (parseFloat(row.total_amount) || 0) + (parseFloat(row.misc_charges) || 0) - (parseFloat(row.discount) || 0);
+            userCash += (billAmt - digital);
+          });
+
+          if (parseInt(salesStats.invoice_count) > 0 || parseInt(returnStats.return_count) > 0) {
+            report.push({
+              username: user.username,
+              invoiceCount: parseInt(salesStats.invoice_count) || 0,
+              itemCount: parseInt(salesStats.item_count) || 0,
+              totalSales: parseFloat(salesStats.total_sales) || 0,
+              returnCount: parseInt(returnStats.return_count) || 0,
+              totalReturned: parseFloat(returnStats.total_returned) || 0,
+              cashSales: userCash,
+              digitalSales: userDigital,
+              invoices: iRes.rows
+            });
+          }
+        }
+        return report;
+      } catch (err) {
+        console.error('Error in get-user-report:', err);
+        return { error: err.message };
+      }
+    }
+
+    case 'get-date-summary': {
+      try {
+        const { startDate, endDate } = data;
+        const res = await query(`
+          SELECT sale_date::date as day,
+                 SUM(total_amount) as total_sales,
+                 SUM(total_packets) as total_items,
+                 STRING_AGG(payment_method || ':' || total_amount, ',') as payment_breakdown
+          FROM sales
+          WHERE sale_date::date BETWEEN $1 AND $2
+          GROUP BY sale_date::date
+          ORDER BY day ASC
+        `, [startDate, endDate]);
+
+        return res.rows.map(row => {
+          let cash = 0, digital = 0;
+          if (row.payment_breakdown) {
+            row.payment_breakdown.split(',').forEach(part => {
+              const colonIdx = part.lastIndexOf(':');
+              if (colonIdx > -1) {
+                const p = part.slice(0, colonIdx).toLowerCase();
+                const amt = parseFloat(part.slice(colonIdx + 1)) || 0;
+                if (p.includes('jazzcash') || p.includes('easypais') || p.includes('raast') || p.includes('bank') || p.includes('transfer')) digital += amt;
+                else if (p.includes('cash')) cash += amt;
+              }
+            });
+          }
+          return {
+            date: row.day,
+            total_sales: parseFloat(row.total_sales) || 0,
+            items_sold: parseInt(row.total_items) || 0,
+            cash_sales: cash,
+            digital_sales: digital
+          };
+        });
+      } catch (err) {
+        console.error('Error in get-date-summary:', err);
+        return { error: err.message };
+      }
+    }
+
+    case 'get-sales-report': {
+      try {
+        const { startDate, endDate } = data;
+        const tRes = await query(`
+          SELECT 
+            COUNT(id) as total_invoices,
+            SUM(total_amount) as total_sales,
+            SUM(total_packets) as total_items,
+            SUM(discount) as total_discount,
+            SUM(misc_charges) as total_misc_charges
+          FROM sales 
+          WHERE sale_date::date BETWEEN $1 AND $2
+        `, [startDate, endDate]);
+
+        const pRes = await query(`
+          SELECT SUM(si.profit) as total_profit
+          FROM sale_items si
+          JOIN sales s ON si.sale_id = s.id
+          WHERE s.sale_date::date BETWEEN $1 AND $2
+        `, [startDate, endDate]);
+
+        const iRes = await query(`
+          SELECT 
+            si.item_code, si.item_description as description, SUM(si.packets) as qty,
+            SUM(si.amount) as amount, SUM(si.profit) as profit
+          FROM sale_items si
+          JOIN sales s ON s.id = si.sale_id
+          WHERE s.sale_date::date BETWEEN $1 AND $2
+          GROUP BY si.item_code, si.item_description
+          ORDER BY qty DESC
+        `, [startDate, endDate]);
+
+        return {
+          ...tRes.rows[0],
+          total_profit: pRes.rows[0]?.total_profit || 0,
+          items: iRes.rows
+        };
+      } catch (err) {
+        console.error('Error in get-sales-report:', err);
+        return { error: err.message };
+      }
+    }
+
+    case 'get-stock-report': {
+      try {
+        const res = await query(`
+          SELECT 
+            SUM(stock_packets * purchase_rate) as total_purchase_value,
+            SUM(stock_packets * sale_rate) as total_sale_value,
+            SUM(stock_packets) as total_items_in_stock
+          FROM (
+            SELECT p.purchase_rate, p.sale_rate,
+              COALESCE(CAST((
+                COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
+              ) AS INTEGER), 0) AS stock_packets
+            FROM products p
+            LEFT JOIN (
+              SELECT pi.item_code, SUM(pi.packets) as qty 
+              FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
+              WHERE pu.is_posted = 1 
+              GROUP BY pi.item_code
+            ) purchases ON purchases.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(packets) as qty FROM sale_items GROUP BY item_code
+            ) sales ON sales.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(packets) as qty FROM purchase_return_items GROUP BY item_code
+            ) returns_out ON returns_out.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(packets) as qty FROM sales_return_items GROUP BY item_code
+            ) returns_in ON returns_in.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
+            ) adjustments ON adjustments.item_code = p.item_code
+          ) as stock_data
+          WHERE stock_packets > 0
+        `);
+        return res.rows[0] || {};
+      } catch (err) {
+        console.error('Error in get-stock-report:', err);
+        return { error: err.message };
+      }
+    }
+
+
+    case 'get-receipt-settings': {
+      try {
+        const settingsPath = require('path').join(require('electron').app.getPath('userData'), 'receipt_settings.json');
+        if (require('fs').existsSync(settingsPath)) {
+          return JSON.parse(require('fs').readFileSync(settingsPath, 'utf8'));
+        }
+        return { copies: 1, printOnSave: true }; // default
+      } catch (err) {
+        console.error('Error reading receipt settings:', err);
+        return {};
+      }
+    }
+
+    case 'save-receipt-settings': {
+      try {
+        const settingsPath = require('path').join(require('electron').app.getPath('userData'), 'receipt_settings.json');
+        require('fs').writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8');
+        return { success: true };
+      } catch (err) {
+        console.error('Error saving receipt settings:', err);
+        return { error: err.message };
+      }
+    }
+
     default:
       throw new Error(`No handler registered for '${channel}'`);
   }
@@ -1667,6 +2086,7 @@ async function forwardToServer(channel, data) {
 // ── IPC registration ──────────────────────────────────────────────────────────
 const LOCAL_CHANNELS = new Set([
   'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
+    'get-receipt-settings', 'save-receipt-settings',
   'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
   'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
   'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf', 'print-barcodes-pdf', 'print-raw',
@@ -1682,7 +2102,7 @@ function registerIPC() {
     'get-packings', 'add-packing', 'update-packing', 'delete-packing',
     'get-brands', 'add-brand', 'update-brand', 'delete-brand',
     'get-expense-accounts', 'add-expense-account', 'update-expense-account', 'delete-expense-account',
-    'get-purchase-expenses',
+    'get-purchase-expenses', 'get-freight-report',
     'get-manufacturers', 'add-manufacturer', 'delete-manufacturer',
     'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-products-chunked', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo', 'start-new-item-session', 'get-item-sessions', 'get-products-by-session', 'get-products-by-session-range', 'check-duplicate-product',
     'get-companies', 'save-company', 'delete-company',
@@ -1695,10 +2115,11 @@ function registerIPC() {
     'get-suppliers-ledger', 'update-supplier-balance', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
-    'get-report-summary', 'get-report-top-items',
+    'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
     'get-payment-accounts', 'save-payment-accounts',
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
+    'get-receipt-settings', 'save-receipt-settings',
     'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
     'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup'
   ];
@@ -1735,9 +2156,56 @@ function registerIPC() {
   });
 
   // Print receipt (local only)
-  ipcMain.handle('print-receipt', async (event, receiptData) => {
-    return { success: true }; // placeholder — implement if thermal printer needed
-  });
+      ipcMain.handle('print-receipt', async (event, receiptData) => {
+      return new Promise((resolve) => {
+        try {
+          let htmlContent = '';
+          let printerName = null;
+          
+          if (typeof receiptData === 'string') {
+            htmlContent = receiptData;
+          } else if (receiptData && receiptData.html) {
+            htmlContent = receiptData.html;
+            printerName = receiptData.printer;
+          }
+
+          if (!htmlContent) {
+            return resolve({ success: false, error: 'No HTML content provided' });
+          }
+
+          const printWin = new BrowserWindow({ 
+            show: false,
+            webPreferences: { nodeIntegration: true, contextIsolation: false } 
+          });
+
+          printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+          printWin.webContents.on('did-finish-load', () => {
+            const printOptions = {
+              silent: true,
+              printBackground: true,
+              copies: 2
+            };
+            
+            if (printerName) {
+              printOptions.deviceName = printerName;
+              printOptions.silent = true; 
+            }
+
+            printWin.webContents.print(printOptions, (success, errorType) => {
+              printWin.close();
+              if (success) {
+                resolve({ success: true });
+              } else {
+                resolve({ success: false, error: errorType || 'Print failed' });
+              }
+            });
+          });
+        } catch (err) {
+          resolve({ success: false, error: err.message });
+        }
+      });
+    });
 
   // Print barcode handler - use PDF to avoid Windows print dialog crash
   ipcMain.handle('print-barcodes-pdf', async () => {

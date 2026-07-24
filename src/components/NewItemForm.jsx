@@ -3,7 +3,7 @@ import './NewItemForm.css';
 
 const { ipcRenderer } = window.require('electron');
 
-function NewItemForm({ editItemData, onClearEdit, isActive }) {
+function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [itemCode, setItemCode] = useState('');
   const [description, setDescription] = useState('');
   const [gender, setGender] = useState('');
@@ -11,10 +11,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const [sizeRange, setSizeRange] = useState('');
   const [purchaseRate, setPurchaseRate] = useState('');
   const [saleRate, setSaleRate] = useState('');
-  const [discount, setDiscount] = useState('');
   const [discountPct, setDiscountPct] = useState('');
+  const [discount, setDiscount] = useState('');
+  const [isAutoCode, setIsAutoCode] = useState(() => localStorage.getItem('auto_item_code') === 'true');
   const [packingQty, setPackingQty] = useState('6');
-  const [year, setYear] = useState('2024-25');
+  const currentYear = new Date().getFullYear().toString();
+  const [year, setYear] = useState(currentYear);
   const [note, setNote] = useState('');
   const [gendersList, setGendersList] = useState([]);
   const [categoriesList, setCategoriesList] = useState([]);
@@ -66,6 +68,15 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   const companyRef = useRef(null);
   const newCompanyInputRef = useRef(null);
   const profitModalRefs = useRef({});
+
+  const handleNewSession = async () => {
+    try {
+      const id = await ipcRenderer.invoke('start-new-item-session');
+      setSessionId(id);
+    } catch (err) {
+      console.error('Failed to get session ID:', err);
+    }
+  };
 
   // Clock and Session Initialization
   useEffect(() => {
@@ -261,7 +272,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
       setCategory(editItemData.category || '');
       setBrand(editItemData.brand || '');
       setSizeRange(editItemData.size_range || '');
-      setYear(editItemData.year || '2024-25');
+      setYear(editItemData.year || currentYear);
       setPurchaseRate(editItemData.purchase_rate ? String(parseFloat(editItemData.purchase_rate)) : '');
       setSaleRate(editItemData.sale_rate ? String(parseFloat(editItemData.sale_rate)) : '');
       setDiscount(editItemData.discount && parseFloat(editItemData.discount) > 0 ? String(parseFloat(editItemData.discount)) : '');
@@ -289,8 +300,17 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
   };
 
   const loadNextCode = async () => {
-    try { setItemCode(await ipcRenderer.invoke('get-next-item-code')); } catch { }
+    try {
+      const code = await ipcRenderer.invoke('get-next-item-code');
+      setItemCode(prev => (!prev ? code : prev));
+    } catch { }
   };
+
+  useEffect(() => {
+    if (isAutoCode && !itemCode && !isEditing) {
+      loadNextCode();
+    }
+  }, [isAutoCode, itemCode, isEditing]);
 
   const handleSubmit = async (e) => {
     e?.preventDefault();
@@ -365,7 +385,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
         if (result.success) { setStatusMsg(`✅ Updated! ${payload.itemCode}`); setTimeout(() => onClearEdit?.(), 500); }
         else setStatusMsg(`❌ ${result.error}`);
       } else {
-        result = await ipcRenderer.invoke('save-product', { ...payload, sessionId });
+        result = await ipcRenderer.invoke('save-product', { ...payload, sessionId, createdBy: currentUser?.username || 'Unknown' });
         if (result.success) {
           if (photoFile) await ipcRenderer.invoke('save-product-photo', { productId: result.id, photoData: photoPreview });
           setStatusMsg(`✅ Saved! ${result.itemCode}`);
@@ -447,7 +467,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
     setSizeRange(sizeRangesList.length > 0 ? sizeRangesList[0].name : '');
     setPackingQty(packingsList.length > 0 ? parseInt(packingsList[0].value) : 6);
     setPhotoFile(null); setPhotoPreview(null);
-    setYear('2024-25'); setNote('');
+    setYear(currentYear); setNote('');
     setTimeout(() => refs.current.itemCode?.focus(), 100);
   };
 
@@ -566,7 +586,15 @@ function NewItemForm({ editItemData, onClearEdit, isActive }) {
             <div className="form-grid">
               {/* Row 1: Item Code + Brand */}
               <div className="form-group span-half">
-                <label>Item Code</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label>Item Code</label>
+                  <label style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontWeight: 'normal' }}>
+                    <input type="checkbox" checked={isAutoCode} onChange={e => {
+                      setIsAutoCode(e.target.checked);
+                      localStorage.setItem('auto_item_code', e.target.checked);
+                    }} /> Auto Generate
+                  </label>
+                </div>
                 <input ref={el => refs.current.itemCode = el} type="text" value={itemCode}
                   onChange={e => setItemCode(e.target.value.toUpperCase())}
                   onKeyDown={e => handleEnter(e, 'brand')}

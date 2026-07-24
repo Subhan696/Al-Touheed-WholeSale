@@ -23,7 +23,7 @@ function PaymentModal({ open, invoiceNo, grandTotal, isEditMode, existingPayment
   const totalReceived = lines.reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0);
   const hasInput = lines.some(line => line.amount !== '');
   const change = hasInput ? totalReceived - total : 0;
-  const canConfirm = totalReceived >= total && totalReceived > 0;
+  const canConfirm = total === 0 ? true : (total < 0 ? totalReceived <= total : totalReceived >= total);
 
   const saveAccountToHistory = (acc) => {
     if (!acc || savedAccounts.includes(acc)) return;
@@ -93,7 +93,7 @@ function PaymentModal({ open, invoiceNo, grandTotal, isEditMode, existingPayment
     setIsSubmitting(true);
 
     const validPayments = lines
-      .filter(line => (parseFloat(line.amount) || 0) > 0)
+      .filter(line => !isNaN(parseFloat(line.amount)) && parseFloat(line.amount) !== 0)
       .map(line => {
         const isCash = line.method === 'Cash Received';
         if (line.accNo && !isCash) saveAccountToHistory(line.accNo);
@@ -114,7 +114,7 @@ function PaymentModal({ open, invoiceNo, grandTotal, isEditMode, existingPayment
   useEffect(() => {
     if (open && onChange) {
       const validPayments = lines
-        .filter(line => (parseFloat(line.amount) || 0) > 0)
+        .filter(line => !isNaN(parseFloat(line.amount)) && parseFloat(line.amount) !== 0)
         .map(line => ({
           method: line.method || 'Cash Received',
           accNo: line.accNo || '',

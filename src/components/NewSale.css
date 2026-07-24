@@ -2,7 +2,7 @@
 .sale-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   width: 100%;
   background: #f0f2f5;
   min-height: 0;
@@ -93,10 +93,10 @@
 
 /* Professional header buttons */
 .topbar-btn {
-  padding: 8px 16px;
-  font-size: 0.875rem;
+  padding: 4px 8px;
+  font-size: 0.75rem;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   border: 1px solid transparent;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
@@ -600,7 +600,7 @@
 /* ---- Sticky footer: Stock/Purchase left, Grand Total & Total Qty right ---- */
 .sale-footer {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 12px;
   padding: 8px 10px 10px;
@@ -1084,4 +1084,15 @@ input[type=number] {
 
 .receipt-preview-footer .btn-secondary:hover {
   background: #4b5563;
+}
+
+.n-field {
+  transition: all 0.15s ease-in-out;
+}
+
+.n-field:focus {
+  border-color: #16a34a !important;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.4) !important;
+  font-weight: 700 !important;
+  outline: none !important;
 }

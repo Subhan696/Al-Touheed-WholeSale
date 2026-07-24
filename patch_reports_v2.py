@@ -3,47 +3,15 @@ import re
 with open(r'd:\projects\SHOP\electron\main.js', 'r', encoding='utf-8') as f:
     content = f.read()
 
-# 1. Update get-next-item-code
-start_idx = content.find("case 'get-next-item-code': {")
-if start_idx != -1:
-    end_idx = content.find("}", start_idx) + 1
-    old_case = content[start_idx:end_idx]
-    new_case = """case 'get-next-item-code': {
-      const r = await query("SELECT item_code FROM products WHERE (NULLIF(regexp_replace(item_code, '\\\\D', '', 'g'), '')::numeric) < 185342 ORDER BY (NULLIF(regexp_replace(item_code, '\\\\D', '', 'g'), '')::numeric) DESC LIMIT 1");
-      if (!r.rows.length) return '0001';
-      const last = r.rows[0].item_code;
-      const num = parseInt(last.replace(/\\D/g, '')) || 0;
-      return String(num + 1).padStart(4, '0');
-    }"""
-    content = content.replace(old_case, new_case)
+cases_start = content.find("case 'get-daily-report': {")
+if cases_start != -1:
+    content = content[:cases_start]
+else:
+    cases_start = content.find("default:\n      throw new Error(`No handler registered for '${channel}'`);\n  }\n}\n\n// ── Client mode forwarding ──")
+    if cases_start != -1:
+        content = content[:cases_start]
 
-# 2. Add channels
-if "'get-freight-report'" not in content:
-    content = content.replace(
-      "'get-purchase-expenses',",
-      "'get-purchase-expenses', 'get-freight-report',"
-    )
-
-if "'get-daily-report'" not in content:
-    content = content.replace(
-      "'get-report-summary', 'get-report-top-items',",
-      "'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report',"
-    )
-
-# 3. Inject new cases
 cases = """
-    case 'get-freight-report': {
-      const { startDate, endDate } = data;
-      const res = await query(`
-        SELECT p.id, p.invoice_date, p.freight, p.supplier_id, p.invoice_no, s.name as supplier_name
-        FROM purchases p
-        LEFT JOIN suppliers s ON p.supplier_id = s.id
-        WHERE p.freight > 0 AND p.invoice_date BETWEEN $1 AND $2
-        ORDER BY p.invoice_date DESC
-      `, [startDate, endDate]);
-      return res.rows;
-    }
-
     case 'get-daily-report': {
       try {
         const { startDate, endDate, startTime, endTime } = data;
@@ -382,9 +350,29 @@ cases = """
         return { error: err.message };
       }
     }
+
+    default:
+      throw new Error(`No handler registered for '${channel}'`);
+  }
+}
+
+// ── Client mode forwarding ──
+function forwardToServer(channel, args) {
+  return new Promise((resolve, reject) => {
+    request.post({
+      url: `${getServerUrl()}/ipc`,
+      json: { channel, args }
+    }, (err, res, body) => {
+      if (err) return reject(err);
+      if (body && body.error) return reject(new Error(body.error));
+      resolve(body ? body.result : null);
+    });
+  });
+}
+
+// Ensure module.exports is present
+module.exports = { setupDatabase, getNextItemCode, generateBackup, printRawData, testDatabaseConnection, printPDF, printBarcodesPDF, getPrinters };
 """
-if "case 'get-daily-report':" not in content:
-    content = content.replace("    default:\n      throw new Error", cases + "\n    default:\n      throw new Error")
 
 with open(r'd:\projects\SHOP\electron\main.js', 'w', encoding='utf-8') as f:
-    f.write(content)
+    f.write(content + cases)

@@ -49,8 +49,8 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
     });
   }, [rows, search, filterDate, showAll]);
 
-  // Net amount = total_amount + misc_charges - discount
-  const netAmount = (r) => Math.max(0, (parseFloat(r.total_amount) || 0) + (parseFloat(r.misc_charges) || 0) - (parseFloat(r.discount) || 0));
+  // total_amount in DB is already the Grand Total (subTotal - discount + miscCharges)
+  const netAmount = (r) => Math.max(0, parseFloat(r.total_amount) || 0);
 
   const total = filtered.reduce((sum, r) => sum + netAmount(r), 0);
   const totalPackets = filtered.reduce((sum, r) => sum + (parseInt(r.total_packets) || 0), 0);
@@ -149,7 +149,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
                     <td>
                       {`${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}, ${saleDateTime.toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
                     </td>
-                    <td>{s.user_id || '-'}</td>
+                    <td>{s.username || '-'}</td>
                     <td className="center-text">{totalQty}</td>
                     <td className="right-text">PKR {Math.round(netAmount(s)).toLocaleString()}</td>
                   </tr>

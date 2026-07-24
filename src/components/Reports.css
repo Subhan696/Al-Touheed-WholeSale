@@ -1,0 +1,84 @@
+/* Reports.css */
+
+.report-content {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 5px; /* Space for scrollbar */
+}
+
+/* Invoice block styles */
+.invoice-block {
+    margin-bottom: 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.invoice-block table thead th {
+    background: #f3f4f6;
+    padding: 7px 10px;
+    text-align: left;
+    font-size: 11px;
+    color: #374151;
+    font-weight: 600;
+}
+
+.invoice-block table tbody td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 12px;
+}
+
+.invoice-block table tbody tr:hover td {
+    background: #fafafa;
+}
+
+/* Return block */
+.return-block {
+    margin-bottom: 14px;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* Summary cards */
+.summary-card {
+    padding: 14px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.summary-card:nth-child(2) {
+    background: rgb(165, 166, 255) !important;
+    font-size: 1.5rem !important;
+}
+
+
+
+
+/* Print specific overrides */
+@media print {
+
+    .user-management-container>.header-row,
+    .tabs-container,
+    .filters-bar,
+    .btn-secondary,
+    .no-print {
+        display: none !important;
+    }
+
+    .report-content {
+        padding: 0;
+    }
+
+    .invoice-block {
+        page-break-inside: avoid;
+        box-shadow: none;
+    }
+
+    body {
+        font-size: 11px;
+    }
+}

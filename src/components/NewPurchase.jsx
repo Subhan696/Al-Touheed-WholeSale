@@ -60,6 +60,9 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const [fromSession, setFromSession] = useState('');
   const [toSession, setToSession] = useState('');
   const [importingSession, setImportingSession] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(false);
+  const [showSessionDropdown, setShowSessionDropdown] = useState(false);
+  const [showAllSessions, setShowAllSessions] = useState(false);
 
   const [companies, setCompanies] = useState([]);
   const [mfgDiscounts, setMfgDiscounts] = useState([]);
@@ -604,9 +607,9 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     return () => window.removeEventListener('keydown', handler);
   }, [isActive, items, supplierName, purchaseDate, discount, miscCharges, notes, isEditing]);
 
-  const loadSessions = async () => {
+  const loadSessions = async (showAll = showAllSessions) => {
     try {
-      const sess = await ipcRenderer.invoke('get-item-sessions');
+      const sess = await ipcRenderer.invoke('get-item-sessions', { showAll });
       setRecentSessions(sess || []);
     } catch (err) {
       console.error('Failed to load sessions', err);
@@ -629,20 +632,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
       const products = await ipcRenderer.invoke('get-products-by-session-range', { from: fromId, to: toId });
       
       if (products && products.length > 0) {
-        const existingCodes = new Set(itemsRef.current.map(i => i.itemCode).filter(Boolean));
-        const newProducts = products.filter(p => !existingCodes.has(p.item_code));
-
-        if (newProducts.length === 0) {
-          setStatusMsg(`All items from selected session(s) are already added.`);
-          setTimeout(() => setStatusMsg(''), 3000);
-          setShowSessionModal(false);
-          setFromSession(''); 
-          setToSession('');
-          setImportingSession(false);
-          return;
-        }
-
-        const newRows = newProducts.map(p => {
+        const newRows = products.map(p => {
           let flatD = 0, pctD = 0;
           if (supplierName && p.brand) {
             const rule = mfgDiscounts.find(d => d.company_name.toLowerCase() === supplierName.toLowerCase() && d.brand_name.toLowerCase() === p.brand.toLowerCase());
@@ -672,7 +662,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         if (autoMode) setAutoImported(true);
         
         const sessionMsg = fromId === toId ? `Session ${fromId}` : `Sessions ${fromId} to ${toId}`;
-        setStatusMsg(`✓ Imported ${newProducts.length} new items from ${sessionMsg}`);
+        setStatusMsg(`✓ Imported ${products.length} items from ${sessionMsg}`);
         setTimeout(() => setStatusMsg(''), 3000);
 
         // Focus the first newly imported item's quantity input
@@ -719,7 +709,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           >
             ⚡ {autoMode ? 'Auto ON' : 'Auto OFF'}
           </button>
-          <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
+          <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting || isEditing} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
             📦 Import Session
           </button>
           <button type="button" onClick={onCancelEdit} className="btn btn-secondary sm" disabled={isSubmitting} style={{ background: '#f64e60', color: 'white', borderColor: '#f64e60' }}>
@@ -1192,10 +1182,10 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
       })()}
       {showSessionModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSessionModal(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 12, width: 480, padding: 0, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.15)', overflow: 'hidden' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 12, width: 480, padding: 0, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.15)', overflow: 'visible' }}>
             
             {/* Header */}
-            <div style={{ background: '#1e293b', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ background: '#1e293b', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'white' }}>📦 Import Session Items</h3>
                 <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>Pull items from a stock entry session into this purchase</p>
@@ -1208,44 +1198,104 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
               
               {/* Session picker */}
               <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, position: 'relative' }}>
                   <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: 6, letterSpacing: '0.5px' }}>Session *</label>
                   <input
                     type="number"
-                    list="recent-sessions-list"
                     autoFocus
                     placeholder="e.g. 1"
                     value={fromSession}
+                    onFocus={() => setShowSessionDropdown('from')}
+                    onBlur={() => setTimeout(() => setShowSessionDropdown(prev => prev === 'from' ? false : prev), 200)}
                     onChange={e => setFromSession(e.target.value)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && fromSession) { e.preventDefault(); handleImportSessionRange(); }
                     }}
                     className="session-select"
                   />
+                  {showSessionDropdown === 'from' && recentSessions.length > 0 && recentSessions.filter(s => !fromSession || s.session_id.toString().includes(fromSession.toString())).length > 0 && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, minWidth: '100%', zIndex: 1000,
+                      backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                      maxHeight: '200px', overflowY: 'auto', marginTop: '4px'
+                    }}>
+                      {recentSessions.filter(s => !fromSession || s.session_id.toString().includes(fromSession.toString())).map(s => (
+                        <div 
+                          key={s.session_id}
+                          onMouseDown={() => {
+                            setFromSession(s.session_id);
+                            setShowSessionDropdown(false);
+                          }}
+                          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', display: 'flex', flexDirection: 'column' }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
+                        >
+                          <span style={{ fontWeight: '600', color: '#1f2937', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>Session {s.session_id}</span>
+                          <span style={{ fontSize: '0.8rem', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                            {s.brand || 'No Brand'} by {s.created_by || 'Unknown'} — {new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, position: 'relative' }}>
                   <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: 6, letterSpacing: '0.5px' }}>To (Range)</label>
                   <input
                     type="number"
-                    list="recent-sessions-list"
                     placeholder="Same as above"
                     value={toSession}
+                    onFocus={() => setShowSessionDropdown('to')}
+                    onBlur={() => setTimeout(() => setShowSessionDropdown(prev => prev === 'to' ? false : prev), 200)}
                     onChange={e => setToSession(e.target.value)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && fromSession) { e.preventDefault(); handleImportSessionRange(); }
                     }}
                     className="session-select"
                   />
+                  {showSessionDropdown === 'to' && recentSessions.length > 0 && recentSessions.filter(s => !toSession || s.session_id.toString().includes(toSession.toString())).length > 0 && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, minWidth: '100%', zIndex: 1000,
+                      backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                      maxHeight: '200px', overflowY: 'auto', marginTop: '4px'
+                    }}>
+                      {recentSessions.filter(s => !toSession || s.session_id.toString().includes(toSession.toString())).map(s => (
+                        <div 
+                          key={s.session_id}
+                          onMouseDown={() => {
+                            setToSession(s.session_id);
+                            setShowSessionDropdown(false);
+                          }}
+                          style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', display: 'flex', flexDirection: 'column' }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
+                        >
+                          <span style={{ fontWeight: '600', color: '#1f2937', fontSize: '0.9rem' }}>Session {s.session_id}</span>
+                          <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                            {s.brand || 'No Brand'} by {s.created_by || 'Unknown'} — {new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  </div>
                 </div>
-              </div>
 
-              <datalist id="recent-sessions-list">
-                {recentSessions.map(s => (
-                  <option key={s.session_id} value={s.session_id}>
-                    Session {s.session_id} — {new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </option>
-                ))}
-              </datalist>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: '#475569', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={showAllSessions} 
+                      onChange={e => {
+                        setShowAllSessions(e.target.checked);
+                        loadSessions(e.target.checked);
+                      }} 
+                    />
+                    Show previously imported sessions
+                  </label>
+                </div>
 
               {/* Info hint */}
               {recentSessions.length === 0 && (

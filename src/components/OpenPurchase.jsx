@@ -45,6 +45,7 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
   const [fromSession, setFromSession] = useState('');
   const [toSession, setToSession] = useState('');
   const [importingSession, setImportingSession] = useState(false);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   
   const [showAuth, setShowAuth] = useState(false);
   const [authPass, setAuthPass] = useState('');
@@ -421,9 +422,9 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
     return () => window.removeEventListener('keydown', handler);
   }, [isActive, items, supplierName, purchaseDate, notes, showAuth, isEditing]);
 
-  const loadSessions = async () => {
+  const loadSessions = async (showAll = showAllSessions) => {
     try {
-      const sess = await ipcRenderer.invoke('get-item-sessions');
+      const sess = await ipcRenderer.invoke('get-item-sessions', { showAll });
       setRecentSessions(sess || []);
     } catch (err) {
       console.error('Failed to load sessions', err);

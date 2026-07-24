@@ -18,15 +18,19 @@ import UserManagement from './components/UserManagement';
 import NetworkSettings from './components/NetworkSettings';
 import BackupSettings from './components/BackupSettings';
 import ManufacturerDiscounts from './components/ManufacturerDiscounts';
+import FreightReport from './components/FreightReport';
 import ExpenseAccounts from './components/ExpenseAccounts';
 import BarcodePrint from './components/BarcodePrint';
 import SupplierLedger from './components/SupplierLedger';
+import ManufacturerStockReport from './components/ManufacturerStockReport';
+import Customers from './components/Customers';
+import ReceiptSettings from './components/ReceiptSettings';
 import './App.css';
 
 const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWindow, hasPermission, handleEditProduct, handleEditPurchase, handleEditReturn, handleEditSale, handleEditSalesReturn, setShowLayoutTabs }) => {
   const tabKey = win.rootKey || win.key;
 
-  if (tabKey === 'new-item') return <NewItemForm editItemData={win.editItemData} onClearEdit={closeTopWindow} isActive={isActive} />;
+  if (tabKey === 'new-item') return <NewItemForm editItemData={win.editItemData} onClearEdit={closeTopWindow} isActive={isActive} currentUser={currentUser} />;
   if (tabKey === 'products') return <ProductList onEditProduct={hasPermission('manage_products') ? handleEditProduct : undefined} currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'stock') return <StockList isActive={isActive} currentUser={currentUser} />;
 
@@ -67,11 +71,15 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
 
   if (tabKey === 'reports') return <Reports currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'users') return <UserManagement currentUser={currentUser} />;
+  if (tabKey === 'customers') return <Customers currentUser={currentUser} />;
   if (tabKey === 'network-settings') return <NetworkSettings />;
+  if (tabKey === 'receipt-settings') return <ReceiptSettings />;
   if (tabKey === 'backup') return <BackupSettings />;
   if (tabKey === 'manufacturer-discounts') return <ManufacturerDiscounts />;
   if (tabKey === 'expense-accounts') return <ExpenseAccounts />;
+  if (tabKey === 'freight-report') return <FreightReport />;
   if (tabKey === 'supplier-ledger') return <SupplierLedger />;
+  if (tabKey === 'manufacturer-stock') return <ManufacturerStockReport />;
 
   return <div style={{ padding: 20 }}>Unknown view</div>;
 }, (prev, next) => prev.isActive === next.isActive && prev.win === next.win && prev.currentUser === next.currentUser);
@@ -298,14 +306,28 @@ function App() {
               <span className="icon">👥</span> Users
             </button>
           )}
+          <button className={`nav-item ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => openWindow('customers')}>
+            <span className="icon">🧑‍🤝‍🧑</span> Customers
+          </button>
+
           {currentUser?.role === 'admin' && (
             <button className={`nav-item ${activeTab === 'network-settings' ? 'active' : ''}`} onClick={() => openWindow('network-settings')}>
               <span className="icon">🌐</span> Network
             </button>
           )}
+          {currentUser?.role === 'admin' && (
+            <button className={`nav-item ${activeTab === 'receipt-settings' ? 'active' : ''}`} onClick={() => openWindow('receipt-settings')}>
+              <span className="icon">🖨️</span> Print Settings
+            </button>
+          )}
           {hasPermission('view_reports') && (
             <button className={`nav-item ${activeTab === 'supplier-ledger' ? 'active' : ''}`} onClick={() => openWindow('supplier-ledger')}>
-              <span className="icon">📓</span> Supplier Ledger
+              <span className="icon">📒</span> Supplier Ledger
+            </button>
+          )}
+          {hasPermission('view_reports') && (
+            <button className={`nav-item ${activeTab === 'manufacturer-stock' ? 'active' : ''}`} onClick={() => openWindow('manufacturer-stock')}>
+              <span className="icon">📊</span> Mfg/Brand Stock
             </button>
           )}
           {currentUser?.role === 'admin' && (
@@ -315,7 +337,12 @@ function App() {
           )}
           {currentUser?.role === 'admin' && (
             <button className={`nav-item ${activeTab === 'expense-accounts' ? 'active' : ''}`} onClick={() => openWindow('expense-accounts')}>
-              <span className="icon">🚚</span> Freight Expense
+              <span className="icon">💰</span> Freight Expense
+            </button>
+          )}
+          {hasPermission('view_reports') && (
+            <button className={`nav-item ${activeTab === 'freight-report' ? 'active' : ''}`} onClick={() => openWindow('freight-report')}>
+              <span className="icon">🚚</span> Freight Report
             </button>
           )}
         </nav>

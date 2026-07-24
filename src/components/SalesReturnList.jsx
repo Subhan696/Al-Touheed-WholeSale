@@ -33,8 +33,8 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
     const s = search.toLowerCase();
     return rows.filter(r => {
       const matchSearch = !search || (r.return_no || '').toLowerCase().includes(s) || (r.customer_name || '').toLowerCase().includes(s) || (r.invoice_no || '').toLowerCase().includes(s);
-      const dateStr = r.return_date instanceof Date ? r.return_date.toISOString() : (typeof r.return_date === 'string' ? r.return_date : '');
-      const matchDate = showAll || dateStr.startsWith(filterDate);
+      const dateStr = r.return_date instanceof Date ? new Date(r.return_date.getTime() - r.return_date.getTimezoneOffset() * 60000).toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '');
+      const matchDate = showAll || dateStr === filterDate;
       return matchSearch && matchDate;
     });
   }, [rows, search, filterDate, showAll]);
@@ -100,7 +100,7 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
                       {expandedId === r.id ? '▼' : '▶'}
                     </td>
                     <td style={{ fontWeight: 700, color: '#dc2626' }}>{r.return_no}</td>
-                    <td>{r.return_date instanceof Date ? r.return_date.toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '')}</td>
+                    <td>{r.return_date instanceof Date ? new Date(r.return_date.getTime() - r.return_date.getTimezoneOffset() * 60000).toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '')}</td>
                     <td>{r.customer_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>—</span>}</td>
                     <td>{r.invoice_no || <span style={{ color: '#9ca3af' }}>—</span>}</td>
                     <td className="center-text"><strong>{r.total_packets}</strong></td>
