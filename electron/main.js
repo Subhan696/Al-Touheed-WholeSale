@@ -480,6 +480,14 @@ async function initDatabase() {
       payment_mode TEXT DEFAULT 'Cash',
       notes TEXT DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      phone TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Auto-migrate unique suppliers from purchases
@@ -612,6 +620,25 @@ async function handleIPC(channel, ...args) {
       case 'add-gender': { await query('INSERT INTO genders (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('genders'); return { success: true }; }
       case 'update-gender': { await query('UPDATE genders SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('genders'); return { success: true }; }
       case 'delete-gender': { await query('DELETE FROM genders WHERE id=$1', [data]); broadcast('genders'); return { success: true }; }
+
+      case 'get-customers': { 
+        const { searchTerm } = data || {};
+        let q = 'SELECT * FROM customers WHERE 1=1';
+        const params = [];
+        if (searchTerm) {
+          params.push(`%${searchTerm}%`);
+          q += ` AND (name ILIKE $1 OR phone ILIKE $1 OR city ILIKE $1)`;
+        }
+        q += ' ORDER BY id DESC LIMIT 50';
+        const r = await query(q, params);
+        return r.rows;
+      }
+      case 'add-customer': {
+        const { name, phone, city } = data;
+        const rr = await query('INSERT INTO customers (name, phone, city) VALUES ($1, $2, $3) RETURNING id', [name, phone, city]);
+        broadcast('customers');
+        return { success: true, id: rr.rows[0].id };
+      }
 
       case 'get-categories': { const r = await query('SELECT * FROM categories ORDER BY name'); return r.rows; }
       case 'add-category': { await query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('categories'); return { success: true }; }
@@ -2114,6 +2141,7 @@ function registerIPC() {
     'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return',
     'get-suppliers-ledger', 'update-supplier-balance', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
+    'get-customers', 'add-customer',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
     'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
