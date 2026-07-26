@@ -6,7 +6,7 @@ const ALL_PERMISSIONS = [
   'manage_products', 'view_products', 'view_stock',
   'manage_purchases', 'view_purchases', 'manage_purchase_returns',
   'create_sale', 'view_sales', 'manage_sales_returns',
-  'view_reports', 'manage_users',
+  'view_reports', 'manage_users', 'use_master_cashier'
 ];
 
 const PERMISSION_LABELS = {
@@ -21,6 +21,7 @@ const PERMISSION_LABELS = {
   manage_sales_returns: 'Sales Returns',
   view_reports: 'Reports',
   manage_users: 'User Management',
+  use_master_cashier: 'Master Cashier Window',
 };
 
 function UserManagement({ currentUser }) {
@@ -140,10 +141,20 @@ function UserManagement({ currentUser }) {
               </div>
               <div>
                 <label style={labelStyle}>Role</label>
-                <select value={role} onChange={e => { setRole(e.target.value); if (e.target.value === 'admin') setPermissions([]); }} style={inputStyle}>
+                <select value={role} onChange={e => { 
+                  setRole(e.target.value); 
+                  if (e.target.value === 'admin') setPermissions(permissions.filter(p => p === 'use_master_cashier')); 
+                }} style={inputStyle}>
                   <option value="admin">Admin (Full Access)</option>
                   <option value="operator">Operator (Limited)</option>
                 </select>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: `1px solid ${permissions.includes('use_master_cashier') ? '#3699ff' : '#e4e6ef'}`, borderRadius: 6, cursor: 'pointer', background: permissions.includes('use_master_cashier') ? '#e8f9fc' : '#f9fafb', fontSize: '0.85rem', width: 'fit-content' }}>
+                  <input type="checkbox" checked={permissions.includes('use_master_cashier')} onChange={() => togglePerm('use_master_cashier')} style={{ accentColor: '#3699ff' }} />
+                  Enable Master Cashier Window (Grid Layout)
+                </label>
               </div>
               {role === 'operator' && (
                 <div>
@@ -155,7 +166,7 @@ function UserManagement({ currentUser }) {
                     </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    {ALL_PERMISSIONS.map(p => (
+                    {ALL_PERMISSIONS.filter(p => p !== 'use_master_cashier').map(p => (
                       <label key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: `1px solid ${permissions.includes(p) ? '#3699ff' : '#e4e6ef'}`, borderRadius: 6, cursor: 'pointer', background: permissions.includes(p) ? '#e8f9fc' : '#f9fafb', fontSize: '0.85rem' }}>
                         <input type="checkbox" checked={permissions.includes(p)} onChange={() => togglePerm(p)} style={{ accentColor: '#3699ff' }} />
                         {PERMISSION_LABELS[p]}

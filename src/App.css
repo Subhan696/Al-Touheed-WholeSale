@@ -341,7 +341,7 @@ body {
 
 .window-content-wrapper {
   flex: 1;
-  overflow: clip;
+  overflow: auto;
   position: relative;
   padding: 10px 15px 15px 15px;
   height: 100%;

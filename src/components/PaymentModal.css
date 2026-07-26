@@ -10,13 +10,8 @@
 }
 
 @keyframes payment-fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .payment-modal {
@@ -24,20 +19,24 @@
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
   width: 90%;
-  max-width: 420px;
   animation: payment-slideIn 0.2s ease-out;
 }
 
-@keyframes payment-slideIn {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(-8px);
-  }
+/* Specific to normal modal */
+.payment-modal.normal {
+  max-width: 420px;
+}
 
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+/* Specific to master cashier modal */
+.payment-modal.master {
+  max-width: 650px;
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes payment-slideIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .payment-modal-header {
@@ -48,11 +47,22 @@
   border-bottom: 1px solid #e5e7eb;
 }
 
+.payment-modal.master .payment-modal-header {
+  background: #2563eb;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  border-bottom: none;
+}
+
 .payment-modal-header h3 {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 700;
   color: #111827;
+}
+
+.payment-modal.master .payment-modal-header h3 {
+  color: #ffffff;
 }
 
 .payment-modal-close {
@@ -65,7 +75,13 @@
   padding: 0 4px;
 }
 
-.payment-modal-close:hover {
+.payment-modal.master .payment-modal-close {
+  color: #ffffff;
+}
+.payment-modal.master .payment-modal-close:hover {
+  color: #f3f4f6;
+}
+.payment-modal.normal .payment-modal-close:hover {
   color: #111827;
 }
 
@@ -73,6 +89,13 @@
   padding: 16px;
 }
 
+.payment-modal.master .payment-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ==== NORMAL UI ==== */
 .payment-row {
   display: flex;
   justify-content: space-between;
@@ -80,138 +103,106 @@
   padding: 6px 0;
   font-size: 0.9rem;
 }
-
-.payment-row span {
-  color: black;
-
-  font-weight: 700;
-}
-
-.payment-row.payment-grand {
-  gap: 12px;
-}
-
-.payment-row.payment-grand span {
-  flex: 0 0 240px;
-  text-align: end;
-  font-size: 2rem;
-}
-
+.payment-row span { color: black; font-weight: 700; }
+.payment-row.payment-grand { gap: 12px; }
+.payment-row.payment-grand span { flex: 0 0 240px; text-align: end; font-size: 2rem; }
 .payment-row.payment-grand strong {
-  font-size: 1.5rem;
-  color: #111827;
-  background-color: rgb(214, 217, 255);
-  padding: 10px 12px;
-  border: 1px solid #02040a;
-  border-radius: 8px;
+  font-size: 1.5rem; color: #111827; background-color: rgb(214, 217, 255);
+  padding: 10px 12px; border: 1px solid #02040a; border-radius: 8px;
 }
-
-.payment-row.payment-change strong {
-  color: black;
-}
-
+.payment-row.payment-change strong { color: black; }
 .payment-split-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #374151;
-  margin-top: 14px;
-  margin-bottom: 8px;
+  font-size: 0.8rem; font-weight: 600; color: #374151; margin-top: 14px; margin-bottom: 8px;
 }
-
 .payment-field-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
 }
-
 .payment-field-row label {
-  flex: 0 0 80px;
-  font-size: 0.85rem;
-  color: black;
-  font-weight: 700;
+  flex: 0 0 80px; font-size: 0.85rem; color: black; font-weight: 700;
 }
-
 .payment-field-row input[type="number"] {
-  flex: 1;
-  background-color: rgb(214, 217, 255);
-  max-width: 295px;
-  padding: 10px 12px;
-  border: 1px solid #02040a;
-  border-radius: 8px;
-  font-size: 1.4rem;
-  font-weight: 700;
-  box-sizing: border-box;
-  text-align: right;
-  font-style: bold;
+  flex: 1; background-color: rgb(214, 217, 255); max-width: 295px; padding: 10px 12px;
+  border: 1px solid #02040a; border-radius: 8px; font-size: 1.4rem; font-weight: 700;
+  box-sizing: border-box; text-align: right;
 }
-
 .payment-field-row input[type="number"]:focus {
-  outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+  outline: none; border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
 }
-
 .payment-row.payment-total-received {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid #e5e7eb;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5e7eb;
 }
-
 .payment-row.payment-total-received strong {
-  font-size: 1.5rem;
-  color: #111827;
+  font-size: 1.5rem; color: #111827;
 }
-
-.payment-row.payment-change {
-  gap: 12px;
-}
-
-.payment-row.payment-change span {
-  flex: 0 0 80px;
-  font-size: 0.85rem;
-}
-
+.payment-row.payment-change { gap: 12px; }
+.payment-row.payment-change span { flex: 0 0 80px; font-size: 0.85rem; }
 .payment-row.payment-change strong {
-  flex: 1;
-  max-width: 295px;
-  font-size: 1.4rem;
-  padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid hsl(0, 0%, 0%);
-  border-radius: 8px;
-  text-align: right;
-  font-weight: 700;
-  box-sizing: border-box;
+  flex: 1; max-width: 295px; font-size: 1.4rem; padding: 10px 12px; background: #ffffff;
+  border: 1px solid hsl(0, 0%, 0%); border-radius: 8px; text-align: right; font-weight: 700; box-sizing: border-box;
 }
 
+/* ==== MASTER CASHIER UI ==== */
+.pm-top-section { display: flex; flex-direction: column; gap: 8px; }
+.pm-cash-account-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pm-cash-account-row label { font-weight: 700; font-size: 0.95rem; color: #111827; }
+.pm-cash-account-row select {
+  flex: 1; padding: 6px 8px; border: 1px solid #9ca3af; border-radius: 4px; font-size: 1rem; font-weight: 600;
+}
+.pm-summary-row {
+  display: flex; align-items: center; justify-content: space-between; font-size: 1.2rem; padding: 4px 0;
+}
+.pm-summary-row label { flex: 0 0 180px; font-weight: 600; color: #374151; }
+.pm-summary-row.pm-total-row { border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 4px; }
+.pm-summary-row.pm-total-row label { color: #059669; font-size: 1.4rem; }
+.pm-summary-row.pm-total-row .pm-val { color: #059669; font-size: 1.6rem; font-weight: 700; }
+.pm-summary-row input.pm-input {
+  flex: 1; max-width: 250px; padding: 8px 12px; font-size: 1.4rem; font-weight: 700;
+  text-align: right; border: 1px solid #111827; border-radius: 6px; background-color: #fff;
+}
+.pm-summary-row input.pm-input:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2); }
+.pm-val { flex: 1; max-width: 250px; text-align: right; font-weight: 700; color: #111827; }
+.pm-bank-grid { border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; }
+.pm-bank-grid-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.pm-bank-grid-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.pm-bank-grid-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.pm-bank-grid-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.pm-bank-grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.pm-grid-header {
+  display: grid; grid-template-columns: 40px 2fr 1.2fr 1.5fr; background: #f3f4f6;
+  font-weight: 700; font-size: 0.85rem; border-bottom: 1px solid #e5e7eb;
+}
+.pm-grid-cell { padding: 8px; border-right: 1px solid #e5e7eb; display: flex; align-items: center; }
+.pm-grid-cell:last-child { border-right: none; }
+.pm-grid-row { display: grid; grid-template-columns: 40px 2fr 1.2fr 1.5fr; border-bottom: 1px solid #e5e7eb; }
+.pm-grid-row:last-child { border-bottom: none; }
+.pm-grid-row .pm-grid-cell { font-size: 0.85rem; background: #fff; }
+.pm-grid-input { width: 100%; border: 1px solid transparent; padding: 4px 6px; font-size: 0.95rem; font-weight: 600; text-align: right; border-radius: 4px; }
+.pm-grid-input.amount { background: #eef2ff; border-color: #c7d2fe; }
+.pm-grid-input.amount:focus { background: #fff; border-color: #4f46e5; outline: none; }
+.pm-grid-input.remarks { text-align: left; background: #f9fafb; }
+.pm-grid-input.remarks:focus { background: #fff; border-color: #4f46e5; outline: none; }
+.pm-bottom-section { border-top: 2px solid #e5e7eb; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 1.4rem; }
+.pm-bottom-section label { font-weight: 700; color: #374151; }
+.pm-bottom-section .pm-val { font-weight: 700; color: #111827; max-width: none; text-align: right; }
+
+/* ==== SHARED FOOTER ==== */
 .payment-modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 12px 16px;
-  border-top: 1px solid #e5e7eb;
+  display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; border-top: 1px solid #e5e7eb;
 }
-
-.payment-modal-footer .btn {
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  border: none;
-}
-
-.payment-modal-footer .btn.ghost {
-  background: #f3f4f6;
-  color: #374151;
-}
-
-.payment-modal-footer .btn.primary {
-  background: #4f46e5;
-  color: #fff;
-}
-
-.payment-modal-footer .btn.primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.payment-modal-footer .btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; }
+.payment-modal-footer .btn.ghost { background: #f3f4f6; color: #374151; }
+.payment-modal-footer .btn.primary { background: #4f46e5; color: #fff; }
+.payment-modal-footer .btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }

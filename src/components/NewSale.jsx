@@ -1,11 +1,40 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './NewSale.css';
 import PaymentModal from './PaymentModal';
+import { PAKISTAN_CITIES } from '../utils/pakistanCities';
 
 const { ipcRenderer } = window.require('electron');
 
 function descForProduct(p) {
   return `${p.description || ''} ${p.category || ''} ${p.size_range || ''} ${p.gender || ''}`.replace(/\s+/g, ' ').trim();
+}
+
+function parsePaymentMethodString(str) {
+  if (!str) return [];
+  const result = [];
+  const parts = str.split(',');
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const colonIdx = trimmed.lastIndexOf(':');
+    if (colonIdx !== -1) {
+      let methodFull = trimmed.substring(0, colonIdx).trim();
+      const amount = parseFloat(trimmed.substring(colonIdx + 1).trim()) || 0;
+      let accNo = '';
+
+      if (methodFull.endsWith(')')) {
+        const pIdx = methodFull.lastIndexOf('(');
+        if (pIdx !== -1) {
+          accNo = methodFull.substring(pIdx + 1, methodFull.length - 1).trim();
+          methodFull = methodFull.substring(0, pIdx).trim();
+        }
+      }
+      result.push({ method: methodFull, accNo, amount });
+    } else if (trimmed && !trimmed.toLowerCase().includes('credit invoice')) {
+      result.push({ method: trimmed, accNo: '', amount: 0 });
+    }
+  }
+  return result;
 }
 
 function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, isActive }) {
@@ -18,8 +47,9 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerCity, setCustomerCity] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
-  const [receivedPayments, setReceivedPayments] = useState(null);
+  const [receivedPayments, setReceivedPayments] = useState([]);
   const [discount, setDiscount] = useState(0);
+  const [extraDiscountPct, setExtraDiscountPct] = useState('');
   const [miscCharges, setMiscCharges] = useState(0);
   const [notes, setNotes] = useState('');
 
@@ -34,10 +64,24 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const [receiptSettings, setReceiptSettings] = useState(null);
   const [showReceiptPreview, setShowReceiptPreview] = useState(false);
   const [previewHTML, setPreviewHTML] = useState('');
+  const [customerPrevBalance, setCustomerPrevBalance] = useState(0);
+
+  useEffect(() => {
+    if (customerName) {
+      ipcRenderer.invoke('get-customer-balance', { customerName, customerId })
+        .then(res => {
+          setCustomerPrevBalance(res?.balance || 0);
+        })
+        .catch(() => setCustomerPrevBalance(0));
+    } else {
+      setCustomerPrevBalance(0);
+    }
+  }, [customerName, customerId]);
 
   // References
   const itemCodeRefs = useRef({});
   const [items, setItems] = useState([]);
+  const isReturnOnlyInvoice = items.length > 0 && items.every(item => item.isReturn);
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -66,11 +110,12 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
   // Invoice Discount Overrides
   const getPersistedDiscounts = () => {
+    const defaults = { overallPct: '', brands: {}, flatAmount: '' };
     try {
       const d = localStorage.getItem('persisted_invoice_discounts');
-      return d ? JSON.parse(d) : { overallPct: '', brands: {} };
+      return d ? { ...defaults, ...JSON.parse(d) } : defaults;
     } catch {
-      return { overallPct: '', brands: {} };
+      return defaults;
     }
   };
   const [invoiceDiscounts, setInvoiceDiscounts] = useState(getPersistedDiscounts);
@@ -94,8 +139,22 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const manualRateRef = useRef(null);
   const newCustPhoneRef = useRef(null);
   const newCustCityRef = useRef(null);
+  const inlineCustomerItemRefs = useRef([]);
+  const customerModalItemRefs = useRef([]);
 
   // ── Load / clock ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (inlineCustomerSelectedIndex >= 0) {
+      inlineCustomerItemRefs.current[inlineCustomerSelectedIndex]?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [inlineCustomerSelectedIndex]);
+
+  useEffect(() => {
+    if (customerModalSelectedIndex >= 0) {
+      customerModalItemRefs.current[customerModalSelectedIndex]?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [customerModalSelectedIndex]);
+
   useEffect(() => {
     if (isEditing) {
       const s = saleToEdit;
@@ -103,19 +162,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       setInvoiceNo(s.invoice_no || '');
       setCustomerName(s.customer_name || '');
       setCustomerPhone(s.customer_phone || '');
-      setPaymentMethod(s.payment_method || 'Cash');
-
-      if (s.payment_method) {
-        const payments = {};
-        const pairs = s.payment_method.split(', ');
-        pairs.forEach(pair => {
-          if (pair.includes(':')) {
-            const [type, amount] = pair.split(': ');
-            if (type && amount) payments[type] = parseFloat(amount);
-          }
-        });
-        setReceivedPayments(payments);
-      }
+      setPaymentMethod(s.payment_method || '');
+      setReceivedPayments(parsePaymentMethodString(s.payment_method));
       setDiscount(s.discount || 0);
       setMiscCharges(s.misc_charges || 0);
       setNotes(s.notes || '');
@@ -498,8 +546,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   };
 
   // ── Packing / Rate row editing ────────────────────────────────────────────
+  const roundToFive = (num) => Math.round((parseFloat(num) || 0) / 5) * 5;
+
   const calculateEffectiveDiscount = (item, discountsOverride) => {
     if (item.isPlaceholderN || item.itemCode === 'N') return parseFloat(item.discount) || 0;
+
+    // Flat amount: same discount value applied to every item, overrides % based rules below.
+    if (discountsOverride.flatAmount !== '' && discountsOverride.flatAmount !== null && discountsOverride.flatAmount !== undefined) {
+      const flat = parseFloat(discountsOverride.flatAmount);
+      if (!isNaN(flat)) return flat;
+    }
+
     const brand = item.brand || item.nBrand || '';
 
     let overridePct = null;
@@ -511,7 +568,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     if (overridePct !== null) {
       const rawDisc = parseFloat(item.saleRate) * overridePct / 100;
-      return Math.round(rawDisc / 5) * 5 || 0;
+      return roundToFive(rawDisc) || 0;
     }
     return parseFloat(item.baseDiscountAmt) || 0;
   };
@@ -680,14 +737,20 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     }, 0);
     const totalPackets = items.reduce((s, i) => {
       const p = parseInt(i.packets) || 0;
-      return s + (i.isReturn ? -Math.abs(p) : Math.abs(p));
+      return s + (i.isReturn ? 0 : Math.abs(p));
     }, 0);
-    const extraDiscountAmt = parseFloat(discount) || 0;
-    const totalDiscountAmt = itemDiscounts + extraDiscountAmt;
+    const totalReturnQty = items.reduce((s, i) => i.isReturn ? s + Math.abs(parseInt(i.packets) || 0) : s, 0);
+    const totalReturnAmount = items.reduce((s, i) => i.isReturn ? s + Math.abs(i.amount) : s, 0);
+    const extraDiscountAmt = roundToFive(discount);
     const miscAmt = parseFloat(miscCharges) || 0;
+    // Percentage discount is applied on top of the subtotal net of item-level
+    // discounts and misc charges, independently of the flat "Extra Disc" amount.
+    const preExtraPctTotal = subTotal + miscAmt - itemDiscounts;
+    const extraDiscountPctAmt = roundToFive(preExtraPctTotal * (parseFloat(extraDiscountPct) || 0) / 100);
+    const totalDiscountAmt = itemDiscounts + extraDiscountAmt + extraDiscountPctAmt;
     const grandTotal = subTotal + miscAmt - totalDiscountAmt;
-    return { subTotal, itemDiscounts, totalDiscountAmt, totalPackets, grandTotal };
-  }, [items, discount, miscCharges]);
+    return { subTotal, itemDiscounts, totalDiscountAmt, totalPackets, grandTotal, totalReturnQty, totalReturnAmount };
+  }, [items, discount, extraDiscountPct, miscCharges]);
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const executeSave = async (paymentMethodStr) => {
@@ -706,7 +769,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           amount: i.isReturn ? -Math.abs(netAmt) : Math.abs(netAmt)
         };
       }),
-      discount: parseFloat(discount) || 0,
+      discount: (totals.totalDiscountAmt - totals.itemDiscounts) || 0,
       miscCharges: parseFloat(miscCharges) || 0,
       paymentMethod: paymentMethodStr, notes,
       userId: currentUser?.id
@@ -742,15 +805,12 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   };
 
   const handlePaymentConfirm = async (paymentData) => {
-    const paymentsObj = {};
     const paymentMethodStr = paymentData.payments.map(p => {
       const accStr = p.accNo ? ` (${p.accNo})` : '';
-      const methodKey = `${p.method}${accStr}`;
-      paymentsObj[methodKey] = p.amount;
-      return `${methodKey}: ${p.amount}`;
+      return `${p.method}${accStr}: ${p.amount}`;
     }).join(', ');
 
-    setReceivedPayments(paymentsObj);
+    setReceivedPayments(paymentData.payments);
     setPaymentMethod(paymentMethodStr);
 
     await executeSave(paymentMethodStr);
@@ -763,6 +823,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
   const handleSubmit = () => {
     if (items.length === 0) { setMessage('Add at least one item'); return; }
+    if (isReturnOnlyInvoice) {
+      setIsPrintMode(false);
+      executeSave('Return Invoice');
+      return;
+    }
     setIsPrintMode(false);
     setPaymentModalOpen(true);
   };
@@ -773,8 +838,51 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     setShowReceiptPreview(true);
   };
 
+  const [isSavingPdf, setIsSavingPdf] = useState(false);
+
+  const handleSaveInvoicePdf = async () => {
+    const html = previewHTML || generateInvoiceHTML({ payments: [] });
+    setIsSavingPdf(true);
+    try {
+      const result = await ipcRenderer.invoke('save-invoice-pdf', { html, fileName: `Invoice-${invoiceNo || 'Draft'}.pdf` });
+      if (result.success) {
+        setMessage('Invoice saved as PDF');
+        setTimeout(() => setMessage(''), 3000);
+      } else if (!result.canceled) {
+        setMessage('Failed to save PDF: ' + (result.error || 'Unknown error'));
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err) {
+      setMessage('Error saving PDF');
+      setTimeout(() => setMessage(''), 3000);
+    } finally {
+      setIsSavingPdf(false);
+    }
+  };
+
+  const handlePrintFromPreview = async () => {
+    const html = previewHTML || generateInvoiceHTML({ payments: [] });
+    try {
+      const result = await ipcRenderer.invoke('print-receipt', html);
+      if (!result.success) {
+        setMessage('Print failed: ' + result.error);
+      } else {
+        setMessage('Print successful');
+      }
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setMessage('Error during printing');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
   const handlePrint = () => {
     if (items.length === 0) { setMessage('Add at least one item'); return; }
+    if (isReturnOnlyInvoice) {
+      setIsPrintMode(true);
+      executeSave('Return Invoice');
+      return;
+    }
     setIsPrintMode(true);
     setPaymentModalOpen(true);
   };
@@ -788,9 +896,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       } else {
         setMessage('Print successful');
       }
+      setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       console.error(err);
       setMessage('Error during printing');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
@@ -802,11 +912,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const visibleItems = items.filter(item => item.itemCode || item.itemDescription);
 
-    // Whole-invoice flag: only show the Disc column / Flat Disc. line when
-    // there's actually a discount somewhere (a per-item discount or the
-    // extra invoice-level discount). Otherwise the print stays clean.
-    const hasDiscount = items.some(item => (parseFloat(item.discount) || 0) !== 0)
-      || (parseFloat(discount) || 0) !== 0;
+    // hasItemDiscount: controls the per-item Disc column — only shown when
+    // at least one item actually has its own discount value. Invoice-level
+    // extra discounts (flat or %) don't apply per-item, so they shouldn't
+    // force this column to appear (it would just show zeros on every row).
+    const hasItemDiscount = items.some(item => (parseFloat(item.discount) || 0) !== 0);
+    // hasAnyDiscount: controls the "Total Discount" summary line — shown
+    // whenever there's a discount anywhere, including invoice-level ones.
+    const hasAnyDiscount = hasItemDiscount
+      || (parseFloat(discount) || 0) !== 0
+      || (parseFloat(extraDiscountPct) || 0) !== 0;
+    const hasDiscount = hasItemDiscount;
 
     // ── Pagination: hard cap of 20 items per printed page ──────────────────
     const ITEMS_PER_PAGE = 20;
@@ -841,39 +957,48 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       const rate = parseFloat(item.saleRate) || 0;
       const qty = parseFloat(item.packets) || 0;
       const disc = parseFloat(item.discount) || 0;
+      const isRet = item.isReturn;
+      const rowStyle = isRet ? ' style="background-color: #e5e7eb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"' : '';
       return `
-        <tr>
+        <tr${rowStyle}>
           <td>${globalIndex + 1}</td>
           <td class="left item-name">
             ${item.itemDescription || ''}
-            ${item.isReturn ? '<span style="font-size: 11px; margin-left: 4px;">(RET)</span>' : ''}
+            ${isRet ? '<span style="font-size: 11px; margin-left: 4px; font-weight: bold;">(RET)</span>' : ''}
           </td>
           <td>${item.itemCode}</td>
-          <td>${qty}</td>
+          <td>${Math.abs(qty)}</td>
           <td class="right">${formatAmt(rate)}</td>
-          ${hasDiscount ? `<td class="right">${formatAmt(disc)}</td>` : ''}
-          <td class="right">${formatAmt(item.amount)}</td>
+          ${hasDiscount ? `<td class="right">${formatAmt(Math.abs(disc))}</td>` : ''}
+          <td class="right">${formatAmt(Math.abs(item.amount))}</td>
         </tr>
       `;
     };
+
+    const finalNetPayable = customerPrevBalance !== 0 ? (totals.grandTotal + customerPrevBalance) : totals.grandTotal;
 
     // Net Payable + footer notes — reused on every single page so it's
     // always pinned to the bottom of whichever page it's printed on.
     const pinnedFooterHtml = `
       <div class="net-payable">
-        Net Payable Total Rs: ${formatAmt(totals.grandTotal)}
+        Net Payable Total Rs: ${formatAmt(finalNetPayable)}
       </div>
       <div class="footer-notes">
         ${(receiptSettings?.footerNotes || "THANKS FOR YOUR VISIT ****!!!!<br/>DON'T EXCHANGE DAMAGED ITEMS AND LOOSE PIECE NOTE: NO ANY RETURN<br/>BRANCH # 2 ..... SHOP NO # E-2028 KUCHA CHAH TAILIAN RANG MAHAL").replace(/\\n/g, '<br/>')}
       </div>
     `;
 
+    const isCreditSaleInvoice = receivedPayments.length === 0 || (paymentMethod && paymentMethod.toLowerCase().includes('credit'));
+    const isReturnInvoice = isReturnOnlyInvoice || (paymentMethod && paymentMethod.toLowerCase().includes('return'));
+    const defaultTitle = isReturnInvoice ? 'Return Invoice' : (isCreditSaleInvoice ? 'Credit Sale Invoice' : 'Cash Sale Invoice');
+    const invoiceTitleToUse = receiptSettings?.invoiceTitle || defaultTitle;
+
     const headerBlockHtml = `
       <div class="header">
         <div class="page-num">Page 1 of ${chunks.length}</div>
         <h1>${receiptSettings?.shopName || 'AL - TOUHEED GARMENTS'}</h1>
         <div class="sub">${receiptSettings?.shopSub || 'SHOP NO E-2028 KUCHA CHAH TAILIAN RANG MAHAL LAHORE'}</div>
-        <div class="title">${receiptSettings?.invoiceTitle || 'Cash Sale Invoice'}</div>
+        <div class="title">${invoiceTitleToUse}</div>
         <div class="shop-info">
           ${(receiptSettings?.shopAddress || 'SHOP 2 AND 3, GROUND FLOOR AL MUMTAZ CENTRE<br/>CHOWK RANG MAHAL, LAHORE<br/>Phone #: (+92 42) 37639907').replace(/\n/g, '<br/>')}
         </div>
@@ -903,7 +1028,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       const tfootHtml = isLastPage ? `
         <tfoot>
           <tr>
-            <th colspan="3" style="text-align: right; border: none; padding-right: 10px;">Net Qty:</th>
+            <th colspan="3" style="text-align: right; border: none; padding-right: 10px;">Sales Qty:</th>
             <th style="border-top: 2px solid #000; border-bottom: 2px solid #000;">${totals.totalPackets}</th>
             <th colspan="${hasDiscount ? 3 : 2}" style="border: none;"></th>
           </tr>
@@ -916,13 +1041,33 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
         <div class="totals-signatures ${compactSignatures ? 'compact' : ''}">
           <div class="summary" style="justify-content: flex-end;">
             <div style="text-align: right;">
-              <div><strong>Subtotal:</strong> ${formatAmt(totals.subTotal)}</div>
-              ${hasDiscount ? `<div><strong>Flat Disc.:</strong> ${formatAmt(totals.totalDiscountAmt)}</div>` : ''}
+              <div><strong>Subtotal:</strong> ${formatAmt(totals.subTotal + (totals.totalReturnAmount || 0))}</div>
+              ${hasAnyDiscount ? `<div><strong>Total Discount:</strong> ${formatAmt(totals.totalDiscountAmt)}</div>` : ''}
+              ${(totals.totalReturnQty > 0 || totals.totalReturnAmount > 0) ? `
+                <div style="margin-top: 4px;">
+                  <span style="background-color: #d1d5db; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                    <span style="margin-right: 15px;"><strong>Total Return Qty:</strong> ${totals.totalReturnQty}</span>
+                    <span><strong>Return Amount:</strong> -${formatAmt(totals.totalReturnAmount)}</span>
+                  </span>
+                </div>
+              ` : ''}
             </div>
           </div>
-          <div class="net-total">
-            <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
-          </div>
+          ${(customerPrevBalance !== 0) ? `
+            <div class="net-total" style="margin-bottom: 2px;">
+              <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
+            </div>
+            <div class="net-total" style="margin-bottom: 2px;">
+              <strong>Previous Balance:</strong> ${customerPrevBalance > 0 ? '+' : '-'}${formatAmt(Math.abs(customerPrevBalance))}
+            </div>
+            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 0; margin-top: 2px;">
+              <strong>Net Payable Total:</strong> ${formatAmt(totals.grandTotal + customerPrevBalance)}
+            </div>
+          ` : `
+            <div class="net-total">
+              <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
+            </div>
+          `}
           <div class="signatures">
             <div class="sig-box">
               <div style="text-transform: uppercase;">${currentUser?.username || 'OPERATOR'}</div>
@@ -1075,7 +1220,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           {!isEditing && onNewSale && (
             <button type="button" className="topbar-btn topbar-btn-primary" onClick={onNewSale} style={{ marginLeft: 10 }}>+ New Sale</button>
           )}
-          <button type="button" className="topbar-btn" onClick={() => setShowInvoiceDiscountModal(true)} title="Invoice Discounts (F6)" style={{ background: '#10b981', color: '#fff', marginLeft: 10 }}>% Disc (F6)</button>
+          <button type="button" className="topbar-btn" onClick={() => setShowInvoiceDiscountModal(true)} title="Invoice Discounts (F6)" style={{ background: '#10b981', color: '#fff', marginLeft: 10 }}>Disc (F6)</button>
           <span className="topbar-title yellow">{isEditing ? 'Edit Sale' : 'New Sale'}</span>
         </div>
         <div className="topbar-right">
@@ -1153,7 +1298,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
               {inlineCustomerResults && inlineCustomerResults.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', zIndex: 100, maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
                   {inlineCustomerResults.map((c, idx) => (
-                    <div key={c.id} style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', background: idx === (inlineCustomerSelectedIndex >= 0 ? inlineCustomerSelectedIndex : 0) ? '#e2e8f0' : '#fff' }} onClick={() => {
+                    <div key={c.id} ref={el => inlineCustomerItemRefs.current[idx] = el} style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', background: idx === (inlineCustomerSelectedIndex >= 0 ? inlineCustomerSelectedIndex : 0) ? '#e2e8f0' : '#fff' }} onClick={() => {
                       setCustomerId(c.id); setCustomerName(c.name); setCustomerPhone(c.phone || ''); setCustomerCity(c.city || '');
                       setInlineCustomerResults([]);
                       setInlineCustomerSelectedIndex(-1);
@@ -1415,6 +1560,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           <input type="number" className="discount-input" value={discount}
             onChange={e => setDiscount(e.target.value)} placeholder="-" />
         </div>
+        <div className="footer-discount">
+          <span>Extra Disc % (-)</span>
+          <input type="number" className="discount-input" value={extraDiscountPct}
+            onChange={e => setExtraDiscountPct(e.target.value)} placeholder="-" />
+        </div>
         <div className="footer-total-qty">
           <span>Total Items</span>
           <strong>{totals.totalPackets}</strong>
@@ -1575,6 +1725,10 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
         onCancel={() => setPaymentModalOpen(false)}
         onChange={() => { }}
         cashOnly={false}
+        useMasterCashier={(currentUser?.permissions || []).includes('use_master_cashier')}
+        allowCredit={!!customerId}
+        customerName={customerName}
+        customerId={customerId}
       />
 
       {/* Receipt Preview Modal */}
@@ -1593,8 +1747,10 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 onLoad={(e) => { e.target.style.opacity = 1; }}
               />
             </div>
-            <div style={{ padding: '15px', borderTop: '1px solid #ddd', textAlign: 'right' }}>
+            <div style={{ padding: '15px', borderTop: '1px solid #ddd', textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button type="button" className="btn btn-secondary" onClick={() => setShowReceiptPreview(false)}>Close Preview</button>
+              <button type="button" className="btn btn-secondary" onClick={handleSaveInvoicePdf} disabled={isSavingPdf}>{isSavingPdf ? 'Saving PDF...' : '📄 Save as PDF'}</button>
+              <button type="button" className="btn btn-primary" onClick={handlePrintFromPreview}>🖨 Print</button>
             </div>
           </div>
         </div>
@@ -1637,7 +1793,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
             <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e4e6ef', borderRadius: 6, marginBottom: 16 }}>
               {customerResults.map((c, idx) => (
-                <div key={c.id} style={{ padding: '10px 14px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer', background: idx === (customerModalSelectedIndex >= 0 ? customerModalSelectedIndex : 0) ? '#e2e8f0' : '#fff' }} onMouseEnter={e => e.currentTarget.style.background = '#f5f8fa'} onMouseLeave={e => e.currentTarget.style.background = idx === (customerModalSelectedIndex >= 0 ? customerModalSelectedIndex : 0) ? '#e2e8f0' : '#fff'} onClick={() => {
+                <div key={c.id} ref={el => customerModalItemRefs.current[idx] = el} style={{ padding: '10px 14px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer', background: idx === (customerModalSelectedIndex >= 0 ? customerModalSelectedIndex : 0) ? '#e2e8f0' : '#fff' }} onMouseEnter={e => e.currentTarget.style.background = '#f5f8fa'} onMouseLeave={e => e.currentTarget.style.background = idx === (customerModalSelectedIndex >= 0 ? customerModalSelectedIndex : 0) ? '#e2e8f0' : '#fff'} onClick={() => {
                   setCustomerId(c.id); setCustomerName(c.name); setCustomerPhone(c.phone || ''); setCustomerCity(c.city || '');
                   setCustomerModalOpen(false);
                   setCustomerModalSelectedIndex(-1);
@@ -1663,19 +1819,30 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>City</label>
-                  <input ref={newCustCityRef} type="text" value={customerCity} onChange={e => setCustomerCity(e.target.value)} onKeyDown={async e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (!customerName.trim()) { setCustomerModalOpen(false); return; }
-                      if (!customerId) {
-                        try {
-                          const res = await ipcRenderer.invoke('add-customer', { name: customerName.trim(), phone: customerPhone.trim(), city: customerCity.trim() });
-                          if (res.success) setCustomerId(res.id);
-                        } catch (err) { }
+                  <select
+                    ref={newCustCityRef}
+                    value={customerCity}
+                    onChange={e => setCustomerCity(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!customerName.trim()) { setCustomerModalOpen(false); return; }
+                        if (!customerId) {
+                          try {
+                            const res = await ipcRenderer.invoke('add-customer', { name: customerName.trim(), phone: customerPhone.trim(), city: customerCity.trim() });
+                            if (res.success) setCustomerId(res.id);
+                          } catch (err) { }
+                        }
+                        setCustomerModalOpen(false);
                       }
-                      setCustomerModalOpen(false);
-                    }
-                  }} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
+                    }}
+                    style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none', background: '#fff', cursor: 'pointer' }}
+                  >
+                    <option value="">Select City...</option>
+                    {PAKISTAN_CITIES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
@@ -1707,9 +1874,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
           setShowInvoiceDiscountModal(false);
         }}>
           <div style={{ background: '#fff', padding: 24, borderRadius: 12, width: 450, boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 16px', fontSize: '1.2rem', color: '#10b981' }}>% Invoice Discounts</h3>
+            <h3 style={{ margin: '0 0 16px', fontSize: '1.2rem', color: '#10b981' }}>Invoice Discounts</h3>
 
             <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>Flat Discount Amount (same for every item)</label>
+              <input type="number" placeholder="Leave empty to not use a flat amount" value={modalDiscounts.flatAmount} onChange={e => setModalDiscounts(p => ({ ...p, flatAmount: e.target.value }))} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
+              <div style={{ fontSize: '0.75rem', color: '#7e8299', marginTop: 4 }}>Applies this exact discount amount to every item on the invoice, regardless of rate or brand. Overrides the % settings below when set.</div>
+            </div>
+
+            <div style={{ marginBottom: 20, borderTop: '1px solid #e4e6ef', paddingTop: 16 }}>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>Overall Invoice Discount %</label>
               <input type="number" placeholder="Leave empty for no overall override" value={modalDiscounts.overallPct} onChange={e => setModalDiscounts(p => ({ ...p, overallPct: e.target.value }))} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
               <div style={{ fontSize: '0.75rem', color: '#7e8299', marginTop: 4 }}>Applies to all items unless a brand override is set below.</div>

@@ -13,7 +13,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [saleRate, setSaleRate] = useState('');
   const [discountPct, setDiscountPct] = useState('');
   const [discount, setDiscount] = useState('');
-  const [isAutoCode, setIsAutoCode] = useState(() => localStorage.getItem('auto_item_code') === 'true');
+  const isAutoCode = true;
   const [packingQty, setPackingQty] = useState('6');
   const currentYear = new Date().getFullYear().toString();
   const [year, setYear] = useState(currentYear);
@@ -259,7 +259,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
 
   useEffect(() => {
     if (!editItemData && !showCompanyModal && isActive) {
-      setTimeout(() => refs.current.itemCode?.focus(), 200);
+      setTimeout(() => refs.current.brand?.focus(), 200);
     }
   }, [editItemData, companies, showCompanyModal, isActive]);
 
@@ -283,11 +283,10 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
       }
       const match = companies.find(c => editItemData.description.startsWith(c));
       if (match) setSelectedCompany(match);
-      setTimeout(() => refs.current.itemCode?.focus(), 200);
+      setTimeout(() => refs.current.brand?.focus(), 200);
     } else {
       setIsEditing(false);
-      // loadNextCode(); // Auto-increment paused as requested
-      setItemCode('');
+      loadNextCode();
       setDescription(''); setPurchaseRate(''); setSaleRate('');
       setDiscount(''); setDiscountPct(''); setPackingQty('6');
       setBrand('');
@@ -302,15 +301,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const loadNextCode = async () => {
     try {
       const code = await ipcRenderer.invoke('get-next-item-code');
-      setItemCode(prev => (!prev ? code : prev));
+      setItemCode(code);
     } catch { }
   };
 
-  useEffect(() => {
-    if (isAutoCode && !itemCode && !isEditing) {
-      loadNextCode();
-    }
-  }, [isAutoCode, itemCode, isEditing]);
+
 
   const handleSubmit = async (e) => {
     e?.preventDefault();
@@ -391,11 +386,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
           setStatusMsg(`✅ Saved! ${result.itemCode}`);
           setTimeout(() => {
             setStatusMsg('');
-            setItemCode('');
+            loadNextCode();
             setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
             setPhotoFile(null); setPhotoPreview(null);
             setNote('');
-            setTimeout(() => refs.current.itemCode?.focus(), 50);
+            setTimeout(() => refs.current.brand?.focus(), 50);
           }, 500);
         } else {
           setStatusMsg(`❌ ${result.error || 'Failed to save'}`);
@@ -435,9 +430,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
       setStatusMsg(`✅ Merged into existing item ${duplicateItem.item_code} (Packing: ${newPacking})`);
       setTimeout(() => {
         setStatusMsg('');
-        setItemCode(''); setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
+        loadNextCode(); setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
         setPhotoFile(null); setPhotoPreview(null); setNote('');
-        setTimeout(() => refs.current.itemCode?.focus(), 50);
+        setTimeout(() => refs.current.brand?.focus(), 50);
       }, 1000);
     } catch (err) {
       setStatusMsg(`❌ Merge failed: ${err.message}`);
@@ -459,7 +454,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
 
   const handleReset = () => {
     if (isEditing) { onClearEdit?.(); return; }
-    setItemCode('');
+    loadNextCode();
     setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
     setBrand(brandsList.length > 0 ? brandsList[0].name : '');
     setGender(gendersList.length > 0 ? gendersList[0].name : '');
@@ -468,7 +463,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     setPackingQty(packingsList.length > 0 ? parseInt(packingsList[0].value) : 6);
     setPhotoFile(null); setPhotoPreview(null);
     setYear(currentYear); setNote('');
-    setTimeout(() => refs.current.itemCode?.focus(), 100);
+    setTimeout(() => refs.current.brand?.focus(), 100);
   };
 
   useEffect(() => {
@@ -586,19 +581,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
             <div className="form-grid">
               {/* Row 1: Item Code + Brand */}
               <div className="form-group span-half">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label>Item Code</label>
-                  <label style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontWeight: 'normal' }}>
-                    <input type="checkbox" checked={isAutoCode} onChange={e => {
-                      setIsAutoCode(e.target.checked);
-                      localStorage.setItem('auto_item_code', e.target.checked);
-                    }} /> Auto Generate
-                  </label>
-                </div>
+                <label>Item Code</label>
                 <input ref={el => refs.current.itemCode = el} type="text" value={itemCode}
                   onChange={e => setItemCode(e.target.value.toUpperCase())}
                   onKeyDown={e => handleEnter(e, 'brand')}
-                  className="form-input" style={{ fontWeight: 700 }} />
+                  className="form-input" style={{ fontWeight: 700, backgroundColor: '#f1f5f9' }} />
               </div>
               <div className="form-group span-half">
                 <label>Brand</label>

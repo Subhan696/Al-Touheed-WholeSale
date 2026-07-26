@@ -42,11 +42,11 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
   const totalAmount = filtered.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0);
   const totalPackets = filtered.reduce((s, r) => s + parseInt(r.total_packets || 0), 0);
 
-  const handleDelete = async (ret, e) => {
+  const handleDelete = async (id, e) => {
     e.stopPropagation();
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this return?');
     if (!confirmed) return;
-    await ipcRenderer.invoke('delete-sales-return', ret.id);
+    await ipcRenderer.invoke('delete-sales-return', id);
     load();
   };
 

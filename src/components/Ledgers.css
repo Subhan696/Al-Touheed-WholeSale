@@ -1,0 +1,79 @@
+.ledgers-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #f8fafc;
+}
+
+.ledgers-header {
+  padding: 16px 20px 0;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.ledgers-header h1 {
+  margin: 0 0 12px;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.ledgers-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 0;
+}
+
+.ledgers-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.ledgers-tab:hover {
+  color: #334155;
+  background: #f1f5f9;
+}
+
+.ledgers-tab.active {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-bottom-color: #2563eb;
+}
+
+.ledgers-tab-icon {
+  font-size: 1rem;
+}
+
+.ledgers-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ledgers-content .customer-ledger-container,
+.ledgers-content .bank-ledger-container,
+.ledgers-content .cash-ledger-container,
+.ledgers-content .freight-report-container {
+  min-height: 100%;
+}
+
+@media print {
+  .ledgers-header {
+    display: none !important;
+  }
+}

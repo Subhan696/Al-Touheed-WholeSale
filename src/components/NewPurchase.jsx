@@ -510,7 +510,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         expTotal,
         totalItemDisc,
         flatDisc: disc,
-        grand: sub + misc + expTotal - disc, 
+        grand: sub + misc - disc, 
         count: items.filter(r => r.description && parseInt(r.packets) > 0).length 
       },
       rowMath: mathMap
@@ -963,7 +963,15 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             {/* Bottom Summary Bar */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12, padding: '10px 16px', background: '#f1f5f9', borderRadius: 6, alignItems: 'center', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Subtotal</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Gross Amount</span>
+                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{totals.grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#dc2626' }}>Total Disc.</span>
+                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{(totals.totalItemDisc + totals.flatDisc).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Net Subtotal</span>
                 <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{totals.netSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

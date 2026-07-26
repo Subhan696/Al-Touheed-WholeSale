@@ -18,13 +18,16 @@ import UserManagement from './components/UserManagement';
 import NetworkSettings from './components/NetworkSettings';
 import BackupSettings from './components/BackupSettings';
 import ManufacturerDiscounts from './components/ManufacturerDiscounts';
-import FreightReport from './components/FreightReport';
 import ExpenseAccounts from './components/ExpenseAccounts';
 import BarcodePrint from './components/BarcodePrint';
-import SupplierLedger from './components/SupplierLedger';
+import Ledgers from './components/Ledgers';
 import ManufacturerStockReport from './components/ManufacturerStockReport';
 import Customers from './components/Customers';
 import ReceiptSettings from './components/ReceiptSettings';
+import GLAccounts from './components/GLAccounts';
+import GLVouchers from './components/GLVouchers';
+import GLLedgerReport from './components/GLLedgerReport';
+import GLCashActivityReport from './components/GLCashActivityReport';
 import './App.css';
 
 const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWindow, hasPermission, handleEditProduct, handleEditPurchase, handleEditReturn, handleEditSale, handleEditSalesReturn, setShowLayoutTabs }) => {
@@ -71,15 +74,24 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
 
   if (tabKey === 'reports') return <Reports currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'users') return <UserManagement currentUser={currentUser} />;
-  if (tabKey === 'customers') return <Customers currentUser={currentUser} />;
+  if (tabKey === 'customers') return <Customers currentUser={currentUser} onSelectCustomerLedger={(c) => openWindow('ledgers', { initialTab: 'customer', initialCustomer: c })} />;
+  if (tabKey === 'ledgers') return <Ledgers currentUser={currentUser} initialTab={win.initialTab || 'customer'} initialCustomer={win.initialCustomer} isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'customer-ledger') return <Ledgers currentUser={currentUser} initialTab="customer" initialCustomer={win.initialCustomer} isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'cash-ledger') return <Ledgers currentUser={currentUser} initialTab="cash" isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'bank-ledger') return <Ledgers currentUser={currentUser} initialTab="bank" isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'supplier-ledger') return <Ledgers currentUser={currentUser} initialTab="supplier" isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'freight-report') return <Ledgers currentUser={currentUser} initialTab="freight" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'network-settings') return <NetworkSettings />;
   if (tabKey === 'receipt-settings') return <ReceiptSettings />;
   if (tabKey === 'backup') return <BackupSettings />;
   if (tabKey === 'manufacturer-discounts') return <ManufacturerDiscounts />;
   if (tabKey === 'expense-accounts') return <ExpenseAccounts />;
-  if (tabKey === 'freight-report') return <FreightReport />;
-  if (tabKey === 'supplier-ledger') return <SupplierLedger />;
   if (tabKey === 'manufacturer-stock') return <ManufacturerStockReport />;
+
+  if (tabKey === 'gl-accounts') return <GLAccounts />;
+  if (tabKey === 'gl-vouchers') return <GLVouchers />;
+  if (tabKey === 'gl-ledger') return <GLLedgerReport />;
+  if (tabKey === 'gl-cash-activity') return <GLCashActivityReport />;
 
   return <div style={{ padding: 20 }}>Unknown view</div>;
 }, (prev, next) => prev.isActive === next.isActive && prev.win === next.win && prev.currentUser === next.currentUser);
@@ -309,6 +321,9 @@ function App() {
           <button className={`nav-item ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => openWindow('customers')}>
             <span className="icon">🧑‍🤝‍🧑</span> Customers
           </button>
+          <button className={`nav-item ${['ledgers', 'customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab) ? 'active' : ''}`} onClick={() => openWindow('ledgers')}>
+            <span className="icon">📒</span> Ledgers
+          </button>
 
           {currentUser?.role === 'admin' && (
             <button className={`nav-item ${activeTab === 'network-settings' ? 'active' : ''}`} onClick={() => openWindow('network-settings')}>
@@ -320,11 +335,26 @@ function App() {
               <span className="icon">🖨️</span> Print Settings
             </button>
           )}
+
+          <div className="nav-divider" />
           {hasPermission('view_reports') && (
-            <button className={`nav-item ${activeTab === 'supplier-ledger' ? 'active' : ''}`} onClick={() => openWindow('supplier-ledger')}>
-              <span className="icon">📒</span> Supplier Ledger
-            </button>
+            <>
+              <button className={`nav-item ${activeTab === 'gl-accounts' ? 'active' : ''}`} onClick={() => openWindow('gl-accounts')}>
+                <span className="icon">🏛️</span> Chart of Accounts
+              </button>
+              <button className={`nav-item ${activeTab === 'gl-vouchers' ? 'active' : ''}`} onClick={() => openWindow('gl-vouchers')}>
+                <span className="icon">🧾</span> Transaction Entry
+              </button>
+              <button className={`nav-item ${activeTab === 'gl-ledger' ? 'active' : ''}`} onClick={() => openWindow('gl-ledger')}>
+                <span className="icon">📖</span> Account Ledger
+              </button>
+              <button className={`nav-item ${activeTab === 'gl-cash-activity' ? 'active' : ''}`} onClick={() => openWindow('gl-cash-activity')}>
+                <span className="icon">💸</span> Cash Activity
+              </button>
+            </>
           )}
+          <div className="nav-divider" />
+
           {hasPermission('view_reports') && (
             <button className={`nav-item ${activeTab === 'manufacturer-stock' ? 'active' : ''}`} onClick={() => openWindow('manufacturer-stock')}>
               <span className="icon">📊</span> Mfg/Brand Stock
@@ -338,11 +368,6 @@ function App() {
           {currentUser?.role === 'admin' && (
             <button className={`nav-item ${activeTab === 'expense-accounts' ? 'active' : ''}`} onClick={() => openWindow('expense-accounts')}>
               <span className="icon">💰</span> Freight Expense
-            </button>
-          )}
-          {hasPermission('view_reports') && (
-            <button className={`nav-item ${activeTab === 'freight-report' ? 'active' : ''}`} onClick={() => openWindow('freight-report')}>
-              <span className="icon">🚚</span> Freight Report
             </button>
           )}
         </nav>

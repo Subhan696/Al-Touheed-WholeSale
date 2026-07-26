@@ -128,6 +128,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
               <tr>
                 <th>Invoice</th>
                 <th>Date & Time</th>
+                <th>Customer</th>
                 <th>User</th>
                 <th style={{ textAlign: 'center' }}>Total Qty</th>
                 <th style={{ textAlign: 'right' }}>Total Amount</th>
@@ -149,6 +150,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
                     <td>
                       {`${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}, ${saleDateTime.toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
                     </td>
+                    <td style={{ fontWeight: 600, color: '#1e40af' }}>{s.customer_name || 'Walk-in'}</td>
                     <td>{s.username || '-'}</td>
                     <td className="center-text">{totalQty}</td>
                     <td className="right-text">PKR {Math.round(netAmount(s)).toLocaleString()}</td>
@@ -156,7 +158,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
                 );
               })}
               <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f8fafc' }}>
-                <td colSpan={3} className="right-text"><strong>Total Sales</strong></td>
+                <td colSpan={4} className="right-text"><strong>Total Sales</strong></td>
                 <td className="center-text"><strong>{totalPackets}</strong></td>
                 <td className="right-text"><strong>PKR {Math.round(total).toLocaleString()}</strong></td>
               </tr>

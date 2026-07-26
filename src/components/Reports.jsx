@@ -504,10 +504,11 @@ function Reports({ currentUser, isActive }) {
                                     <div style={{ fontSize: '15px', color: '#6b7280' }}>{dailyReport.summary.totalSoldItems || 0} items</div>
                                 </div>
                             </div>
-                            {/* Row 2: Net Cash | Total Returns | Digital */}
+                            {/* Row 2: Net Cash | Total Returns | Credit Invoices */}
                             {[
                                 { label: <strong style={{ color: 'black !important' }}>Net Cash in Hand</strong>, value: <strong style={{ color: 'black !important' }}>{fmt(dailyReport.summary.netCash)}</strong> },
                                 { label: 'Total Returns', value: fmt(dailyReport.summary.totalReturns), extra: `${dailyReport.summary.totalReturnedItems || 0} items`, color: '#ef4444' },
+                                { label: 'Credit Invoices (Unpaid)', value: fmt(dailyReport.summary.totalCredit || 0), color: '#d97706' },
                             ].map((card, i) => (
                                 <div key={i} className="summary-card" style={{ padding: '14px', background: 'white', borderRadius: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', borderLeft: `4px solid ${card.color}` }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -640,14 +641,14 @@ function Reports({ currentUser, isActive }) {
                                             <span style={{ fontSize: '12px', color: '#6b7280' }}>{reformatDateDisplay(sale.sale_date)} {fmtTime(sale.created_at)}</span>
                                             <span style={{
                                                 padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold',
-                                                background: (sale.payment_method && (
+                                                background: (sale.displayType === 'Return Invoice' || sale.billAmt < 0) ? '#fee2e2' : (sale.payment_method && (
                                                     sale.payment_method.toLowerCase().includes('jazzcash') ||
                                                     sale.payment_method.toLowerCase().includes('easypais') ||
                                                     sale.payment_method.toLowerCase().includes('raast') ||
                                                     sale.payment_method.toLowerCase().includes('bank') ||
                                                     sale.payment_method.toLowerCase().includes('transfer')
                                                 )) ? '#dbeafe' : '#d1fae5',
-                                                color: (sale.payment_method && (
+                                                color: (sale.displayType === 'Return Invoice' || sale.billAmt < 0) ? '#991b1b' : (sale.payment_method && (
                                                     sale.payment_method.toLowerCase().includes('jazzcash') ||
                                                     sale.payment_method.toLowerCase().includes('easypais') ||
                                                     sale.payment_method.toLowerCase().includes('raast') ||
@@ -655,7 +656,7 @@ function Reports({ currentUser, isActive }) {
                                                     sale.payment_method.toLowerCase().includes('transfer')
                                                 )) ? '#1e40af' : '#065f46'
                                             }}>
-                                                {sale.payment_method || 'Cash'}
+                                                {sale.displayType || sale.payment_method || 'Cash'}
                                             </span>
                                         </div>
                                     </div>

@@ -180,10 +180,10 @@ async function runRestore(fileToRestore, skipBackup = false) {
       }
       try {
         await query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE(MAX(id), 1) + 1, false) FROM "${table}"`);
-      } catch(e) {}
+      } catch (e) { }
     }
     await query('COMMIT');
-    
+
     broadcast('stock'); broadcast('purchases'); broadcast('sales'); broadcast('purchase-returns'); broadcast('sales-returns');
     isRestoring = false;
 
@@ -201,21 +201,21 @@ async function runRestore(fileToRestore, skipBackup = false) {
 
 // ── Database Schema ──────────────────────────────────────────────────────────
 async function initDatabase() {
-    await query(`
+  await query(`
       CREATE TABLE IF NOT EXISTS daily_sessions (
         date DATE PRIMARY KEY,
         last_id INTEGER NOT NULL DEFAULT 0
       )
     `);
 
-    await query(`
+  await query(`
       CREATE TABLE IF NOT EXISTS global_counters (
         name TEXT PRIMARY KEY,
         value INTEGER NOT NULL DEFAULT 0
       )
     `);
 
-    await query(`
+  await query(`
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
       item_code TEXT UNIQUE NOT NULL,
@@ -413,6 +413,11 @@ async function initDatabase() {
         name TEXT UNIQUE NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS cities (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL
+      );
+
       ALTER TABLE products ADD COLUMN IF NOT EXISTS year INTEGER;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT '';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0;
@@ -488,7 +493,67 @@ async function initDatabase() {
       city TEXT DEFAULT '',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS gl_accounts (
+      id SERIAL PRIMARY KEY,
+      account_name TEXT UNIQUE NOT NULL,
+      account_type TEXT NOT NULL,
+      reference_id INTEGER,
+      opening_balance NUMERIC(15,2) DEFAULT 0,
+      balance_type TEXT DEFAULT 'Dr',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS vouchers (
+      id SERIAL PRIMARY KEY,
+      voucher_no TEXT UNIQUE NOT NULL,
+      voucher_date DATE NOT NULL,
+      voucher_type TEXT NOT NULL,
+      remarks TEXT DEFAULT '',
+      user_id INTEGER,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS voucher_details (
+      id SERIAL PRIMARY KEY,
+      voucher_id INTEGER REFERENCES vouchers(id) ON DELETE CASCADE,
+      account_id INTEGER REFERENCES gl_accounts(id) ON DELETE RESTRICT,
+      description TEXT DEFAULT '',
+      reference_no TEXT DEFAULT '',
+      debit NUMERIC(15,2) DEFAULT 0,
+      credit NUMERIC(15,2) DEFAULT 0
+    );
   `);
+
+  // Seed default Pakistan cities list (only runs once, when the table is empty)
+  try {
+    const cityCountRes = await query('SELECT COUNT(*)::int AS c FROM cities');
+    if (cityCountRes.rows[0].c === 0) {
+      const DEFAULT_CITIES = [
+        "Islamabad", "Lahore", "Karachi", "Faisalabad", "Rawalpindi", "Multan", "Gujranwala",
+        "Peshawar", "Quetta", "Sargodha", "Sialkot", "Abbottabad", "Attock", "Badin", "Bagh",
+        "Bahawalnagar", "Bahawalpur", "Bannu", "Bhakkar", "Bhalwal", "Burewala", "Chakwal",
+        "Chaman", "Charsadda", "Chiniot", "Chishtian", "Chitral", "Dadu", "Daska",
+        "Dera Ghazi Khan", "Dera Ismail Khan", "Ghotki", "Gilgit", "Gojra", "Gujar Khan",
+        "Gujrat", "Gwadar", "Hafizabad", "Hangu", "Haripur", "Hasilpur", "Hub", "Hunza",
+        "Hyderabad", "Jacobabad", "Jalalpur Jattan", "Jampur", "Jamshoro", "Jhang", "Jhelum",
+        "Kabal", "Kamalia", "Kamber Ali Khan", "Kamoke", "Kandhkot", "Karak", "Kasur",
+        "Khairpur", "Khanewal", "Khanpur", "Khushab", "Khuzdar", "Kohat", "Kot Addu", "Kotli",
+        "Larkana", "Layyah", "Lodhran", "Loralai", "Mandi Bahauddin", "Mansehra", "Mardan",
+        "Mianwali", "Mingora", "Mirpur (AJK)", "Mirpur Khas", "Muridke", "Murree",
+        "Muzaffarabad", "Muzaffargarh", "Nankana Sahib", "Narowal", "Nawabshah", "Nowshera",
+        "Okara", "Pakpattan", "Pishin", "Rahim Yar Khan", "Rajanpur", "Rawalakot", "Sadiqabad",
+        "Sahiwal", "Sambrial", "Samundri", "Shahdadkot", "Sheikhupura", "Shikarpur", "Sibi",
+        "Skardu", "Sukkur", "Swabi", "Swat", "Tando Adam", "Tando Allahyar", "Tank", "Taxila",
+        "Toba Tek Singh", "Turbat", "Umerkot", "Vehari", "Wah Cantt", "Wazirabad", "Zhob"
+      ];
+      for (const cityName of DEFAULT_CITIES) {
+        await query('INSERT INTO cities (name) VALUES ($1) ON CONFLICT DO NOTHING', [cityName]);
+      }
+    }
+  } catch (e) {
+    console.error('Seed cities error:', e);
+  }
 
   // Auto-migrate unique suppliers from purchases
   await query(`
@@ -496,6 +561,15 @@ async function initDatabase() {
     SELECT DISTINCT supplier_name, 0 FROM purchases
     WHERE supplier_name IS NOT NULL AND trim(supplier_name) != ''
     ON CONFLICT (name) DO NOTHING
+  `);
+
+  // Ensure freight/expense accounts are also available in GL for voucher entry.
+  await query(`
+    INSERT INTO gl_accounts (account_name, account_type, opening_balance, balance_type)
+    SELECT ea.account_name, 'Expense', 0, 'Dr'
+    FROM expense_accounts ea
+    LEFT JOIN gl_accounts g ON LOWER(TRIM(g.account_name)) = LOWER(TRIM(ea.account_name))
+    WHERE g.id IS NULL
   `);
 
   // Indexes
@@ -520,12 +594,19 @@ async function initDatabase() {
   try {
     // Migration: if gender is empty and category has Boy/Girl, move it
     await query("UPDATE products SET gender = category, category = '' WHERE gender = '' AND category IN ('Boy', 'Girl')");
-    
+
     // Migration: year should be TEXT, not INTEGER (e.g. '2024-25')
     await query("ALTER TABLE products ALTER COLUMN year TYPE TEXT USING year::text");
     await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''");
     await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''");
-  } catch(e) { console.error('Migration error:', e); }
+  } catch (e) {
+    console.error('Migration products column error:', e);
+  }
+  try {
+    await query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS initial_balance NUMERIC(15,2) NOT NULL DEFAULT 0');
+  } catch (e) {
+    console.error('Migration customer initial_balance error:', e);
+  }
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   try {
@@ -549,6 +630,37 @@ async function initDatabase() {
       await query("UPDATE sales_returns SET return_no = $1 WHERE id = $2", [String(i + 1), allSR.rows[i].id]);
     }
   }
+
+  // Auto-migrate Suppliers, Customers, and Manufacturers to GL Accounts and Suppliers table
+  try {
+    await query(`
+      INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type)
+      SELECT 'Supplier - ' || name, 'Supplier', id, 'Cr' FROM suppliers
+      WHERE name IS NOT NULL AND trim(name) != ''
+      ON CONFLICT (account_name) DO NOTHING
+    `);
+    await query(`
+      INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type)
+      SELECT 'Customer - ' || name, 'Customer', id, 'Dr' FROM customers
+      WHERE name IS NOT NULL AND trim(name) != ''
+      ON CONFLICT (account_name) DO NOTHING
+    `);
+    // Migrate manufacturers to both GL accounts and suppliers table
+    await query(`
+      INSERT INTO suppliers (name, initial_balance)
+      SELECT name, 0 FROM manufacturers
+      WHERE name IS NOT NULL AND trim(name) != ''
+      ON CONFLICT (name) DO NOTHING
+    `);
+    await query(`
+      INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type)
+      SELECT 'Supplier - ' || m.name, 'Supplier', s.id, 'Cr' 
+      FROM manufacturers m
+      JOIN suppliers s ON s.name = m.name
+      WHERE m.name IS NOT NULL AND trim(m.name) != ''
+      ON CONFLICT (account_name) DO NOTHING
+    `);
+  } catch (e) { console.error('Migration GL accounts error:', e); }
 
   console.log('[DB] Schema initialized');
 }
@@ -609,79 +721,840 @@ function startExpressServer() {
     console.log(`[API] Express server running on port ${API_PORT}`);
   });
 }
-
 // ── Central IPC handler (called both locally and via Express proxy) ───────────
+async function getBankStatementData({ accountId, accountName, startDate, endDate }) {
+  let accountRow;
+  if (accountId) {
+    accountRow = await query('SELECT * FROM gl_accounts WHERE id = $1', [accountId]);
+  } else if (accountName) {
+    accountRow = await query('SELECT * FROM gl_accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1))', [accountName]);
+  }
+
+  const account = accountRow?.rows[0];
+  if (!account) {
+    return { account: null, transactions: [], initial_balance: 0, final_balance: 0, total_debit: 0, total_credit: 0 };
+  }
+
+  const initial_balance = parseFloat(account.opening_balance) || 0;
+  const balance_type = account.balance_type || 'Dr';
+
+  let dateFilter = '';
+  const params = [account.id];
+  if (startDate) {
+    params.push(startDate);
+    dateFilter += ` AND v.voucher_date >= $${params.length}`;
+  }
+  if (endDate) {
+    params.push(endDate);
+    dateFilter += ` AND v.voucher_date <= $${params.length}`;
+  }
+
+  const txnsRes = await query(`
+    SELECT v.voucher_date, v.voucher_type, v.voucher_no, v.remarks, vd.description, vd.reference_no, vd.debit, vd.credit,
+           (
+             SELECT g_offset.account_name 
+             FROM voucher_details vd_offset 
+             JOIN gl_accounts g_offset ON g_offset.id = vd_offset.account_id 
+             WHERE vd_offset.voucher_id = v.id 
+               AND vd_offset.account_id != vd.account_id 
+             ORDER BY vd_offset.id ASC
+             LIMIT 1
+           ) as offset_account_name
+    FROM voucher_details vd 
+    JOIN vouchers v ON vd.voucher_id = v.id 
+    WHERE vd.account_id = $1${dateFilter}
+    ORDER BY v.voucher_date ASC, v.id ASC
+  `, params);
+
+  // Fetch Bank / Cash payments recorded directly in Sales
+  let salesDateFilter = '';
+  const isCashAccount = account.account_type === 'Cash' || accountName.toLowerCase().includes('cash');
+  const searchPattern = isCashAccount ? '%cash%' : `%${accountName}%`;
+  const salesParams = [searchPattern];
+  if (startDate) {
+    salesParams.push(startDate);
+    salesDateFilter += ` AND sale_date >= $${salesParams.length}`;
+  }
+  if (endDate) {
+    salesParams.push(endDate);
+    salesDateFilter += ` AND sale_date <= $${salesParams.length}`;
+  }
+
+  const transactions = (txnsRes.rows || []).map(t => {
+    const accHeadName = (t.offset_account_name || '').replace(/^(Customer|Supplier) - /i, '').trim();
+    const rawUserNotes = (t.remarks || t.description || '').trim();
+    const userNotes = (rawUserNotes === 'Header offset' || rawUserNotes === 'CASH PAY' || rawUserNotes === 'Payment received from customer') ? '' : rawUserNotes;
+
+    let remarkText = '';
+    if (accHeadName) {
+      if (userNotes) {
+        remarkText = `${accHeadName} - ${userNotes}`;
+      } else {
+        remarkText = accHeadName;
+      }
+    } else {
+      remarkText = userNotes || t.voucher_type || '';
+    }
+
+    let chequeVal = t.reference_no || '';
+    if (!chequeVal && accHeadName) {
+      chequeVal = accHeadName;
+    }
+
+    return {
+      id: t.voucher_no || `txn-${Math.random()}`,
+      date: t.voucher_date,
+      type: t.voucher_type || 'JV',
+      v_code: t.voucher_no || '',
+      remarks: remarkText,
+      cheque_no: chequeVal,
+      debit: parseFloat(t.debit) || 0,
+      credit: parseFloat(t.credit) || 0
+    };
+  });
+
+  const salesRes = await query(`
+    SELECT sale_date, invoice_no, payment_method, notes, customer_name, total_amount
+    FROM sales
+    WHERE payment_method ILIKE $1${salesDateFilter}
+    ORDER BY sale_date ASC
+  `, salesParams);
+
+  // Append sale payments
+  salesRes.rows.forEach(s => {
+    if (!s.payment_method) return;
+    const parts = s.payment_method.split(',');
+    parts.forEach(part => {
+      const partTrimmed = part.trim();
+      if (!partTrimmed) return;
+      const partLower = partTrimmed.toLowerCase();
+      const accLower = accountName.toLowerCase();
+
+      let isMatch = partLower.includes(accLower);
+      if (!isMatch && isCashAccount) {
+        if ((partLower.includes('cash') || partLower.includes('cash received')) && (!partLower.includes('jazzcash') || accLower.includes('jazzcash'))) {
+          isMatch = true;
+        }
+      }
+
+      if (isMatch) {
+        const colonIdx = partTrimmed.lastIndexOf(':');
+        let amt = 0;
+        if (colonIdx !== -1) {
+          amt = parseFloat(partTrimmed.slice(colonIdx + 1).trim()) || 0;
+        } else {
+          amt = parseFloat(s.total_amount) || 0;
+        }
+
+        if (amt > 0) {
+          transactions.push({
+            id: `sale-pay-${s.invoice_no}-${Math.random()}`,
+            date: s.sale_date,
+            type: 'SV',
+            v_code: s.invoice_no || '',
+            remarks: `Sale Payment: ${s.customer_name || 'Counter Customer'} (Inv #${s.invoice_no || ''})`,
+            cheque_no: '',
+            debit: amt,
+            credit: 0
+          });
+        }
+      }
+    });
+  });
+
+  // Sort transactions by date
+  transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let runningBalance = initial_balance;
+  let totalDebit = 0;
+  let totalCredit = 0;
+
+  transactions.forEach(t => {
+    if (balance_type === 'Dr') {
+      runningBalance += t.debit - t.credit;
+    } else {
+      runningBalance += t.credit - t.debit;
+    }
+    t.balance = Math.abs(runningBalance);
+    t.balance_type = runningBalance >= 0 ? balance_type : (balance_type === 'Dr' ? 'Cr' : 'Dr');
+    totalDebit += t.debit;
+    totalCredit += t.credit;
+  });
+
+  const finalBalance = runningBalance;
+  const finalBalanceType = finalBalance >= 0 ? balance_type : (balance_type === 'Dr' ? 'Cr' : 'Dr');
+
+  return {
+    account,
+    initial_balance: Math.abs(initial_balance),
+    initial_balance_type: balance_type,
+    transactions,
+    total_debit: totalDebit,
+    total_credit: totalCredit,
+    final_balance: Math.abs(finalBalance),
+    final_balance_type: finalBalanceType
+  };
+}
+
+async function getCustomerStatementData({ customerName, customerId, startDate, endDate }) {
+  let custRow;
+  if (customerId) {
+    custRow = await query('SELECT * FROM customers WHERE id = $1', [customerId]);
+  } else if (customerName) {
+    custRow = await query('SELECT * FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [customerName]);
+  }
+
+  const cust = custRow?.rows[0];
+  const name = cust?.name || customerName || '';
+  const initial_balance = parseFloat(cust?.initial_balance) || 0;
+
+  if (!name && !customerId) {
+    return { customer: null, transactions: [], initial_balance: 0, final_balance: 0, signed_balance: 0 };
+  }
+
+  const cleanDateStr = (raw) => {
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw.slice(0, 10);
+    if (raw instanceof Date) {
+      const offset = raw.getTimezoneOffset();
+      const local = new Date(raw.getTime() - offset * 60 * 1000);
+      return local.toISOString().slice(0, 10);
+    }
+    return String(raw).slice(0, 10);
+  };
+
+  // Fetch Sales
+  const salesRes = await query(`
+    SELECT id, invoice_no, sale_date, created_at, total_amount, discount, misc_charges, payment_method, notes
+    FROM sales
+    WHERE (LOWER(TRIM(customer_name)) = LOWER(TRIM($1)) OR (customer_id IS NOT NULL AND customer_id = $2))
+    ORDER BY sale_date ASC, created_at ASC
+  `, [name, cust?.id || 0]);
+
+  // Fetch Sales Returns
+  const returnsRes = await query(`
+    SELECT id, return_no, return_date, created_at, total_amount, notes
+    FROM sales_returns
+    WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($1))
+    ORDER BY return_date ASC, created_at ASC
+  `, [name]);
+
+  // Fetch Manual Vouchers for Customer GL account
+  console.log('[STMT] Fetching statement for customer:', name, 'cust.id:', cust?.id);
+  const vouchersRes = await query(`
+    SELECT v.id, v.voucher_no, v.voucher_date, v.voucher_type, v.remarks, vd.description, vd.reference_no, vd.debit, vd.credit, v.created_at,
+           (
+             SELECT g_offset.account_name 
+             FROM voucher_details vd_offset 
+             JOIN gl_accounts g_offset ON g_offset.id = vd_offset.account_id 
+             WHERE vd_offset.voucher_id = v.id 
+               AND vd_offset.account_id != vd.account_id 
+             ORDER BY vd_offset.id ASC
+             LIMIT 1
+           ) as bank_account_name
+    FROM voucher_details vd
+    JOIN vouchers v ON vd.voucher_id = v.id
+    JOIN gl_accounts g ON g.id = vd.account_id
+    WHERE (LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) OR (g.account_type = 'Customer' AND g.reference_id = $2))
+    ORDER BY v.voucher_date ASC, v.created_at ASC
+  `, ['Customer - ' + name, cust?.id || 0]);
+
+  console.log('[STMT] Vouchers found count:', vouchersRes.rows.length);
+
+  let seqCounter = 0;
+  const txns = [];
+
+  for (const s of salesRes.rows) {
+    const invTotal = parseFloat(s.total_amount) || 0;
+    const invDateStr = cleanDateStr(s.sale_date || s.created_at);
+    const rawDate = s.created_at || s.sale_date;
+
+    // Calculate payment total for this sale
+    let totalPaidOnSale = 0;
+    if (s.payment_method) {
+      const parts = s.payment_method.split(',');
+      for (const part of parts) {
+        const colonIdx = part.lastIndexOf(':');
+        if (colonIdx !== -1) {
+          totalPaidOnSale += parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+        }
+      }
+    }
+
+    // Customer ledger should never show more credit than the invoice itself.
+    // Any amount received above the invoice total is treated as counter cash,
+    // not as an advance on the customer's account.
+    let remainingCustomerCredit = invTotal > 0 ? invTotal : 0;
+
+    if (invTotal < 0) {
+      // 1. Sale Return / Refund Invoice (Credit Entry to Customer)
+      const absTotal = Math.abs(invTotal);
+      const retRemarks = s.notes ? `Sale Return Invoice - ${s.notes}` : `Sale Return Invoice`;
+      txns.push({
+        id: `sale-inv-${s.id}`,
+        date: invDateStr,
+        type: `SV-${s.invoice_no || s.id}`,
+        v_code: s.invoice_no || String(s.id),
+        remarks: retRemarks,
+        cheque_no: 'Return Refund',
+        debit: 0,
+        credit: absTotal,
+        raw_date: rawDate,
+        seq: ++seqCounter
+      });
+    } else {
+      const isCreditSale = totalPaidOnSale === 0 || (s.payment_method && s.payment_method.toLowerCase().includes('credit'));
+      const isPartialSale = totalPaidOnSale > 0 && totalPaidOnSale < invTotal;
+
+      let defaultRemark = 'Sale Invoice';
+      if (isCreditSale) {
+        defaultRemark = 'Credit Sale Invoice (Unpaid)';
+      } else if (isPartialSale) {
+        defaultRemark = 'Credit Sale Invoice (Partially Paid)';
+      }
+
+      const invRemarks = s.notes ? `${defaultRemark} - ${s.notes}` : defaultRemark;
+
+      // 1. Invoice Debit Entry
+      txns.push({
+        id: `sale-inv-${s.id}`,
+        date: invDateStr,
+        type: `SV-${s.invoice_no || s.id}`,
+        v_code: s.invoice_no || String(s.id),
+        remarks: invRemarks,
+        cheque_no: isCreditSale ? 'Credit Sale' : '',
+        debit: invTotal,
+        credit: 0,
+        raw_date: rawDate,
+        seq: ++seqCounter
+      });
+
+      // 2. Immediate Payments on Sale (Credit entries)
+      if (s.payment_method) {
+        const parts = s.payment_method.split(',');
+        for (const part of parts) {
+          const colonIdx = part.lastIndexOf(':');
+          if (colonIdx === -1) continue;
+          const fullMethod = part.slice(0, colonIdx).trim();
+          const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+          if (amt > 0 && remainingCustomerCredit > 0) {
+            const creditedAmt = Math.min(amt, remainingCustomerCredit);
+            remainingCustomerCredit -= creditedAmt;
+
+            const methodLower = fullMethod.trim().toLowerCase();
+            const isCashPayment = methodLower === 'cash' || methodLower === 'cash received' || methodLower === 'cash pay' || methodLower.startsWith('cash ');
+
+            let remarkStr = isCashPayment
+              ? `Cash Received on Sale Inv. No.${s.invoice_no || s.id}`
+              : `Bank Received on Sale Inv. No.${s.invoice_no || s.id} (${fullMethod})`;
+
+            let chqStr = isCashPayment ? 'Cash Received' : fullMethod;
+            if (fullMethod.includes('(')) {
+              const pIdx = fullMethod.indexOf('(');
+              chqStr = fullMethod.substring(pIdx + 1, fullMethod.length - 1).trim();
+            }
+
+            txns.push({
+              id: `sale-pay-${s.id}-${fullMethod}`,
+              date: invDateStr,
+              type: `SV-${s.invoice_no || s.id}`,
+              v_code: s.invoice_no || String(s.id),
+              remarks: remarkStr,
+              cheque_no: chqStr,
+              debit: 0,
+              credit: creditedAmt,
+              raw_date: rawDate,
+              seq: ++seqCounter
+            });
+          }
+        }
+      }
+    }
+  }
+
+  for (const r of returnsRes.rows) {
+    const retDateStr = cleanDateStr(r.return_date || r.created_at);
+    txns.push({
+      id: `ret-${r.id}`,
+      date: retDateStr,
+      type: `SR-${r.return_no || r.id}`,
+      v_code: r.return_no || String(r.id),
+      remarks: r.notes || 'RETURN',
+      cheque_no: '',
+      debit: 0,
+      credit: parseFloat(r.total_amount) || 0,
+      raw_date: r.created_at || r.return_date,
+      seq: ++seqCounter
+    });
+  }
+
+  for (const v of vouchersRes.rows) {
+    const vDateStr = cleanDateStr(v.voucher_date || v.created_at);
+    let typeCode = v.voucher_type;
+    if (typeCode === 'Cash Receipt') typeCode = 'CR';
+    else if (typeCode === 'Cash Payment') typeCode = 'CP';
+    else if (typeCode === 'Bank Receipt') typeCode = 'BR';
+    else if (typeCode === 'Bank Payment') typeCode = 'BP';
+    else if (typeCode === 'Journal') typeCode = 'JV';
+
+    const accHeadName = (v.bank_account_name || '').replace(/^(Customer|Supplier) - /i, '').trim();
+    const rawUserNotes = (v.remarks || v.description || '').trim();
+    const userNotes = (rawUserNotes === 'Header offset' || rawUserNotes === 'CASH PAY' || rawUserNotes === 'Payment received from customer') ? '' : rawUserNotes;
+
+    let remarkText = '';
+    if (accHeadName) {
+      if (userNotes) {
+        remarkText = `${accHeadName} - ${userNotes}`;
+      } else {
+        remarkText = accHeadName;
+      }
+    } else {
+      remarkText = userNotes || (typeCode === 'BP' ? 'Bank Payment' : typeCode === 'BR' ? 'Bank Receipt' : typeCode === 'CP' ? 'Cash Payment' : typeCode === 'CR' ? 'Cash Receipt' : 'Journal Entry');
+    }
+
+    let chequeVal = v.reference_no || '';
+    if (!chequeVal) {
+      if (typeCode === 'CP' || typeCode === 'CR') {
+        chequeVal = 'Cash Received';
+      } else if (accHeadName) {
+        chequeVal = accHeadName;
+      }
+    }
+
+    console.log('[STMT Voucher Processing]', {
+      voucher_id: v.id,
+      voucher_no: v.voucher_no,
+      voucher_type: v.voucher_type,
+      v_remarks: v.remarks,
+      vd_description: v.description,
+      bank_account_name: v.bank_account_name,
+      accHeadName,
+      computedRemark: remarkText
+    });
+
+    txns.push({
+      id: `vouch-${v.id}`,
+      date: vDateStr,
+      type: `${typeCode}-${v.voucher_no || v.id}`,
+      v_code: v.voucher_no || String(v.id),
+      remarks: remarkText,
+      cheque_no: chequeVal,
+      debit: parseFloat(v.debit) || 0,
+      credit: parseFloat(v.credit) || 0,
+      raw_date: v.created_at || v.voucher_date,
+      seq: ++seqCounter
+    });
+  }
+
+  // Sort all transactions chronologically by created_at timestamp and sequence
+  txns.sort((a, b) => {
+    const timeA = new Date(a.raw_date).getTime();
+    const timeB = new Date(b.raw_date).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return a.seq - b.seq;
+  });
+
+  // Compute running balance & filter by date range
+  let currentBal = initial_balance;
+  let startBal = initial_balance;
+  const filteredTxns = [];
+
+  for (const t of txns) {
+    const dStr = t.date;
+    if (startDate && dStr < startDate) {
+      startBal += (t.debit - t.credit);
+      currentBal += (t.debit - t.credit);
+    } else if (!endDate || dStr <= endDate) {
+      currentBal += (t.debit - t.credit);
+      filteredTxns.push({
+        ...t,
+        balance: Math.abs(currentBal),
+        balance_type: currentBal >= 0 ? 'Dr' : 'Cr'
+      });
+    }
+  }
+
+  return {
+    customer: cust || { name, phone: '', city: '', address: '' },
+    initial_balance: startBal,
+    initial_balance_type: startBal >= 0 ? 'Dr' : 'Cr',
+    transactions: filteredTxns,
+    total_debit: filteredTxns.reduce((s, t) => s + t.debit, 0),
+    total_credit: filteredTxns.reduce((s, t) => s + t.credit, 0),
+    final_balance: Math.abs(currentBal),
+    final_balance_type: currentBal >= 0 ? 'Dr' : 'Cr',
+    signed_balance: currentBal
+  };
+}
+
+async function getAccountClosingBalance({ accountId }) {
+  try {
+    if (!accountId) return { signed_balance: 0, closing_balance: 0, balance_type: 'Dr', account_name: '' };
+
+    const accRow = await query('SELECT * FROM gl_accounts WHERE id = $1', [accountId]);
+    const acc = accRow?.rows[0];
+    if (!acc) return { signed_balance: 0, closing_balance: 0, balance_type: 'Dr', account_name: '', error: `gl_account id=${accountId} not found` };
+
+    const account_name = acc.account_name;
+    const account_type = (acc.account_type || '').trim();
+    const atype = account_type.toLowerCase();
+    const opening_balance = parseFloat(acc.opening_balance) || 0;
+    const balance_type = acc.balance_type || 'Dr';
+
+    let totalDebit = 0;
+    let totalCredit = 0;
+
+    if (atype === 'customer') {
+      let customerName = null;
+      let customerId = acc.reference_id || 0;
+      if (customerId && customerId > 0) {
+        const c = await query('SELECT name, initial_balance FROM customers WHERE id = $1', [customerId]);
+        if (c.rows && c.rows.length > 0) {
+          customerName = c.rows[0].name;
+          const custInitBal = parseFloat(c.rows[0].initial_balance) || 0;
+          const salesRows = await query(
+            `SELECT total_amount, payment_method FROM sales WHERE (LOWER(TRIM(customer_name)) = LOWER(TRIM($1)) OR customer_id = $2)`,
+            [customerName, customerId]
+          );
+          let saleTotal = 0, salePaid = 0;
+          salesRows.rows.forEach(s => {
+            const invTotal = parseFloat(s.total_amount) || 0;
+            if (invTotal === 0) return;
+            let paid = 0;
+            if (s.payment_method) {
+              s.payment_method.split(',').forEach(part => {
+                const colonIdx = part.lastIndexOf(':');
+                if (colonIdx !== -1) paid += parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+              });
+            }
+            if (invTotal > 0) {
+              paid = Math.min(paid, invTotal);
+              saleTotal += invTotal;
+              salePaid += paid;
+            } else {
+              salePaid += Math.abs(invTotal);
+            }
+          });
+          const retSum = await query(
+            `SELECT COALESCE(SUM(total_amount),0) as s FROM sales_returns WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($1))`,
+            [customerName]
+          );
+          const vouchSum = await query(
+            `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) OR (g.account_type = 'Customer' AND g.reference_id = $2))`,
+            ['Customer - ' + customerName, customerId]
+          );
+          totalDebit = saleTotal + parseFloat(vouchSum.rows[0].td);
+          totalCredit = salePaid + parseFloat(retSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
+          let running = custInitBal + totalDebit - totalCredit;
+          const finalType = running >= 0 ? 'Dr' : 'Cr';
+          return {
+            signed_balance: running,
+            closing_balance: Math.abs(running),
+            balance_type: finalType,
+            account_name
+          };
+        }
+      }
+
+      customerName = account_name.replace(/^Customer\s*-\s*/i, '');
+      if (customerName) {
+        const custRow = await query('SELECT id, initial_balance FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [customerName]);
+        const custId = custRow.rows[0]?.id || 0;
+        const custInitBal = parseFloat(custRow.rows[0]?.initial_balance) || 0;
+        const salesRows = await query(
+          `SELECT total_amount, payment_method FROM sales WHERE (LOWER(TRIM(customer_name)) = LOWER(TRIM($1)) OR ($2 > 0 AND customer_id = $2))`,
+          [customerName, custId]
+        );
+        let saleTotal = 0, salePaid = 0;
+        salesRows.rows.forEach(s => {
+          saleTotal += parseFloat(s.total_amount) || 0;
+          if (s.payment_method) {
+            s.payment_method.split(',').forEach(part => {
+              const colonIdx = part.lastIndexOf(':');
+              if (colonIdx !== -1) salePaid += parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+            });
+          }
+        });
+        const retSum = await query(
+          `SELECT COALESCE(SUM(total_amount),0) as s FROM sales_returns WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($1))`,
+          [customerName]
+        );
+        const vouchSum = await query(
+          `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) OR ($2 > 0 AND g.account_type = 'Customer' AND g.reference_id = $2))`,
+          ['Customer - ' + customerName, custId]
+        );
+        totalDebit = saleTotal + parseFloat(vouchSum.rows[0].td);
+        totalCredit = salePaid + parseFloat(retSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
+        let running = custInitBal + totalDebit - totalCredit;
+        const finalType = running >= 0 ? 'Dr' : 'Cr';
+        return {
+          signed_balance: running,
+          closing_balance: Math.abs(running),
+          balance_type: finalType,
+          account_name
+        };
+      }
+    }
+
+    if (atype === 'supplier' || atype === 'accounts payable' || atype === 'vendor' || account_name.toLowerCase().startsWith('supplier -')) {
+      let supplierName = null;
+      let supplierId = acc.reference_id || 0;
+      if (supplierId && supplierId > 0) {
+        const s = await query('SELECT name, initial_balance FROM suppliers WHERE id = $1', [supplierId]);
+        if (s.rows && s.rows.length > 0) {
+          supplierName = s.rows[0].name;
+          const suppInitBal = parseFloat(s.rows[0].initial_balance) || 0;
+          const purSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchases WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
+          const prSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchase_returns WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
+          const paySum = await query(`SELECT COALESCE(SUM(amount),0) as s FROM supplier_payments WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1))`, [supplierName]);
+          const vouchSum = await query(
+            `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(replace(g.account_name, 'Supplier - ', ''))) = LOWER(TRIM($1)) OR (g.account_type = 'Supplier' AND g.reference_id = $2))`,
+            [supplierName, supplierId]
+          );
+          totalCredit = parseFloat(purSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
+          totalDebit = parseFloat(prSum.rows[0].s) + parseFloat(paySum.rows[0].s) + parseFloat(vouchSum.rows[0].td);
+          let running = suppInitBal + totalCredit - totalDebit;
+          const finalType = running >= 0 ? 'Cr' : 'Dr';
+          return {
+            signed_balance: -running,
+            closing_balance: Math.abs(running),
+            balance_type: finalType,
+            account_name
+          };
+        }
+      }
+      supplierName = account_name.replace(/^Supplier\s*-\s*/i, '').trim();
+      if (supplierName) {
+        const suppRow = await query('SELECT id, initial_balance FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [supplierName]);
+        const suppId = suppRow.rows[0]?.id || 0;
+        const suppInitBal = parseFloat(suppRow.rows[0]?.initial_balance) || 0;
+        const purSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchases WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
+        const prSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchase_returns WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
+        const paySum = await query(`SELECT COALESCE(SUM(amount),0) as s FROM supplier_payments WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1))`, [supplierName]);
+        const vouchSum = await query(
+          `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(replace(g.account_name, 'Supplier - ', ''))) = LOWER(TRIM($1)) OR ($2 > 0 AND g.account_type = 'Supplier' AND g.reference_id = $2))`,
+          [supplierName, suppId]
+        );
+        totalCredit = parseFloat(purSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
+        totalDebit = parseFloat(prSum.rows[0].s) + parseFloat(paySum.rows[0].s) + parseFloat(vouchSum.rows[0].td);
+        let running = suppInitBal + totalCredit - totalDebit;
+        const finalType = running >= 0 ? 'Cr' : 'Dr';
+        return {
+          signed_balance: -running,
+          closing_balance: Math.abs(running),
+          balance_type: finalType,
+          account_name
+        };
+      }
+    }
+
+    const vouchSum = await query(
+      `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id WHERE vd.account_id = $1`,
+      [acc.id]
+    );
+    totalDebit = parseFloat(vouchSum.rows[0].td);
+    totalCredit = parseFloat(vouchSum.rows[0].tc);
+
+    if (atype === 'expense' || atype === 'freight' || atype === 'expense account' || atype === 'payable' || atype === 'other current liability') {
+      const peSum = await query(
+        `SELECT COALESCE(SUM(amount), 0) as s FROM purchase_expenses WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1))`,
+        [account_name]
+      );
+      totalCredit += parseFloat(peSum.rows[0].s) || 0;
+    } else {
+      const eaCheck = await query(`SELECT 1 FROM expense_accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1)) LIMIT 1`, [account_name]);
+      if (eaCheck.rows && eaCheck.rows.length > 0) {
+        const peSum = await query(
+          `SELECT COALESCE(SUM(amount), 0) as s FROM purchase_expenses WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1))`,
+          [account_name]
+        );
+        totalCredit += parseFloat(peSum.rows[0].s) || 0;
+      }
+    }
+
+    if (atype === 'bank' || atype === 'cash') {
+      const salesLike = await query(
+        `SELECT payment_method FROM sales WHERE payment_method ILIKE $1`,
+        [`%${account_name}%`]
+      );
+      let saleDeposit = 0;
+      salesLike.rows.forEach(s => {
+        if (!s.payment_method) return;
+        const parts = s.payment_method.split(',');
+        parts.forEach(part => {
+          if (part.toLowerCase().includes(account_name.toLowerCase())) {
+            const colonIdx = part.lastIndexOf(':');
+            if (colonIdx !== -1) {
+              saleDeposit += parseFloat(part.slice(colonIdx + 1).trim()) || 0;
+            }
+          }
+        });
+      });
+      totalDebit += saleDeposit;
+    }
+
+    let running;
+    const isFreightOrExpense = atype === 'expense' || atype === 'freight' || atype === 'expense account' || atype === 'payable';
+    if (isFreightOrExpense || balance_type === 'Cr') {
+      running = opening_balance + totalCredit - totalDebit;
+    } else {
+      running = opening_balance + totalDebit - totalCredit;
+    }
+    const defaultType = (isFreightOrExpense || balance_type === 'Cr') ? 'Cr' : balance_type;
+    const oppositeType = defaultType === 'Cr' ? 'Dr' : 'Cr';
+    const finalType = running >= 0 ? defaultType : oppositeType;
+
+    return {
+      signed_balance: running,
+      closing_balance: Math.abs(running),
+      balance_type: finalType,
+      account_name
+    };
+  } catch (e) {
+    console.error('getAccountClosingBalance ERROR for accountId=' + accountId, e);
+    return { error: e.message || String(e), signed_balance: 0, closing_balance: 0, balance_type: 'Dr', account_name: '' };
+  }
+}
+
 async function handleIPC(channel, ...args) {
   const data = args[0];
 
   switch (channel) {
     // ─── AUTH ─────────────────────────────────────────────────────────────────
     case 'get-genders': { const r = await query('SELECT * FROM genders ORDER BY name'); return r.rows; }
-      case 'add-gender': { await query('INSERT INTO genders (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('genders'); return { success: true }; }
-      case 'update-gender': { await query('UPDATE genders SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('genders'); return { success: true }; }
-      case 'delete-gender': { await query('DELETE FROM genders WHERE id=$1', [data]); broadcast('genders'); return { success: true }; }
+    case 'add-gender': { await query('INSERT INTO genders (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('genders'); return { success: true }; }
+    case 'update-gender': { await query('UPDATE genders SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('genders'); return { success: true }; }
+    case 'delete-gender': { await query('DELETE FROM genders WHERE id=$1', [data]); broadcast('genders'); return { success: true }; }
 
-      case 'get-customers': { 
-        const { searchTerm } = data || {};
-        let q = 'SELECT * FROM customers WHERE 1=1';
-        const params = [];
-        if (searchTerm) {
-          params.push(`%${searchTerm}%`);
-          q += ` AND (name ILIKE $1 OR phone ILIKE $1 OR city ILIKE $1)`;
+    case 'get-customers': {
+      const { searchTerm } = data || {};
+      let q = 'SELECT * FROM customers WHERE 1=1';
+      const params = [];
+      if (searchTerm) {
+        params.push(`%${searchTerm}%`);
+        q += ` AND (name ILIKE $1 OR phone ILIKE $1 OR city ILIKE $1)`;
+      }
+      q += ' ORDER BY id DESC LIMIT 50';
+      const r = await query(q, params);
+      return r.rows;
+    }
+    case 'get-customer-balance': {
+      const { customerName, customerId } = data || {};
+      if (!customerName && !customerId) return { balance: 0 };
+
+      try {
+        const stmt = await getCustomerStatementData({ customerName, customerId });
+        return { balance: stmt?.signed_balance || 0 };
+      } catch (err) {
+        console.error('Error fetching customer balance:', err);
+        return { balance: 0, error: err.message };
+      }
+    }
+    case 'add-customer': {
+      const { name, phone, city, initial_balance } = data;
+      const initBal = parseFloat(initial_balance) || 0;
+      const rr = await query('INSERT INTO customers (name, phone, city, initial_balance) VALUES ($1, $2, $3, $4) RETURNING id', [name, phone, city, initBal]);
+      const cId = rr.rows[0].id;
+      await query(`INSERT INTO gl_accounts (account_name, account_type, reference_id, opening_balance, balance_type) VALUES ($1, 'Customer', $2, $3, 'Dr') ON CONFLICT (account_name) DO NOTHING`, ['Customer - ' + name, cId, Math.abs(initBal)]);
+      broadcast('customers');
+      return { success: true, id: cId };
+    }
+    case 'update-customer': {
+      const { id, name, phone, city, initial_balance } = data;
+      const initBal = parseFloat(initial_balance) || 0;
+      await query('UPDATE customers SET name=$1, phone=$2, city=$3, initial_balance=$4 WHERE id=$5', [name, phone, city, initBal, id]);
+      await query(`UPDATE gl_accounts SET account_name = $1, opening_balance = $2 WHERE account_type = 'Customer' AND reference_id = $3`, ['Customer - ' + name, Math.abs(initBal), id]);
+      broadcast('customers');
+      return { success: true };
+    }
+    case 'update-customer-balance': {
+      const { id, initial_balance } = data;
+      const initBal = parseFloat(initial_balance) || 0;
+      await query('UPDATE customers SET initial_balance = $1 WHERE id = $2', [initBal, id]);
+      await query('UPDATE gl_accounts SET opening_balance = $1 WHERE account_type = \'Customer\' AND reference_id = $2', [Math.abs(initBal), id]);
+      broadcast('customers');
+      return { success: true };
+    }
+
+    case 'get-categories': { const r = await query('SELECT * FROM categories ORDER BY name'); return r.rows; }
+    case 'add-category': { await query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('categories'); return { success: true }; }
+    case 'update-category': { await query('UPDATE categories SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('categories'); return { success: true }; }
+    case 'delete-category': { await query('DELETE FROM categories WHERE id=$1', [data]); broadcast('categories'); return { success: true }; }
+
+    case 'get-size-ranges': { const r = await query('SELECT * FROM size_ranges ORDER BY name'); return r.rows; }
+    case 'add-size-range': { await query('INSERT INTO size_ranges (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('size_ranges'); return { success: true }; }
+    case 'update-size-range': { await query('UPDATE size_ranges SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('size_ranges'); return { success: true }; }
+    case 'delete-size-range': { await query('DELETE FROM size_ranges WHERE id=$1', [data]); broadcast('size_ranges'); return { success: true }; }
+
+    case 'get-packings': { const r = await query('SELECT * FROM packings ORDER BY value'); return r.rows; }
+    case 'add-packing': { await query('INSERT INTO packings (value) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('packings'); return { success: true }; }
+    case 'update-packing': { await query('UPDATE packings SET value=$1 WHERE id=$2', [data.value, data.id]); broadcast('packings'); return { success: true }; }
+    case 'delete-packing': { await query('DELETE FROM packings WHERE id=$1', [data]); broadcast('packings'); return { success: true }; }
+
+    case 'get-brands': { const r = await query('SELECT * FROM brands ORDER BY name'); return r.rows; }
+    case 'add-brand': { await query('INSERT INTO brands (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('brands'); return { success: true }; }
+    case 'update-brand': { await query('UPDATE brands SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('brands'); return { success: true }; }
+    case 'delete-brand': { await query('DELETE FROM brands WHERE id=$1', [data]); broadcast('brands'); return { success: true }; }
+    case 'get-cities': { const r = await query('SELECT * FROM cities ORDER BY name'); return r.rows; }
+    case 'add-city': { await query('INSERT INTO cities (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('cities'); return { success: true }; }
+
+    case 'get-expense-accounts': { const r = await query('SELECT * FROM expense_accounts ORDER BY account_name'); return r.rows; }
+    case 'add-expense-account': {
+      try {
+        await query('INSERT INTO expense_accounts (account_name, default_rate) VALUES ($1, $2) ON CONFLICT (account_name) DO UPDATE SET default_rate = EXCLUDED.default_rate', [data.account_name, data.default_rate]);
+
+        const glCheck = await query('SELECT id FROM gl_accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1)) LIMIT 1', [data.account_name]);
+        if (glCheck.rows.length === 0) {
+          await query('INSERT INTO gl_accounts (account_name, account_type, opening_balance, balance_type) VALUES ($1, $2, 0, $3)', [data.account_name, 'Expense', 'Dr']);
         }
-        q += ' ORDER BY id DESC LIMIT 50';
-        const r = await query(q, params);
-        return r.rows;
+
+        broadcast('expense_accounts');
+        broadcast('gl-accounts');
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err.message };
       }
-      case 'add-customer': {
-        const { name, phone, city } = data;
-        const rr = await query('INSERT INTO customers (name, phone, city) VALUES ($1, $2, $3) RETURNING id', [name, phone, city]);
-        broadcast('customers');
-        return { success: true, id: rr.rows[0].id };
-      }
+    }
+    case 'update-expense-account': {
+      const oldAcc = await query('SELECT account_name FROM expense_accounts WHERE id=$1', [data.id]);
+      const oldName = oldAcc.rows[0]?.account_name || '';
 
-      case 'get-categories': { const r = await query('SELECT * FROM categories ORDER BY name'); return r.rows; }
-      case 'add-category': { await query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('categories'); return { success: true }; }
-      case 'update-category': { await query('UPDATE categories SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('categories'); return { success: true }; }
-      case 'delete-category': { await query('DELETE FROM categories WHERE id=$1', [data]); broadcast('categories'); return { success: true }; }
+      await query('UPDATE expense_accounts SET account_name=$1, default_rate=$2 WHERE id=$3', [data.account_name, data.default_rate, data.id]);
 
-      case 'get-size-ranges': { const r = await query('SELECT * FROM size_ranges ORDER BY name'); return r.rows; }
-      case 'add-size-range': { await query('INSERT INTO size_ranges (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('size_ranges'); return { success: true }; }
-      case 'update-size-range': { await query('UPDATE size_ranges SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('size_ranges'); return { success: true }; }
-      case 'delete-size-range': { await query('DELETE FROM size_ranges WHERE id=$1', [data]); broadcast('size_ranges'); return { success: true }; }
-
-      case 'get-packings': { const r = await query('SELECT * FROM packings ORDER BY value'); return r.rows; }
-      case 'add-packing': { await query('INSERT INTO packings (value) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('packings'); return { success: true }; }
-      case 'update-packing': { await query('UPDATE packings SET value=$1 WHERE id=$2', [data.value, data.id]); broadcast('packings'); return { success: true }; }
-      case 'delete-packing': { await query('DELETE FROM packings WHERE id=$1', [data]); broadcast('packings'); return { success: true }; }
-
-      case 'get-brands': { const r = await query('SELECT * FROM brands ORDER BY name'); return r.rows; }
-      case 'add-brand': { await query('INSERT INTO brands (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('brands'); return { success: true }; }
-      case 'update-brand': { await query('UPDATE brands SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('brands'); return { success: true }; }
-      case 'delete-brand': { await query('DELETE FROM brands WHERE id=$1', [data]); broadcast('brands'); return { success: true }; }
-
-      case 'get-expense-accounts': { const r = await query('SELECT * FROM expense_accounts ORDER BY account_name'); return r.rows; }
-      case 'add-expense-account': { 
-        try {
-          await query('INSERT INTO expense_accounts (account_name, default_rate) VALUES ($1, $2) ON CONFLICT (account_name) DO UPDATE SET default_rate = EXCLUDED.default_rate', [data.account_name, data.default_rate]); 
-          broadcast('expense_accounts'); 
-          return { success: true }; 
-        } catch (err) {
-          return { success: false, error: err.message };
-        }
-      }
-      case 'update-expense-account': { 
-        await query('UPDATE expense_accounts SET account_name=$1, default_rate=$2 WHERE id=$3', [data.account_name, data.default_rate, data.id]); 
-        broadcast('expense_accounts'); 
-        return { success: true }; 
-      }
-      case 'delete-expense-account': { 
-        await query('DELETE FROM expense_accounts WHERE id=$1', [data]); 
-        broadcast('expense_accounts'); 
-        return { success: true }; 
+      if (oldName) {
+        await query('UPDATE gl_accounts SET account_name=$1 WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($2)) AND account_type = $3', [data.account_name, oldName, 'Expense']);
       }
 
-      case 'check-any-users': {
+      const glCheck = await query('SELECT id FROM gl_accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1)) LIMIT 1', [data.account_name]);
+      if (glCheck.rows.length === 0) {
+        await query('INSERT INTO gl_accounts (account_name, account_type, opening_balance, balance_type) VALUES ($1, $2, 0, $3)', [data.account_name, 'Expense', 'Dr']);
+      }
+
+      broadcast('expense_accounts');
+      broadcast('gl-accounts');
+      return { success: true };
+    }
+    case 'delete-expense-account': {
+      const oldAcc = await query('SELECT account_name FROM expense_accounts WHERE id=$1', [data]);
+      const oldName = oldAcc.rows[0]?.account_name || '';
+
+      await query('DELETE FROM expense_accounts WHERE id=$1', [data]);
+
+      if (oldName) {
+        await query(`
+            DELETE FROM gl_accounts g
+            WHERE LOWER(TRIM(g.account_name)) = LOWER(TRIM($1))
+              AND g.account_type = 'Expense'
+              AND NOT EXISTS (SELECT 1 FROM voucher_details vd WHERE vd.account_id = g.id)
+          `, [oldName]);
+      }
+
+      broadcast('expense_accounts');
+      broadcast('gl-accounts');
+      return { success: true };
+    }
+
+    case 'check-any-users': {
       const r = await query('SELECT COUNT(*) FROM users');
       return parseInt(r.rows[0].count) > 0;
     }
@@ -780,18 +1653,18 @@ async function handleIPC(channel, ...args) {
           RETURNING last_id
         `);
         const newId = res.rows[0].last_id;
-        
+
         // Clean up previous days' sessions by setting them to 0 so they don't persist
         // We do this silently in the background
         query('UPDATE products SET session_id = 0 WHERE session_id > 0 AND created_at < CURRENT_DATE').catch(console.error);
-        
+
         return newId;
       } catch (err) {
         console.error('Error getting next session ID:', err);
         return 1; // Fallback
       }
     }
-    
+
     case 'get-item-sessions': {
       const showAll = data?.showAll || false;
       const r = await query(`
@@ -807,12 +1680,12 @@ async function handleIPC(channel, ...args) {
       `);
       return r.rows;
     }
-    
+
     case 'get-products-by-session': {
       const r = await query('SELECT * FROM products WHERE session_id = $1 ORDER BY id ASC', [data]);
       return r.rows;
     }
-    
+
     case 'get-products-by-session-range': {
       const { from, to } = data;
       // Fetch products between from and to (inclusive)
@@ -914,7 +1787,7 @@ async function handleIPC(channel, ...args) {
           const pd = parseFloat(row.discount_pct) || 0;
           const da = parseFloat(row.discount_amount) || 0;
           if (!mfg || !b) continue;
-          
+
           await query(
             `INSERT INTO manufacturer_brands (company_name, brand_name, purchase_discount_pct, discount_amount)
              VALUES ($1,$2,$3,$4)
@@ -1191,21 +2064,35 @@ async function handleIPC(channel, ...args) {
           s.initial_balance,
           s.opening_date,
           COALESCE(p.total_purchases, 0) as total_purchases,
+          COALESCE(p.total_discount, 0) as total_discount,
           COALESCE(pr.total_returns, 0) as total_returns,
           COALESCE(sp.total_paid, 0) as total_paid,
           (s.initial_balance + COALESCE(p.total_purchases, 0) - COALESCE(pr.total_returns, 0) - COALESCE(sp.total_paid, 0)) as net_balance
         FROM suppliers s
         LEFT JOIN (
-          SELECT supplier_name, SUM(total_amount) as total_purchases
-          FROM purchases WHERE is_posted = 1 GROUP BY supplier_name
+          SELECT 
+            p.supplier_name, 
+            SUM(p.total_amount) as total_purchases,
+            SUM(p.discount + COALESCE((SELECT SUM(pi.pre_disc_price * pi.packets - pi.amount) FROM purchase_items pi WHERE pi.purchase_id = p.id), 0)) as total_discount
+          FROM purchases p WHERE p.is_posted = 1 GROUP BY p.supplier_name
         ) p ON p.supplier_name = s.name
         LEFT JOIN (
           SELECT supplier_name, SUM(total_amount) as total_returns
           FROM purchase_returns WHERE is_posted = 1 GROUP BY supplier_name
         ) pr ON pr.supplier_name = s.name
         LEFT JOIN (
-          SELECT supplier_name, SUM(amount) as total_paid
-          FROM supplier_payments GROUP BY supplier_name
+          SELECT 
+            sp.supplier_name,
+            SUM(sp.total_paid) as total_paid
+          FROM (
+            SELECT supplier_name, SUM(amount) as total_paid FROM supplier_payments GROUP BY supplier_name
+            UNION ALL
+            SELECT replace(g.account_name, 'Supplier - ', '') as supplier_name, SUM(vd.debit - vd.credit) as total_paid
+            FROM voucher_details vd
+            JOIN gl_accounts g ON g.id = vd.account_id
+            WHERE g.account_type = 'Supplier'
+            GROUP BY g.account_name
+          ) sp GROUP BY sp.supplier_name
         ) sp ON sp.supplier_name = s.name
         ORDER BY s.name ASC
       `);
@@ -1213,7 +2100,10 @@ async function handleIPC(channel, ...args) {
     }
     case 'update-supplier-balance': {
       const { id, initial_balance } = data;
-      await query('UPDATE suppliers SET initial_balance = $1 WHERE id = $2', [parseFloat(initial_balance) || 0, id]);
+      const initBal = parseFloat(initial_balance) || 0;
+      await query('UPDATE suppliers SET initial_balance = $1 WHERE id = $2', [initBal, id]);
+      await query('UPDATE gl_accounts SET opening_balance = $1 WHERE account_type = \'Supplier\' AND reference_id = $2', [Math.abs(initBal), id]);
+      broadcast('suppliers');
       return { success: true };
     }
     case 'add-supplier-payment': {
@@ -1225,56 +2115,299 @@ async function handleIPC(channel, ...args) {
     }
     case 'get-supplier-statement': {
       const { supplier_name } = data;
-      const supplierRow = await query('SELECT initial_balance FROM suppliers WHERE name = $1', [supplier_name]);
+      console.log('[SUPP STMT] Fetching statement for supplier:', supplier_name);
+      const supplierRow = await query('SELECT initial_balance FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [supplier_name]);
       const initial_balance = supplierRow.rows[0]?.initial_balance || 0;
-      
+
       const res = await query(`
         SELECT 
-          'Purchase' as type,
-          purchase_date as txn_date,
-          invoice_no as ref_no,
-          total_amount as amount,
-          notes
-        FROM purchases
-        WHERE supplier_name = $1 AND is_posted = 1
+          'PV-' || p.id as type,
+          p.purchase_date as txn_date,
+          p.invoice_no as ref_no,
+          p.notes,
+          DATE(p.created_at) as supp_date,
+          p.invoice_no as supp_inv_no,
+          p.blt_number as bilty_no,
+          COALESCE((SELECT SUM(cartons) FROM purchase_expenses WHERE purchase_id = p.id), 0) as ctn_bag,
+          COALESCE((SELECT SUM(amount) FROM purchase_expenses WHERE purchase_id = p.id), 0) as freight,
+          COALESCE((SELECT SUM(packets) FROM purchase_items WHERE purchase_id = p.id), 0) as total_qty,
+          COALESCE((SELECT SUM(pre_disc_price * packets) FROM purchase_items WHERE purchase_id = p.id), 0) as supplier_amount,
+          (COALESCE((SELECT SUM(pre_disc_price * packets) FROM purchase_items WHERE purchase_id = p.id), 0) - COALESCE((SELECT SUM(amount) FROM purchase_items WHERE purchase_id = p.id), 0) + p.discount) as discount_amount,
+          '' as cheque_no,
+          0 as debit,
+          p.total_amount as credit
+        FROM purchases p
+        WHERE LOWER(TRIM(p.supplier_name)) = LOWER(TRIM($1)) AND p.is_posted = 1
         
         UNION ALL
         
         SELECT 
-          'Return' as type,
-          return_date as txn_date,
-          return_no as ref_no,
-          total_amount as amount,
-          notes
-        FROM purchase_returns
-        WHERE supplier_name = $1 AND is_posted = 1
+          'PR-' || r.id as type,
+          r.return_date as txn_date,
+          r.return_no as ref_no,
+          r.notes,
+          NULL as supp_date,
+          '' as supp_inv_no,
+          '' as bilty_no,
+          COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE return_id = r.id), 0) as ctn_bag,
+          0 as freight,
+          COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE return_id = r.id), 0) as total_qty,
+          r.total_amount as supplier_amount,
+          0 as discount_amount,
+          '' as cheque_no,
+          r.total_amount as debit,
+          0 as credit
+        FROM purchase_returns r
+        WHERE LOWER(TRIM(r.supplier_name)) = LOWER(TRIM($1)) AND r.is_posted = 1
         
         UNION ALL
         
         SELECT 
-          'Payment' as type,
-          payment_date as txn_date,
-          'PAY-' || id as ref_no,
-          amount,
-          notes
-        FROM supplier_payments
-        WHERE supplier_name = $1
+          CASE WHEN p.payment_mode = 'Cash' THEN 'CP-' || p.id ELSE 'BP-' || p.id END as type,
+          p.payment_date as txn_date,
+          'PAY-' || p.id as ref_no,
+          p.payment_mode as notes,
+          NULL as supp_date,
+          '' as supp_inv_no,
+          '' as bilty_no,
+          0 as ctn_bag,
+          0 as freight,
+          0 as total_qty,
+          0 as supplier_amount,
+          0 as discount_amount,
+          p.notes as cheque_no,
+          p.amount as debit,
+          0 as credit
+        FROM supplier_payments p
+        WHERE LOWER(TRIM(p.supplier_name)) = LOWER(TRIM($1))
+
+        UNION ALL
+
+        SELECT 
+          v.voucher_type || '-' || v.voucher_no as type,
+          v.voucher_date as txn_date,
+          v.voucher_no as ref_no,
+          CASE 
+            WHEN (
+              SELECT g_offset.account_name 
+              FROM voucher_details vd_offset 
+              JOIN gl_accounts g_offset ON g_offset.id = vd_offset.account_id 
+              WHERE vd_offset.voucher_id = v.id 
+                AND vd_offset.account_id != vd.account_id 
+              ORDER BY vd_offset.id ASC
+              LIMIT 1
+            ) IS NOT NULL THEN
+              REPLACE((
+                SELECT g_offset.account_name 
+                FROM voucher_details vd_offset 
+                JOIN gl_accounts g_offset ON g_offset.id = vd_offset.account_id 
+                WHERE vd_offset.voucher_id = v.id 
+                  AND vd_offset.account_id != vd.account_id 
+                ORDER BY vd_offset.id ASC
+                LIMIT 1
+              ), 'Bank - ', '') || CASE 
+                WHEN COALESCE(vd.description, v.remarks, '') != '' 
+                     AND COALESCE(vd.description, v.remarks, '') != 'Header offset' 
+                     AND COALESCE(vd.description, v.remarks, '') != 'CASH PAY' 
+                THEN ' - ' || COALESCE(vd.description, v.remarks)
+                ELSE ''
+              END
+            ELSE COALESCE(vd.description, v.remarks, '')
+          END as notes,
+          NULL as supp_date,
+          '' as supp_inv_no,
+          '' as bilty_no,
+          0 as ctn_bag,
+          0 as freight,
+          0 as total_qty,
+          0 as supplier_amount,
+          0 as discount_amount,
+          COALESCE(vd.reference_no, '') as cheque_no,
+          vd.debit as debit,
+          vd.credit as credit
+        FROM voucher_details vd
+        JOIN vouchers v ON v.id = vd.voucher_id
+        JOIN gl_accounts g ON g.id = vd.account_id
+        WHERE g.account_type = 'Supplier' 
+          AND (
+            LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) 
+            OR LOWER(TRIM(replace(g.account_name, 'Supplier - ', ''))) = LOWER(TRIM($1))
+          )
         
-        ORDER BY txn_date ASC
+        ORDER BY txn_date ASC, type DESC
       `, [supplier_name]);
-      
+
+      console.log(`[SUPP STMT] Returned ${res.rows.length} transactions for supplier:`, supplier_name);
       return { initial_balance, transactions: res.rows };
     }
 
+    // ─── CUSTOMER STATEMENT HELPER ─────────────────────────────────────────────
+    case 'get-customer-statement': {
+      try {
+        return await getCustomerStatementData(data || {});
+      } catch (err) {
+        console.error('Error in get-customer-statement:', err);
+        return { error: err.message };
+      }
+    }
+    case 'add-customer-payment': {
+      try {
+        const { customerName, customerId, paymentDate, amount, paymentMode, remarks, referenceNo, userId } = data;
+        const numAmt = parseFloat(amount) || 0;
+        if (numAmt <= 0) return { success: false, error: 'Amount must be greater than zero' };
+
+        // 1. Get or create Customer GL Account
+        let custGl = await query(`SELECT id FROM gl_accounts WHERE account_name = $1 OR (account_type = 'Customer' AND reference_id = $2)`, ['Customer - ' + customerName, customerId || 0]);
+        let custAccId = custGl.rows[0]?.id;
+        if (!custAccId) {
+          const cr = await query(`INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Customer', $2, 'Dr') RETURNING id`, ['Customer - ' + customerName, customerId || null]);
+          custAccId = cr.rows[0].id;
+        }
+
+        // 2. Get Cash or Bank GL Account
+        let cashBankGl = await query(`SELECT id FROM gl_accounts WHERE account_name = $1 OR account_name ILIKE $2 LIMIT 1`, [paymentMode, `%${paymentMode}%`]);
+        let cashBankAccId = cashBankGl.rows[0]?.id;
+        if (!cashBankAccId) {
+          const defaultCash = await query(`SELECT id FROM gl_accounts WHERE account_type = 'Cash' LIMIT 1`);
+          cashBankAccId = defaultCash.rows[0]?.id;
+        }
+
+        // 3. Generate Voucher Number
+        const vRes = await query(`UPDATE global_counters SET value = value + 1 WHERE name = 'voucher_no' RETURNING value`);
+        const nextNo = String(vRes.rows[0]?.value || Date.now());
+        const isCashMode = paymentMode.toLowerCase().includes('cash');
+        const vCode = isCashMode ? `CP-${nextNo}` : `BR-${nextNo}`;
+        const vType = isCashMode ? 'Cash Receipt' : 'Bank Receipt';
+
+        // 4. Create Voucher Header
+        const vr = await query(`INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [vCode, paymentDate || new Date().toISOString().slice(0, 10), vType, remarks || 'CASH PAY', userId || null]);
+        const voucherId = vr.rows[0].id;
+
+        // 5. Create Voucher Details
+        // Customer Account CREDITED (reduces customer debt)
+        await query(`INSERT INTO voucher_details (voucher_id, account_id, description, reference_no, debit, credit) VALUES ($1, $2, $3, $4, 0, $5)`, [voucherId, custAccId, remarks || 'Payment received from customer', referenceNo || '', numAmt]);
+
+        // Cash/Bank Account DEBITED (increases cash/bank balance)
+        if (cashBankAccId) {
+          await query(`INSERT INTO voucher_details (voucher_id, account_id, description, reference_no, debit, credit) VALUES ($1, $2, $3, $4, $5, 0)`, [voucherId, cashBankAccId, `Received from ${customerName}`, referenceNo || '', numAmt]);
+        }
+
+        broadcast('vouchers');
+        broadcast('customers');
+        return { success: true, voucherNo: vCode };
+      } catch (err) {
+        console.error('Error in add-customer-payment:', err);
+        return { success: false, error: err.message };
+      }
+    }
+
     // ─── SALES ────────────────────────────────────────────────────────────────
+    case 'get-customer-statement': {
+      try {
+        return await getCustomerStatementData(data || {});
+      } catch (err) {
+        console.error('Error in get-customer-statement:', err);
+        return { error: err.message };
+      }
+    }
+    case 'add-customer-payment': {
+      try {
+        const { customerName, customerId, paymentDate, amount, paymentMode, remarks, referenceNo, userId } = data;
+        const numAmt = parseFloat(amount) || 0;
+        if (numAmt <= 0) return { success: false, error: 'Amount must be greater than zero' };
+
+        // 1. Get or create Customer GL Account
+        let custGl = await query(`SELECT id FROM gl_accounts WHERE account_name = $1 OR (account_type = 'Customer' AND reference_id = $2)`, ['Customer - ' + customerName, customerId || 0]);
+        let custAccId = custGl.rows[0]?.id;
+        if (!custAccId) {
+          const cr = await query(`INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Customer', $2, 'Dr') RETURNING id`, ['Customer - ' + customerName, customerId || null]);
+          custAccId = cr.rows[0].id;
+        }
+
+        // 2. Get Cash or Bank GL Account
+        let cashBankGl = await query(`SELECT id FROM gl_accounts WHERE account_name = $1 OR account_name ILIKE $2 LIMIT 1`, [paymentMode, `%${paymentMode}%`]);
+        let cashBankAccId = cashBankGl.rows[0]?.id;
+        if (!cashBankAccId) {
+          const defaultCash = await query(`SELECT id FROM gl_accounts WHERE account_type = 'Cash' LIMIT 1`);
+          cashBankAccId = defaultCash.rows[0]?.id;
+        }
+
+        // 3. Generate Voucher Number
+        const vRes = await query(`UPDATE global_counters SET value = value + 1 WHERE name = 'voucher_no' RETURNING value`);
+        const nextNo = String(vRes.rows[0]?.value || Date.now());
+        const isCashMode = paymentMode.toLowerCase().includes('cash');
+        const vCode = isCashMode ? `CP-${nextNo}` : `BR-${nextNo}`;
+        const vType = isCashMode ? 'Cash Receipt' : 'Bank Receipt';
+
+        // 4. Create Voucher Header
+        const vr = await query(`INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [vCode, paymentDate || new Date().toISOString().slice(0, 10), vType, remarks || 'CASH PAY', userId || null]);
+        const voucherId = vr.rows[0].id;
+
+        // 5. Create Voucher Details
+        // Customer Account CREDITED (reduces customer debt)
+        await query(`INSERT INTO voucher_details (voucher_id, account_id, description, reference_no, debit, credit) VALUES ($1, $2, $3, $4, 0, $5)`, [voucherId, custAccId, remarks || 'Payment received from customer', referenceNo || '', numAmt]);
+
+        // Cash/Bank Account DEBITED (increases cash/bank balance)
+        if (cashBankAccId) {
+          await query(`INSERT INTO voucher_details (voucher_id, account_id, description, reference_no, debit, credit) VALUES ($1, $2, $3, $4, $5, 0)`, [voucherId, cashBankAccId, `Received from ${customerName}`, referenceNo || '', numAmt]);
+        }
+
+        broadcast('vouchers');
+        broadcast('customers');
+        return { success: true, voucherNo: vCode };
+      } catch (err) {
+        console.error('Error in add-customer-payment:', err);
+        return { success: false, error: err.message };
+      }
+    }
+
+    // ─── SALES ────────────────────────────────────────────────────────────────
+    case 'get-customer-balance': {
+      const { customerName, customerId } = data || {};
+      if (!customerName && !customerId) return { balance: 0 };
+
+      try {
+        const stmt = await getCustomerStatementData({ customerName, customerId });
+        return { balance: stmt?.signed_balance || 0 };
+      } catch (err) {
+        console.error('Error fetching customer balance:', err);
+        return { balance: 0, error: err.message };
+      }
+    }
     case 'save-sale': {
       const { saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes, userId } = data;
       const subTotal = items.reduce((s, i) => s + i.amount, 0);
       const total = subTotal - (discount || 0) + (miscCharges || 0);
       const totalPackets = items.reduce((s, i) => s + i.packets, 0);
+
+      if (customerName) {
+        let cId;
+        const existC = await query('SELECT id FROM customers WHERE name = $1', [customerName]);
+        if (existC.rows && existC.rows.length > 0) {
+          cId = existC.rows[0].id;
+          await query('UPDATE customers SET phone = $2 WHERE id = $1', [cId, customerPhone || '']);
+        } else {
+          const cr = await query('INSERT INTO customers (name, phone) VALUES ($1, $2) RETURNING id', [customerName, customerPhone || '']);
+          cId = cr.rows[0].id;
+        }
+        await query(`INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Customer', $2, 'Dr') ON CONFLICT (account_name) DO NOTHING`, ['Customer - ' + customerName, cId]);
+      }
+
+      let finalInvoiceNo = invoiceNo;
+
+      if (finalInvoiceNo && finalInvoiceNo.match(/^[0-9]+$/)) {
+        const used = await query('SELECT id FROM sales WHERE invoice_no = $1', [finalInvoiceNo]);
+        if (used.rows && used.rows.length > 0) {
+          const res = await query(`UPDATE global_counters SET value = value + 1 WHERE name = 'invoice_no' RETURNING value`);
+          finalInvoiceNo = String(res.rows[0].value);
+        } else {
+          await query(`UPDATE global_counters SET value = GREATEST(value, $1) WHERE name = 'invoice_no'`, [parseInt(finalInvoiceNo)]);
+        }
+      }
+
       const sr = await query(
         'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, misc_charges, payment_method, notes, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id',
-        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null]
+        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null]
       );
       const saleId = sr.rows[0].id;
       for (const item of items) {
@@ -1329,9 +2462,8 @@ async function handleIPC(channel, ...args) {
           SELECT 'invoice_no', COALESCE(MAX(CAST(invoice_no AS INTEGER)), 0) FROM sales WHERE invoice_no ~ '^[0-9]+$'
           ON CONFLICT (name) DO NOTHING
         `);
-        const res = await query(`UPDATE global_counters SET value = value + 1 WHERE name = 'invoice_no' RETURNING value
-        `);
-        return String(res.rows[0].value);
+        const res = await query(`SELECT value + 1 AS next_val FROM global_counters WHERE name = 'invoice_no'`);
+        return String(res.rows[0].next_val);
       } catch (err) {
         console.error('Error getting next invoice no:', err);
         const r = await query("SELECT MAX(CAST(invoice_no AS INTEGER)) FROM sales WHERE invoice_no ~ '^[0-9]+$'");
@@ -1457,7 +2589,22 @@ async function handleIPC(channel, ...args) {
       return r.rows;
     }
     case 'add-manufacturer': {
-      await query('INSERT INTO manufacturers (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]);
+      const result = await query('INSERT INTO manufacturers (name) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id', [data]);
+      const mfgId = result.rows[0]?.id;
+      if (mfgId) {
+        // Create GL account
+        await query(
+          'INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, $2, $3, $4) ON CONFLICT (account_name) DO NOTHING',
+          ['Supplier - ' + data, 'Supplier', mfgId, 'Cr']
+        );
+        // Also create in suppliers table for full integration
+        await query(
+          'INSERT INTO suppliers (name, initial_balance) VALUES ($1, 0) ON CONFLICT (name) DO NOTHING',
+          [data]
+        );
+        broadcast('gl-accounts');
+        broadcast('suppliers');
+      }
       return { success: true };
     }
     case 'delete-manufacturer': {
@@ -1571,24 +2718,24 @@ async function handleIPC(channel, ...args) {
         if (dbCheck.rowCount === 0) {
           await setupPool.query("CREATE DATABASE atg_wholesale OWNER atg_user");
         }
-        
+
         // Now try to reconnect the main pool to the new database and initialize tables
-        if (pool) await pool.end().catch(()=>{});
+        if (pool) await pool.end().catch(() => { });
         pool = createPool();
         await initDatabase();
-        
+
         // Reconnect Express Server
         if (expressServer) { expressServer.close(); expressServer = null; }
         startExpressServer();
         dbStatus = { connected: true, error: null };
-        
+
         // Auto-load default data removed as per request
-        
+
         return { success: true };
       } catch (e) {
         return { success: false, error: e.message };
       } finally {
-        await setupPool.end().catch(() => {});
+        await setupPool.end().catch(() => { });
       }
     }
     case 'test-client-connection': {
@@ -1613,7 +2760,7 @@ async function handleIPC(channel, ...args) {
     // ─── BACKUP ───────────────────────────────────────────────────────────────
     // ─── ADVANCED BACKUP ────────────────────────────────────────────────────────
     case 'get-backup-settings': {
-      const backupRoot = findBackupDrive(); 
+      const backupRoot = findBackupDrive();
       const configuredPath = store.get('backupDrivePath') || '';
 
       let dailySnapshots = [];
@@ -1623,7 +2770,7 @@ async function handleIPC(channel, ...args) {
           if (fs.existsSync(dailyDir)) {
             dailySnapshots = fs.readdirSync(dailyDir)
               .filter(f => f.startsWith('shop_') && f.endsWith('.json'))
-              .sort().reverse() 
+              .sort().reverse()
               .map(f => ({
                 filename: f,
                 date: f.replace('shop_', '').replace('.json', ''),
@@ -1667,7 +2814,7 @@ async function handleIPC(channel, ...args) {
       return { success: true, hasExistingBackup, message: 'Backup drive connected.' };
     }
     case 'test-backup': {
-      const backupRoot = findBackupDrive(); 
+      const backupRoot = findBackupDrive();
       if (!backupRoot) {
         store.set('lastBackupStatus', 'Drive not found (unplugged or missing)');
         return { success: false, error: 'No backup drive found. Please plug it in.' };
@@ -1677,9 +2824,9 @@ async function handleIPC(channel, ...args) {
         fs.mkdirSync(atgDir, { recursive: true });
 
         const exportData = {};
-        for (const t of BACKUP_TABLES) { 
-          const r = await query(`SELECT * FROM ${t} ORDER BY id`); 
-          exportData[t] = r.rows; 
+        for (const t of BACKUP_TABLES) {
+          const r = await query(`SELECT * FROM ${t} ORDER BY id`);
+          exportData[t] = r.rows;
         }
 
         const liveFile = path.join(atgDir, 'shop.json');
@@ -1708,13 +2855,184 @@ async function handleIPC(channel, ...args) {
     case 'get-freight-report': {
       const { startDate, endDate } = data;
       const res = await query(`
-        SELECT p.id, p.invoice_date, p.freight, p.supplier_id, p.invoice_no, s.name as supplier_name
-        FROM purchases p
-        LEFT JOIN suppliers s ON p.supplier_id = s.id
-        WHERE p.freight > 0 AND p.invoice_date BETWEEN $1 AND $2
-        ORDER BY p.invoice_date DESC
+        SELECT 
+          ('PE-' || pe.id)::text as id,
+          p.purchase_date,
+          pe.account_name,
+          p.supplier_name,
+          p.invoice_no,
+          pe.cartons,
+          pe.rate,
+          pe.amount,
+          COALESCE(pe.remarks, '') as remarks,
+          'PURCHASE' as source
+        FROM purchase_expenses pe
+        JOIN purchases p ON p.id = pe.purchase_id
+        WHERE pe.amount > 0
+          AND p.purchase_date BETWEEN $1 AND $2
+
+        UNION ALL
+
+        SELECT
+          ('VD-' || vd.id)::text as id,
+          v.voucher_date as purchase_date,
+          g.account_name,
+          '' as supplier_name,
+          v.voucher_no as invoice_no,
+          0 as cartons,
+          0 as rate,
+          vd.debit as amount,
+          COALESCE(NULLIF(vd.description, ''), v.remarks, '') as remarks,
+          'VOUCHER' as source
+        FROM voucher_details vd
+        JOIN vouchers v ON v.id = vd.voucher_id
+        JOIN gl_accounts g ON g.id = vd.account_id
+        JOIN expense_accounts ea ON LOWER(TRIM(ea.account_name)) = LOWER(TRIM(g.account_name))
+        WHERE vd.debit > 0
+          AND v.voucher_date BETWEEN $1 AND $2
+
+        ORDER BY purchase_date DESC, id DESC
       `, [startDate, endDate]);
       return res.rows;
+    }
+
+    case 'get-freight-ledger': {
+      const { startDate, endDate, accountName } = data || {};
+
+      const baseTxSql = `
+        SELECT
+          p.purchase_date as txn_date,
+          pe.account_name,
+          'PURCHASE' as source,
+          ('PV-' || COALESCE(NULLIF(p.invoice_no, ''), p.id::text)) as type_code,
+          COALESCE(NULLIF(p.invoice_no, ''), p.id::text) as vcode,
+          COALESCE(NULLIF(p.invoice_no, ''), ('PUR-' || p.id::text)) as ref_no,
+          CASE 
+            WHEN pe.remarks IS NOT NULL AND TRIM(pe.remarks) != '' THEN pe.remarks
+            WHEN pe.rate > 0 THEN 'FREIGHT CTN EXP ' || pe.rate::text || '/= Payable'
+            ELSE 'FREIGHT CTN EXP Payable'
+          END as remarks,
+          '' as cheque_no,
+          0::numeric as debit,
+          pe.amount as credit,
+          p.created_at as sort_ts,
+          ('PE-' || pe.id)::text as row_id
+        FROM purchase_expenses pe
+        JOIN purchases p ON p.id = pe.purchase_id
+        WHERE pe.amount > 0
+
+        UNION ALL
+
+        SELECT
+          v.voucher_date as txn_date,
+          g.account_name,
+          'VOUCHER' as source,
+          COALESCE(NULLIF(v.voucher_no, ''), ('VD-' || v.id::text)) as type_code,
+          COALESCE(NULLIF(vd.reference_no, ''), NULLIF(v.voucher_no, ''), v.id::text) as vcode,
+          COALESCE(NULLIF(v.voucher_no, ''), ('V-' || v.id::text)) as ref_no,
+          COALESCE(NULLIF(vd.description, ''), NULLIF(v.remarks, ''), '') as remarks,
+          COALESCE(vd.reference_no, '') as cheque_no,
+          vd.debit,
+          vd.credit,
+          v.created_at as sort_ts,
+          ('VD-' || vd.id)::text as row_id
+        FROM voucher_details vd
+        JOIN vouchers v ON v.id = vd.voucher_id
+        JOIN gl_accounts g ON g.id = vd.account_id
+        JOIN expense_accounts ea ON LOWER(TRIM(ea.account_name)) = LOWER(TRIM(g.account_name))
+        WHERE vd.debit > 0 OR vd.credit > 0
+      `;
+
+      const openParams = [startDate || null];
+      let accountFilterOpen = '';
+      if (accountName) {
+        openParams.push(accountName);
+        accountFilterOpen = ` AND LOWER(TRIM(t.account_name)) = LOWER(TRIM($${openParams.length}))`;
+      }
+
+      const openingRes = await query(`
+        WITH tx AS (${baseTxSql})
+        SELECT t.account_name, COALESCE(SUM(t.credit - t.debit), 0) as opening_balance
+        FROM tx t
+        WHERE ($1::date IS NULL OR t.txn_date < $1)
+        ${accountFilterOpen}
+        GROUP BY t.account_name
+      `, openParams);
+
+      const txParams = [startDate || null, endDate || null];
+      let accountFilterTx = '';
+      if (accountName) {
+        txParams.push(accountName);
+        accountFilterTx = ` AND LOWER(TRIM(t.account_name)) = LOWER(TRIM($${txParams.length}))`;
+      }
+
+      const txRes = await query(`
+        WITH tx AS (${baseTxSql})
+        SELECT
+          t.txn_date,
+          t.account_name,
+          t.source,
+          t.type_code,
+          t.vcode,
+          t.ref_no,
+          t.remarks,
+          t.cheque_no,
+          t.debit,
+          t.credit,
+          t.sort_ts,
+          t.row_id
+        FROM tx t
+        WHERE ($1::date IS NULL OR t.txn_date >= $1)
+          AND ($2::date IS NULL OR t.txn_date <= $2)
+          ${accountFilterTx}
+        ORDER BY t.account_name ASC, t.txn_date ASC, t.sort_ts ASC, t.row_id ASC
+      `, txParams);
+
+      const openingByAccount = new Map();
+      for (const r of openingRes.rows) {
+        openingByAccount.set(r.account_name, parseFloat(r.opening_balance) || 0);
+      }
+
+      const runningByAccount = new Map();
+      const transactions = txRes.rows.map((r) => {
+        const acc = r.account_name || '';
+        const opening = openingByAccount.get(acc) || 0;
+        const prev = runningByAccount.has(acc) ? runningByAccount.get(acc) : opening;
+        const next = prev + (parseFloat(r.credit) || 0) - (parseFloat(r.debit) || 0);
+        runningByAccount.set(acc, next);
+
+        return {
+          date: r.txn_date,
+          account_name: acc,
+          source: r.source,
+          type: r.type_code,
+          vcode: r.vcode,
+          ref_no: r.ref_no,
+          remarks: r.remarks,
+          cheque_no: r.cheque_no,
+          debit: parseFloat(r.debit) || 0,
+          credit: parseFloat(r.credit) || 0,
+          balance: Math.abs(next),
+          balance_type: next >= 0 ? 'Cr.' : 'Dr.'
+        };
+      });
+
+      const openingBalance = accountName
+        ? (openingByAccount.get(accountName) || 0)
+        : Array.from(openingByAccount.values()).reduce((s, v) => s + v, 0);
+      const totalDebit = transactions.reduce((s, t) => s + t.debit, 0);
+      const totalCredit = transactions.reduce((s, t) => s + t.credit, 0);
+      const closingSigned = openingBalance + totalCredit - totalDebit;
+
+      return {
+        opening_balance: Math.abs(openingBalance),
+        opening_type: openingBalance >= 0 ? 'Cr.' : 'Dr.',
+        total_debit: totalDebit,
+        total_credit: totalCredit,
+        closing_balance: Math.abs(closingSigned),
+        closing_type: closingSigned >= 0 ? 'Cr.' : 'Dr.',
+        transactions
+      };
     }
 
     case 'get-daily-report': {
@@ -1747,7 +3065,12 @@ async function handleIPC(channel, ...args) {
         `, params);
         const sales = salesRes.rows;
 
+        // Fetch Bank Accounts for strict matching in Master Cashier Window
+        const glRes = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
+        const bankAccountNames = glRes.rows.map(r => r.account_name.toLowerCase());
+
         const enrichedSales = [];
+        const returnInvoices = [];
         for (const sale of sales) {
           const itemsRes = await query(`
             SELECT item_code, item_description, packets as quantity, sale_rate, purchase_rate, amount, profit
@@ -1757,8 +3080,12 @@ async function handleIPC(channel, ...args) {
           `, [sale.id]);
           const items = itemsRes.rows;
 
+          const billAmt = parseFloat(sale.total_amount) || 0;
+          const isReturnInvoice = billAmt < 0 || (sale.payment_method && sale.payment_method.toLowerCase().includes('return'));
+          let cash = 0;
           let digital = 0;
           const breakdown = {};
+
           if (sale.payment_method) {
             const parts = sale.payment_method.split(',');
             for (const part of parts) {
@@ -1766,28 +3093,56 @@ async function handleIPC(channel, ...args) {
               if (colonIdx === -1) continue;
               const fullMethod = part.slice(0, colonIdx).trim();
               const methodName = fullMethod.toLowerCase();
+              const baseMethodName = fullMethod.split(' (')[0].toLowerCase();
               const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
 
-              if (methodName.includes('jazzcash') || methodName.includes('easypais') || methodName.includes('raast') || methodName.includes('transfer') || methodName.includes('bank')) {
+              if (methodName.includes('jazzcash') || methodName.includes('easypais') || methodName.includes('raast') || methodName.includes('transfer') || methodName.includes('bank') || bankAccountNames.includes(baseMethodName)) {
                 digital += amt;
                 breakdown[fullMethod] = (breakdown[fullMethod] || 0) + amt;
+              } else if (methodName.includes('cash') || (methodName !== '' && !methodName.includes('credit') && !methodName.includes('unpaid'))) {
+                cash += amt;
               }
             }
           }
-          if (digital === 0 && sale.payment_method) {
-            const pm = sale.payment_method.toLowerCase();
-            const netAmt = (parseFloat(sale.total_amount) || 0) + (parseFloat(sale.misc_charges) || 0) - (parseFloat(sale.discount) || 0);
-            if (pm.includes('jazzcash') || pm.includes('easypais') || pm.includes('raast') || pm.includes('transfer') || pm.includes('bank')) {
-              digital = netAmt;
-              breakdown[sale.payment_method] = netAmt;
-            }
+
+          const totalPaid = cash + digital;
+          if (billAmt > 0 && totalPaid > billAmt && cash > 0) {
+            const changeGiven = totalPaid - billAmt;
+            cash = Math.max(0, cash - changeGiven);
+          }
+          const netTotalPaid = cash + digital;
+
+          let credit = 0;
+          if (billAmt >= 0 && !isReturnInvoice) {
+            credit = Math.max(0, billAmt - netTotalPaid);
           }
 
-          const billAmt = (parseFloat(sale.total_amount) || 0) + (parseFloat(sale.misc_charges) || 0) - (parseFloat(sale.discount) || 0);
-          const cash = billAmt - digital;
-
           const totalProfit = items.reduce((s, i) => s + (parseFloat(i.profit) || 0), 0) + (parseFloat(sale.misc_charges) || 0) - (parseFloat(sale.discount) || 0);
-          enrichedSales.push({ ...sale, items, cash, digital, profit: totalProfit, breakdown });
+
+          if (isReturnInvoice) {
+            returnInvoices.push({
+              id: `return-invoice-${sale.id}`,
+              return_no: sale.invoice_no || sale.id,
+              invoice_no: sale.invoice_no || sale.id,
+              return_date: sale.sale_date,
+              created_at: sale.created_at,
+              customer_name: sale.customer_name,
+              total_amount: Math.abs(billAmt),
+              notes: sale.notes || 'Return Invoice',
+              items: items.map(item => ({
+                item_code: item.item_code,
+                item_description: item.item_description,
+                quantity: Math.abs(parseFloat(item.quantity) || 0),
+                sale_rate: parseFloat(item.sale_rate) || 0,
+                amount: Math.abs(parseFloat(item.amount) || 0),
+                profit: parseFloat(item.profit) || 0
+              })),
+              isReturnInvoice: true,
+              displayType: 'Return Invoice'
+            });
+          } else {
+            enrichedSales.push({ ...sale, items, cash, digital, credit, billAmt, profit: totalProfit, breakdown, isReturnInvoice: false, displayType: null });
+          }
         }
 
         const returnsRes = await query(`
@@ -1808,7 +3163,7 @@ async function handleIPC(channel, ...args) {
                 0
               ) as purchase_rate
             FROM sales_return_items sri
-            WHERE sri.sales_return_id = $1
+            WHERE sri.return_id = $1
             ORDER BY sri.id
           `, [ret.id]);
           const items = itemsRes.rows.map(i => ({
@@ -1818,15 +3173,17 @@ async function handleIPC(channel, ...args) {
           enrichedReturns.push({ ...ret, items });
         }
 
-        const totalSales = enrichedSales.reduce((sum, s) => sum + ((parseFloat(s.total_amount) || 0) + (parseFloat(s.misc_charges) || 0) - (parseFloat(s.discount) || 0)), 0);
+        const totalSales = enrichedSales.reduce((sum, s) => sum + s.billAmt, 0);
         const totalSoldItems = enrichedSales.reduce((sum, s) => sum + (parseFloat(s.total_quantity) || 0), 0);
-        const totalReturns = enrichedReturns.reduce((sum, r) => sum + (parseFloat(r.total_amount) || 0), 0);
-        const totalReturnedItems = enrichedReturns.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0), 0);
+        const allReturns = [...enrichedReturns, ...returnInvoices];
+        const totalReturns = allReturns.reduce((sum, r) => sum + (parseFloat(r.total_amount) || 0), 0);
+        const totalReturnedItems = allReturns.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0), 0);
         const grossProfit = enrichedSales.reduce((sum, s) => sum + (parseFloat(s.profit) || 0), 0);
-        const profitLostOnReturns = enrichedReturns.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (parseFloat(i.profit) || 0), 0), 0);
+        const profitLostOnReturns = allReturns.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (parseFloat(i.profit) || 0), 0), 0);
         const netProfit = grossProfit - profitLostOnReturns;
         const totalCash = enrichedSales.reduce((sum, s) => sum + s.cash, 0);
         const totalDigital = enrichedSales.reduce((sum, s) => sum + s.digital, 0);
+        const totalCredit = enrichedSales.reduce((sum, s) => sum + s.credit, 0);
         const netCash = totalCash - totalReturns;
 
         const digitalBreakdown = {};
@@ -1842,11 +3199,11 @@ async function handleIPC(channel, ...args) {
 
         return {
           sales: enrichedSales,
-          returns: enrichedReturns,
+          returns: allReturns,
           summary: {
             totalSales, totalSoldItems, totalReturns, totalReturnedItems,
             netSales: totalSales - totalReturns,
-            totalCash, netCash, totalDigital, digitalBreakdown,
+            totalCash, netCash, totalDigital, totalCredit, digitalBreakdown,
             grossProfit, profitLostOnReturns, netProfit
           }
         };
@@ -1890,7 +3247,7 @@ async function handleIPC(channel, ...args) {
             WHERE user_id = $1 AND sale_date::date BETWEEN $2 AND $3
             ORDER BY created_at DESC
           `, [user.id, startDate, endDate]);
-          
+
           let userCash = 0, userDigital = 0;
           iRes.rows.forEach(row => {
             let digital = 0;
@@ -2089,6 +3446,184 @@ async function handleIPC(channel, ...args) {
       }
     }
 
+    case 'get-gl-accounts': {
+      let q = 'SELECT * FROM gl_accounts WHERE 1=1';
+      const params = [];
+      if (data && data.type) {
+        params.push(data.type);
+        q += ` AND account_type = $${params.length}`;
+      }
+      if (data && data.searchTerm) {
+        params.push(`%${data.searchTerm}%`);
+        q += ` AND account_name ILIKE $${params.length}`;
+      }
+      q += ' ORDER BY account_name';
+      const r = await query(q, params);
+      return r.rows;
+    }
+    case 'add-gl-account': {
+      const { account_name, account_type, opening_balance, balance_type } = data;
+      let refId = null;
+      if (account_type === 'Customer') {
+        const custName = account_name.startsWith('Customer - ') ? account_name.replace('Customer - ', '') : account_name;
+        const exist = await query('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [custName]);
+        if (exist.rows.length > 0) {
+          refId = exist.rows[0].id;
+        } else {
+          const newC = await query('INSERT INTO customers (name) VALUES ($1) RETURNING id', [custName]);
+          refId = newC.rows[0].id;
+        }
+        broadcast('customers');
+      } else if (account_type === 'Supplier') {
+        const suppName = account_name.startsWith('Supplier - ') ? account_name.replace('Supplier - ', '') : account_name;
+        const exist = await query('SELECT id FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [suppName]);
+        if (exist.rows.length > 0) {
+          refId = exist.rows[0].id;
+        } else {
+          const newS = await query('INSERT INTO suppliers (name, initial_balance) VALUES ($1, $2) RETURNING id', [suppName, parseFloat(opening_balance) || 0]);
+          refId = newS.rows[0].id;
+        }
+        broadcast('suppliers');
+      }
+      await query(
+        'INSERT INTO gl_accounts (account_name, account_type, reference_id, opening_balance, balance_type) VALUES ($1, $2, $3, $4, $5)',
+        [account_name, account_type, refId, opening_balance || 0, balance_type || 'Dr']
+      );
+      broadcast('gl-accounts');
+      return { success: true };
+    }
+    case 'update-gl-account': {
+      const { id, account_name, account_type, opening_balance, balance_type } = data;
+      if (account_type === 'Customer') {
+        const custName = account_name.startsWith('Customer - ') ? account_name.replace('Customer - ', '') : account_name;
+        const glRow = await query('SELECT reference_id FROM gl_accounts WHERE id = $1', [id]);
+        const refId = glRow.rows[0]?.reference_id;
+        if (refId) {
+          await query('UPDATE customers SET name = $1 WHERE id = $2', [custName, refId]);
+        } else {
+          const exist = await query('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [custName]);
+          if (exist.rows.length > 0) {
+            await query('UPDATE gl_accounts SET reference_id = $1 WHERE id = $2', [exist.rows[0].id, id]);
+          } else {
+            const newC = await query('INSERT INTO customers (name) VALUES ($1) RETURNING id', [custName]);
+            await query('UPDATE gl_accounts SET reference_id = $1 WHERE id = $2', [newC.rows[0].id, id]);
+          }
+        }
+        broadcast('customers');
+      } else if (account_type === 'Supplier') {
+        const suppName = account_name.startsWith('Supplier - ') ? account_name.replace('Supplier - ', '') : account_name;
+        const glRow = await query('SELECT reference_id FROM gl_accounts WHERE id = $1', [id]);
+        const refId = glRow.rows[0]?.reference_id;
+        if (refId) {
+          await query('UPDATE suppliers SET name = $1 WHERE id = $2', [suppName, refId]);
+        } else {
+          const exist = await query('SELECT id FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [suppName]);
+          if (exist.rows.length > 0) {
+            await query('UPDATE gl_accounts SET reference_id = $1 WHERE id = $2', [exist.rows[0].id, id]);
+          } else {
+            const newS = await query('INSERT INTO suppliers (name, initial_balance) VALUES ($1, $2) RETURNING id', [suppName, parseFloat(opening_balance) || 0]);
+            await query('UPDATE gl_accounts SET reference_id = $1 WHERE id = $2', [newS.rows[0].id, id]);
+          }
+        }
+        broadcast('suppliers');
+      }
+      await query(
+        'UPDATE gl_accounts SET account_name=$1, account_type=$2, opening_balance=$3, balance_type=$4 WHERE id=$5',
+        [account_name, account_type, opening_balance || 0, balance_type || 'Dr', id]
+      );
+      broadcast('gl-accounts');
+      return { success: true };
+    }
+    case 'delete-gl-account': {
+      await query('DELETE FROM gl_accounts WHERE id=$1', [data]);
+      broadcast('gl-accounts');
+      return { success: true };
+    }
+    case 'get-account-closing-balance': {
+      try {
+        return await getAccountClosingBalance(data || {});
+      } catch (err) {
+        console.error('Error fetching account closing balance:', err);
+        return { signed_balance: 0, closing_balance: 0, balance_type: 'Dr', account_name: '', error: err.message };
+      }
+    }
+    case 'get-vouchers': {
+      const { startDate, endDate, type } = data || {};
+      let q = 'SELECT * FROM vouchers WHERE 1=1';
+      const params = [];
+      if (startDate) { params.push(startDate); q += ` AND voucher_date >= $${params.length}`; }
+      if (endDate) { params.push(endDate); q += ` AND voucher_date <= $${params.length}`; }
+      if (type) { params.push(type); q += ` AND voucher_type = $${params.length}`; }
+      q += ' ORDER BY id DESC LIMIT 500';
+      const r = await query(q, params);
+      return r.rows;
+    }
+    case 'get-voucher-details': {
+      const r = await query('SELECT vd.*, a.account_name FROM voucher_details vd JOIN gl_accounts a ON vd.account_id = a.id WHERE vd.voucher_id=$1 ORDER BY vd.id', [data]);
+      return r.rows;
+    }
+    case 'save-voucher': {
+      const { id, voucher_no, voucher_date, voucher_type, remarks, user_id, details } = data;
+      let voucher_id = id;
+
+      if (id) {
+        await query(
+          'UPDATE vouchers SET voucher_no=$1, voucher_date=$2, voucher_type=$3, remarks=$4, user_id=$5 WHERE id=$6',
+          [voucher_no, voucher_date, voucher_type, remarks || '', user_id || null, id]
+        );
+        await query('DELETE FROM voucher_details WHERE voucher_id=$1', [id]);
+      } else {
+        const v_res = await query(
+          'INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+          [voucher_no, voucher_date, voucher_type, remarks || '', user_id || null]
+        );
+        voucher_id = v_res.rows[0].id;
+      }
+
+      for (const d of details) {
+        await query(
+          'INSERT INTO voucher_details (voucher_id, account_id, description, reference_no, debit, credit) VALUES ($1, $2, $3, $4, $5, $6)',
+          [voucher_id, d.account_id, d.description || '', d.reference_no || '', d.debit || 0, d.credit || 0]
+        );
+      }
+      broadcast('vouchers');
+      broadcast('customers');
+      broadcast('suppliers');
+      broadcast('gl-accounts');
+      return { success: true, id: voucher_id };
+    }
+    case 'delete-voucher': {
+      await query('DELETE FROM vouchers WHERE id=$1', [data]);
+      broadcast('vouchers');
+      broadcast('customers');
+      broadcast('suppliers');
+      broadcast('gl-accounts');
+      return { success: true };
+    }
+    case 'get-ledger-report': {
+      try {
+        return await getBankStatementData(data || {});
+      } catch (err) {
+        console.error('Error in get-ledger-report:', err);
+        return { account: null, transactions: [], initial_balance: 0, final_balance: 0, total_debit: 0, total_credit: 0, error: err.message };
+      }
+    }
+    case 'get-cash-activity-report': {
+      const { startDate, endDate } = data;
+      const r = await query(`
+        SELECT a.id, a.account_name, 
+               COALESCE(SUM(vd.debit) FILTER (WHERE v.voucher_date < $1), 0) - COALESCE(SUM(vd.credit) FILTER (WHERE v.voucher_date < $1), 0) as prior_balance,
+               COALESCE(SUM(vd.debit) FILTER (WHERE v.voucher_date >= $1 AND v.voucher_date <= $2), 0) as period_debit,
+               COALESCE(SUM(vd.credit) FILTER (WHERE v.voucher_date >= $1 AND v.voucher_date <= $2), 0) as period_credit
+        FROM gl_accounts a
+        LEFT JOIN voucher_details vd ON a.id = vd.account_id
+        LEFT JOIN vouchers v ON vd.voucher_id = v.id
+        WHERE a.account_type IN ('Bank', 'Cash')
+        GROUP BY a.id, a.account_name
+      `, [startDate || null, endDate || null]);
+      return r.rows;
+    }
+
     default:
       throw new Error(`No handler registered for '${channel}'`);
   }
@@ -2113,10 +3648,10 @@ async function forwardToServer(channel, data) {
 // ── IPC registration ──────────────────────────────────────────────────────────
 const LOCAL_CHANNELS = new Set([
   'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
-    'get-receipt-settings', 'save-receipt-settings',
+  'get-receipt-settings', 'save-receipt-settings',
   'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
   'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
-  'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'print-pdf', 'print-barcodes-pdf', 'print-raw',
+  'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'save-invoice-pdf', 'print-pdf', 'print-barcodes-pdf', 'print-raw',
   'select-json-file', 'read-file'
 ]);
 
@@ -2128,8 +3663,9 @@ function registerIPC() {
     'get-size-ranges', 'add-size-range', 'update-size-range', 'delete-size-range',
     'get-packings', 'add-packing', 'update-packing', 'delete-packing',
     'get-brands', 'add-brand', 'update-brand', 'delete-brand',
+    'get-cities', 'add-city',
     'get-expense-accounts', 'add-expense-account', 'update-expense-account', 'delete-expense-account',
-    'get-purchase-expenses', 'get-freight-report',
+    'get-purchase-expenses', 'get-freight-report', 'get-freight-ledger',
     'get-manufacturers', 'add-manufacturer', 'delete-manufacturer',
     'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-products-chunked', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo', 'start-new-item-session', 'get-item-sessions', 'get-products-by-session', 'get-products-by-session-range', 'check-duplicate-product',
     'get-companies', 'save-company', 'delete-company',
@@ -2141,7 +3677,7 @@ function registerIPC() {
     'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return',
     'get-suppliers-ledger', 'update-supplier-balance', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
-    'get-customers', 'add-customer',
+    'get-customers', 'add-customer', 'get-customer-balance', 'update-customer', 'update-customer-balance', 'get-customer-statement', 'add-customer-payment',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
     'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
@@ -2149,7 +3685,10 @@ function registerIPC() {
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
     'get-receipt-settings', 'save-receipt-settings',
     'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
-    'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup'
+    'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
+    'get-gl-accounts', 'add-gl-account', 'update-gl-account', 'delete-gl-account', 'get-account-closing-balance',
+    'get-vouchers', 'get-voucher-details', 'save-voucher', 'delete-voucher',
+    'get-ledger-report', 'get-cash-activity-report'
   ];
 
   const AUTO_BACKUP_TRIGGERS = new Set([
@@ -2174,66 +3713,118 @@ function registerIPC() {
       } else {
         result = await handleIPC(channel, data);
       }
-      
+
       if (AUTO_BACKUP_TRIGGERS.has(channel) && result && (result.success || result.id)) {
         executeAutoBackup().catch(err => console.error('[AutoBackup] Error:', err));
       }
-      
+
       return result;
     });
   });
 
   // Print receipt (local only)
-      ipcMain.handle('print-receipt', async (event, receiptData) => {
-      return new Promise((resolve) => {
-        try {
-          let htmlContent = '';
-          let printerName = null;
-          
-          if (typeof receiptData === 'string') {
-            htmlContent = receiptData;
-          } else if (receiptData && receiptData.html) {
-            htmlContent = receiptData.html;
-            printerName = receiptData.printer;
-          }
+  ipcMain.handle('print-receipt', async (event, receiptData) => {
+    return new Promise((resolve) => {
+      try {
+        let htmlContent = '';
+        let printerName = null;
 
-          if (!htmlContent) {
-            return resolve({ success: false, error: 'No HTML content provided' });
-          }
-
-          const printWin = new BrowserWindow({ 
-            show: false,
-            webPreferences: { nodeIntegration: true, contextIsolation: false } 
-          });
-
-          printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-
-          printWin.webContents.on('did-finish-load', () => {
-            const printOptions = {
-              silent: true,
-              printBackground: true,
-              copies: 2
-            };
-            
-            if (printerName) {
-              printOptions.deviceName = printerName;
-              printOptions.silent = true; 
-            }
-
-            printWin.webContents.print(printOptions, (success, errorType) => {
-              printWin.close();
-              if (success) {
-                resolve({ success: true });
-              } else {
-                resolve({ success: false, error: errorType || 'Print failed' });
-              }
-            });
-          });
-        } catch (err) {
-          resolve({ success: false, error: err.message });
+        if (typeof receiptData === 'string') {
+          htmlContent = receiptData;
+        } else if (receiptData && receiptData.html) {
+          htmlContent = receiptData.html;
+          printerName = receiptData.printer;
         }
-      });
+
+        if (!htmlContent) {
+          return resolve({ success: false, error: 'No HTML content provided' });
+        }
+
+        const printWin = new BrowserWindow({
+          show: false,
+          webPreferences: { nodeIntegration: true, contextIsolation: false }
+        });
+
+        printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+        printWin.webContents.on('did-finish-load', () => {
+          const printOptions = {
+            silent: true,
+            printBackground: true,
+            copies: 2
+          };
+
+          if (printerName) {
+            printOptions.deviceName = printerName;
+            printOptions.silent = true;
+          }
+
+          printWin.webContents.print(printOptions, (success, errorType) => {
+            printWin.close();
+            if (success) {
+              resolve({ success: true });
+            } else {
+              resolve({ success: false, error: errorType || 'Print failed' });
+            }
+          });
+        });
+      } catch (err) {
+        resolve({ success: false, error: err.message });
+      }
     });
+  });
+
+  // Save invoice/receipt HTML as a PDF file at a location the user chooses
+  ipcMain.handle('save-invoice-pdf', async (event, data) => {
+    let htmlContent = '';
+    let defaultFileName = 'Invoice.pdf';
+    if (typeof data === 'string') {
+      htmlContent = data;
+    } else if (data && data.html) {
+      htmlContent = data.html;
+      if (data.fileName) defaultFileName = data.fileName;
+    }
+    if (!htmlContent) return { success: false, error: 'No HTML content provided' };
+
+    const parentWin = BrowserWindow.fromWebContents(event.sender);
+    const saveResult = await dialog.showSaveDialog(parentWin, {
+      title: 'Save Invoice as PDF',
+      defaultPath: path.join(app.getPath('documents'), defaultFileName),
+      filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { success: false, canceled: true };
+
+    return new Promise((resolve) => {
+      try {
+        const pdfWin = new BrowserWindow({
+          show: false,
+          webPreferences: { nodeIntegration: true, contextIsolation: false }
+        });
+
+        pdfWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+        pdfWin.webContents.on('did-finish-load', async () => {
+          try {
+            const pdfBuffer = await pdfWin.webContents.printToPDF({
+              printBackground: true,
+              marginsType: 1,
+              pageSize: 'A4',
+              landscape: false
+            });
+            fs.writeFileSync(saveResult.filePath, pdfBuffer);
+            pdfWin.close();
+            require('electron').shell.openPath(saveResult.filePath);
+            resolve({ success: true, filePath: saveResult.filePath });
+          } catch (err) {
+            pdfWin.close();
+            resolve({ success: false, error: err.message });
+          }
+        });
+      } catch (err) {
+        resolve({ success: false, error: err.message });
+      }
+    });
+  });
 
   // Print barcode handler - use PDF to avoid Windows print dialog crash
   ipcMain.handle('print-barcodes-pdf', async () => {
@@ -2431,8 +4022,8 @@ if (-not $winspoolOk) {
 
       const cleanup = () => {
         setTimeout(() => {
-          try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
-          try { if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath); } catch {}
+          try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch { }
+          try { if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath); } catch { }
         }, 5000);
       };
 
