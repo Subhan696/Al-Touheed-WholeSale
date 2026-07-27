@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useDataVersion } from '../context/DataContext';
 import './SalesList.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -14,8 +15,9 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
     return new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().split('T')[0];
   });
   const [showAll, setShowAll] = useState(false);
+  const version = useDataVersion('sales-returns');
 
-  useEffect(() => { if (isActive) load(); }, [isActive]);
+  useEffect(() => { if (isActive) load(); }, [isActive, version]);
 
   const load = async () => {
     setLoading(true);

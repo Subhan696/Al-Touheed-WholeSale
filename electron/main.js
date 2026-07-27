@@ -46,6 +46,23 @@ async function query(text, params) {
   }
 }
 
+// Helper: parse payment method string to extract total amount received
+function parsePaymentAmount(paymentMethodStr) {
+  if (!paymentMethodStr) return 0;
+  const parts = paymentMethodStr.split(',');
+  let total = 0;
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const colonIdx = trimmed.lastIndexOf(':');
+    if (colonIdx !== -1) {
+      const amount = parseFloat(trimmed.substring(colonIdx + 1).trim()) || 0;
+      total += amount;
+    }
+  }
+  return total;
+}
+
 // ── SSE broadcaster ──────────────────────────────────────────────────────────
 const sseClients = new Set();
 
@@ -120,11 +137,32 @@ function saveDailySnapshotJSON(exportData, backupRoot) {
   }
 }
 
+// Tables that have a serial 'id' primary key
 const BACKUP_TABLES = [
-  'users', 'genders', 'categories', 'size_ranges', 'packings', 'brands', 'manufacturers', 'companies', 'profit_rules', 'overall_profit', 'manufacturer_brands',
-  'products', 'stock_adjustments', 'purchases', 'purchase_items', 'purchase_returns', 'purchase_return_items',
-  'sales', 'sale_items', 'sales_returns', 'sales_return_items'
+  // Auth & config
+  'users',
+  // Product meta
+  'genders', 'categories', 'size_ranges', 'packings', 'brands', 'manufacturers', 'companies',
+  'profit_rules', 'overall_profit', 'manufacturer_brands',
+  // Products & stock
+  'products', 'stock_adjustments',
+  // Customers & Suppliers
+  'customers', 'suppliers',
+  // Chart of Accounts & Vouchers
+  'gl_accounts', 'vouchers', 'voucher_details',
+  // Expense accounts (must be before purchase_expenses which references it)
+  'expense_accounts',
+  // Purchases
+  'purchases', 'purchase_items', 'purchase_expenses', 'purchase_returns', 'purchase_return_items',
+  // Sales
+  'sales', 'sale_items', 'sales_returns', 'sales_return_items',
+  // Payments
+  'supplier_payments',
+  // Other
+  'cities',
 ];
+// Tables without a serial id column (need separate handling)
+const BACKUP_TABLES_NO_ID = ['daily_sessions', 'global_counters'];
 
 async function executeAutoBackup() {
   if (isRestoring) return;
@@ -140,6 +178,11 @@ async function executeAutoBackup() {
     const exportData = {};
     for (const t of BACKUP_TABLES) {
       const res = await query(`SELECT * FROM ${t} ORDER BY id`);
+      exportData[t] = res.rows;
+    }
+    // Also backup tables without id column
+    for (const t of BACKUP_TABLES_NO_ID) {
+      const res = await query(`SELECT * FROM ${t}`);
       exportData[t] = res.rows;
     }
 
@@ -167,9 +210,18 @@ async function runRestore(fileToRestore, skipBackup = false) {
     let fileData = parsed.data ? parsed : { data: parsed };
 
     await query('BEGIN');
+
+    // Truncate all tables in reverse dependency order to avoid FK violations
+    // Tables with id (with CASCADE to handle all FK refs)
     await query(`TRUNCATE ${BACKUP_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+    // Tables without serial id
+    for (const t of BACKUP_TABLES_NO_ID) {
+      await query(`TRUNCATE ${t}`);
+    }
+
+    // Restore all tables with id
     for (const table of BACKUP_TABLES) {
-      const rows = fileData.data[table] || fileData[table];
+      const rows = fileData.data ? fileData.data[table] : fileData[table];
       if (!rows || rows.length === 0) continue;
       const columns = Object.keys(rows[0]);
       const colNames = columns.map(c => `"${c}"`).join(', ');
@@ -178,13 +230,32 @@ async function runRestore(fileToRestore, skipBackup = false) {
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
         await query(`INSERT INTO "${table}" (${colNames}) VALUES (${placeholders})`, values);
       }
+      // Reset the serial sequence so new inserts get correct next IDs
       try {
-        await query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE(MAX(id), 1) + 1, false) FROM "${table}"`);
-      } catch (e) { }
+        await query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE((SELECT MAX(id) FROM "${table}"), 0) + 1, false)`);
+      } catch (e) { /* table may not have a sequence */ }
     }
+
+    // Restore tables without id (daily_sessions, global_counters)
+    for (const table of BACKUP_TABLES_NO_ID) {
+      const rows = fileData.data ? fileData.data[table] : fileData[table];
+      if (!rows || rows.length === 0) continue;
+      const columns = Object.keys(rows[0]);
+      const colNames = columns.map(c => `"${c}"`).join(', ');
+      for (const row of rows) {
+        const values = columns.map(c => row[c]);
+        const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+        await query(`INSERT INTO "${table}" (${colNames}) VALUES (${placeholders})`, values);
+      }
+    }
+
     await query('COMMIT');
 
-    broadcast('stock'); broadcast('purchases'); broadcast('sales'); broadcast('purchase-returns'); broadcast('sales-returns');
+    // Broadcast updates to all relevant listeners
+    for (const ch of ['stock', 'purchases', 'sales', 'purchase-returns', 'sales-returns',
+                       'customers', 'suppliers', 'gl-accounts', 'vouchers']) {
+      broadcast(ch);
+    }
     isRestoring = false;
 
     if (!skipBackup) {
@@ -194,7 +265,8 @@ async function runRestore(fileToRestore, skipBackup = false) {
     return { success: true, message: 'Database restored successfully!' };
   } catch (err) {
     isRestoring = false;
-    await query('ROLLBACK');
+    try { await query('ROLLBACK'); } catch (_) {}
+    console.error('[Restore] Error:', err);
     return { success: false, error: 'Restore failed: ' + err.message };
   }
 }
@@ -330,6 +402,7 @@ async function initDatabase() {
       payment_method TEXT DEFAULT 'Cash',
       notes TEXT,
       user_id INTEGER,
+      customer_prev_balance NUMERIC(15,2) DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     )
@@ -610,6 +683,11 @@ async function initDatabase() {
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
   await query('ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   try {
+    await query('ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_prev_balance NUMERIC(15,2) DEFAULT 0');
+  } catch (e) {
+    console.error('Migration customer_prev_balance error:', e);
+  }
+  try {
     await query('ALTER TABLE profit_rules ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0');
   } catch (e) {
     console.error('Migration discount_pct error:', e);
@@ -768,9 +846,12 @@ async function getBankStatementData({ accountId, accountName, startDate, endDate
 
   // Fetch Bank / Cash payments recorded directly in Sales
   let salesDateFilter = '';
-  const isCashAccount = account.account_type === 'Cash' || accountName.toLowerCase().includes('cash');
-  const searchPattern = isCashAccount ? '%cash%' : `%${accountName}%`;
-  const salesParams = [searchPattern];
+  const isCashAccount = account.account_type === 'Cash' || (accountName.toLowerCase().includes('cash') && !accountName.toLowerCase().includes('jazz'));
+  // For cash accounts: match 'cash' but NOT 'jazz' (jazzcash is a bank method)
+  const searchPattern = isCashAccount
+    ? "payment_method ILIKE '%cash%' AND payment_method NOT ILIKE '%jazz%'"
+    : `payment_method ILIKE '%${accountName.replace(/'/g, "''")}%'`;
+  const salesParams = [];
   if (startDate) {
     salesParams.push(startDate);
     salesDateFilter += ` AND sale_date >= $${salesParams.length}`;
@@ -816,7 +897,7 @@ async function getBankStatementData({ accountId, accountName, startDate, endDate
   const salesRes = await query(`
     SELECT sale_date, invoice_no, payment_method, notes, customer_name, total_amount
     FROM sales
-    WHERE payment_method ILIKE $1${salesDateFilter}
+    WHERE ${searchPattern}${salesDateFilter}
     ORDER BY sale_date ASC
   `, salesParams);
 
@@ -829,11 +910,22 @@ async function getBankStatementData({ accountId, accountName, startDate, endDate
       if (!partTrimmed) return;
       const partLower = partTrimmed.toLowerCase();
       const accLower = accountName.toLowerCase();
+      let isMatch = false;
+      // If the full payment_method or part is 'Credit', or starts with 'credit', ignore it
+      const fullLower = (s.payment_method || '').toLowerCase().trim();
+      const isFullCredit = fullLower === 'credit' || fullLower === 'credit invoice' || fullLower.startsWith('credit:');
 
-      let isMatch = partLower.includes(accLower);
-      if (!isMatch && isCashAccount) {
-        if ((partLower.includes('cash') || partLower.includes('cash received')) && (!partLower.includes('jazzcash') || accLower.includes('jazzcash'))) {
+      if (!isFullCredit && !partLower.startsWith('credit') && !partLower.includes('credit:')) {
+        if (partLower.includes(accLower)) {
           isMatch = true;
+        } else if (isCashAccount) {
+          // For cash accounts, match if the payment method is the account name itself or is a generic cash term
+          // This handles both specific cash account names (e.g., "Main Cash: 5000") and generic terms (e.g., "Cash Received: 5000")
+          const methodPart = partTrimmed.split(':')[0].trim().toLowerCase();
+          const isGenericCashTerm = methodPart === 'cash' || methodPart === 'cash received' || methodPart === 'cash pay' || methodPart.startsWith('cash ');
+          if (methodPart === accLower || (isGenericCashTerm && !partLower.includes('jazz'))) {
+            isMatch = true;
+          }
         }
       }
 
@@ -843,7 +935,11 @@ async function getBankStatementData({ accountId, accountName, startDate, endDate
         if (colonIdx !== -1) {
           amt = parseFloat(partTrimmed.slice(colonIdx + 1).trim()) || 0;
         } else {
-          amt = parseFloat(s.total_amount) || 0;
+          // Fallback to total_amount ONLY if there is no customer_name (counter customer) and payment_method is not credit.
+          // Invoices for named customers with plain 'Cash' or 'Cash Received' without a colon amount were saved as credit/unpaid.
+          if (!fullLower.includes('credit') && !s.customer_name) {
+            amt = parseFloat(s.total_amount) || 0;
+          }
         }
 
         if (amt > 0) {
@@ -1029,7 +1125,7 @@ async function getCustomerStatementData({ customerName, customerId, startDate, e
         seq: ++seqCounter
       });
 
-      // 2. Immediate Payments on Sale (Credit entries)
+      // 2. Immediate Payments on Sale (Credit entries) — show full typed amount, no cap
       if (s.payment_method) {
         const parts = s.payment_method.split(',');
         for (const part of parts) {
@@ -1037,36 +1133,35 @@ async function getCustomerStatementData({ customerName, customerId, startDate, e
           if (colonIdx === -1) continue;
           const fullMethod = part.slice(0, colonIdx).trim();
           const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
-          if (amt > 0 && remainingCustomerCredit > 0) {
-            const creditedAmt = Math.min(amt, remainingCustomerCredit);
-            remainingCustomerCredit -= creditedAmt;
+          if (amt <= 0) continue;
+          // Skip credit entries
+          if (fullMethod.toLowerCase().startsWith('credit')) continue;
 
-            const methodLower = fullMethod.trim().toLowerCase();
-            const isCashPayment = methodLower === 'cash' || methodLower === 'cash received' || methodLower === 'cash pay' || methodLower.startsWith('cash ');
+          const methodLower = fullMethod.trim().toLowerCase();
+          const isCashPayment = methodLower === 'cash' || methodLower === 'cash received' || methodLower === 'cash pay' || methodLower.startsWith('cash ');
 
-            let remarkStr = isCashPayment
-              ? `Cash Received on Sale Inv. No.${s.invoice_no || s.id}`
-              : `Bank Received on Sale Inv. No.${s.invoice_no || s.id} (${fullMethod})`;
+          let remarkStr = isCashPayment
+            ? `Cash Received on Sale Inv. No.${s.invoice_no || s.id}`
+            : `Bank Received on Sale Inv. No.${s.invoice_no || s.id} (${fullMethod})`;
 
-            let chqStr = isCashPayment ? 'Cash Received' : fullMethod;
-            if (fullMethod.includes('(')) {
-              const pIdx = fullMethod.indexOf('(');
-              chqStr = fullMethod.substring(pIdx + 1, fullMethod.length - 1).trim();
-            }
-
-            txns.push({
-              id: `sale-pay-${s.id}-${fullMethod}`,
-              date: invDateStr,
-              type: `SV-${s.invoice_no || s.id}`,
-              v_code: s.invoice_no || String(s.id),
-              remarks: remarkStr,
-              cheque_no: chqStr,
-              debit: 0,
-              credit: creditedAmt,
-              raw_date: rawDate,
-              seq: ++seqCounter
-            });
+          let chqStr = isCashPayment ? 'Cash Received' : fullMethod;
+          if (fullMethod.includes('(')) {
+            const pIdx = fullMethod.indexOf('(');
+            chqStr = fullMethod.substring(pIdx + 1, fullMethod.length - 1).trim();
           }
+
+          txns.push({
+            id: `sale-pay-${s.id}-${fullMethod}`,
+            date: invDateStr,
+            type: `SV-${s.invoice_no || s.id}`,
+            v_code: s.invoice_no || String(s.id),
+            remarks: remarkStr,
+            cheque_no: chqStr,
+            debit: 0,
+            credit: amt,   // full typed amount — no cap at invoice total
+            raw_date: rawDate,
+            seq: ++seqCounter
+          });
         }
       }
     }
@@ -2375,13 +2470,13 @@ async function handleIPC(channel, ...args) {
       }
     }
     case 'save-sale': {
-      const { saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes, userId } = data;
+      const { saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes, userId, customerPrevBalance } = data;
       const subTotal = items.reduce((s, i) => s + i.amount, 0);
       const total = subTotal - (discount || 0) + (miscCharges || 0);
       const totalPackets = items.reduce((s, i) => s + i.packets, 0);
 
+      let cId;
       if (customerName) {
-        let cId;
         const existC = await query('SELECT id FROM customers WHERE name = $1', [customerName]);
         if (existC.rows && existC.rows.length > 0) {
           cId = existC.rows[0].id;
@@ -2406,8 +2501,8 @@ async function handleIPC(channel, ...args) {
       }
 
       const sr = await query(
-        'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, misc_charges, payment_method, notes, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id',
-        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null]
+        'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, misc_charges, payment_method, notes, user_id, customer_prev_balance) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id',
+        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null, customerPrevBalance || 0]
       );
       const saleId = sr.rows[0].id;
       for (const item of items) {
@@ -2417,23 +2512,39 @@ async function handleIPC(channel, ...args) {
           [saleId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit, item.discount || 0]
         );
       }
-      broadcast('sales'); broadcast('stock');
-      return { success: true, id: saleId };
+
+      broadcast('sales'); broadcast('stock'); broadcast('customers');
+      return { success: true, id: saleId, invoiceNo: finalInvoiceNo };
     }
     case 'update-sale': {
-      const { id, saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes } = data;
+      const { id, saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes, customerPrevBalance } = data;
       const subTotal = items.reduce((s, i) => s + i.amount, 0);
       const total = subTotal - (discount || 0) + (miscCharges || 0);
       const totalPackets = items.reduce((s, i) => s + i.packets, 0);
-      await query('UPDATE sales SET sale_date=$1, invoice_no=$2, customer_name=$3, customer_phone=$4, total_amount=$5, total_packets=$6, discount=$7, misc_charges=$8, payment_method=$9, notes=$10, updated_at=NOW() WHERE id=$11',
-        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, id]);
+
+      let cId;
+      if (customerName) {
+        const existC = await query('SELECT id FROM customers WHERE name = $1', [customerName]);
+        if (existC.rows && existC.rows.length > 0) {
+          cId = existC.rows[0].id;
+          await query('UPDATE customers SET phone = $2 WHERE id = $1', [cId, customerPhone || '']);
+        } else {
+          const cr = await query('INSERT INTO customers (name, phone) VALUES ($1, $2) RETURNING id', [customerName, customerPhone || '']);
+          cId = cr.rows[0].id;
+        }
+        await query(`INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Customer', $2, 'Dr') ON CONFLICT (account_name) DO NOTHING`, ['Customer - ' + customerName, cId]);
+      }
+
+      await query('UPDATE sales SET sale_date=$1, invoice_no=$2, customer_name=$3, customer_phone=$4, total_amount=$5, total_packets=$6, discount=$7, misc_charges=$8, payment_method=$9, notes=$10, customer_prev_balance=$11, updated_at=NOW() WHERE id=$12',
+        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, customerPrevBalance || 0, id]);
       await query('DELETE FROM sale_items WHERE sale_id=$1', [id]);
       for (const item of items) {
         const profit = (item.saleRate - item.purchaseRate) * item.packets;
         await query('INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
           [id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit, item.discount || 0]);
       }
-      broadcast('sales'); broadcast('stock');
+
+      broadcast('sales'); broadcast('stock'); broadcast('customers');
       return { success: true };
     }
     case 'get-sales': {
@@ -2826,6 +2937,11 @@ async function handleIPC(channel, ...args) {
         const exportData = {};
         for (const t of BACKUP_TABLES) {
           const r = await query(`SELECT * FROM ${t} ORDER BY id`);
+          exportData[t] = r.rows;
+        }
+        // Also backup tables without id column
+        for (const t of BACKUP_TABLES_NO_ID) {
+          const r = await query(`SELECT * FROM ${t}`);
           exportData[t] = r.rows;
         }
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useDataVersion } from '../context/DataContext';
 import './NewSale.css';
 import PaymentModal from './PaymentModal';
 import { PAKISTAN_CITIES } from '../utils/pakistanCities';
@@ -30,7 +31,8 @@ function parsePaymentMethodString(str) {
         }
       }
       result.push({ method: methodFull, accNo, amount });
-    } else if (trimmed && !trimmed.toLowerCase().includes('credit invoice')) {
+    } else {
+      // Include all payment methods including "Credit" and "Credit Invoice"
       result.push({ method: trimmed, accNo: '', amount: 0 });
     }
   }
@@ -39,6 +41,7 @@ function parsePaymentMethodString(str) {
 
 function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, isActive }) {
   const isEditing = !!saleToEdit;
+  const salesVersion = useDataVersion('sales');
 
   const [invoiceNo, setInvoiceNo] = useState('');
   const [saleDate, setSaleDate] = useState(new Date());
@@ -48,6 +51,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const [customerCity, setCustomerCity] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [receivedPayments, setReceivedPayments] = useState([]);
+  const [cashAccountNames, setCashAccountNames] = useState([]); // GL Cash account names for correct invoice print classification
   const [discount, setDiscount] = useState(0);
   const [extraDiscountPct, setExtraDiscountPct] = useState('');
   const [miscCharges, setMiscCharges] = useState(0);
@@ -67,16 +71,16 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const [customerPrevBalance, setCustomerPrevBalance] = useState(0);
 
   useEffect(() => {
-    if (customerName) {
+    if (customerName && !isEditing) {
       ipcRenderer.invoke('get-customer-balance', { customerName, customerId })
         .then(res => {
           setCustomerPrevBalance(res?.balance || 0);
         })
         .catch(() => setCustomerPrevBalance(0));
-    } else {
+    } else if (!customerName) {
       setCustomerPrevBalance(0);
     }
-  }, [customerName, customerId]);
+  }, [customerName, customerId, isEditing]);
 
   // References
   const itemCodeRefs = useRef({});
@@ -167,6 +171,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       setDiscount(s.discount || 0);
       setMiscCharges(s.misc_charges || 0);
       setNotes(s.notes || '');
+      setCustomerPrevBalance(s.customer_prev_balance || 0);
       ipcRenderer.invoke('get-sale-items', s.id).then(async rows => {
         const mapped = rows.map(r => ({
           itemCode: r.item_code,
@@ -195,7 +200,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       const t = setInterval(() => setSaleDate(new Date()), 1000);
       return () => clearInterval(t);
     }
-  }, [saleToEdit]);
+  }, [saleToEdit, salesVersion]);
 
   useEffect(() => {
     ipcRenderer.invoke('get-receipt-settings').then(res => {
@@ -741,7 +746,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     }, 0);
     const totalReturnQty = items.reduce((s, i) => i.isReturn ? s + Math.abs(parseInt(i.packets) || 0) : s, 0);
     const totalReturnAmount = items.reduce((s, i) => i.isReturn ? s + Math.abs(i.amount) : s, 0);
-    const extraDiscountAmt = roundToFive(discount);
+    const extraDiscountAmt = parseFloat(discount) || 0;
     const miscAmt = parseFloat(miscCharges) || 0;
     // Percentage discount is applied on top of the subtotal net of item-level
     // discounts and misc charges, independently of the flat "Extra Disc" amount.
@@ -772,13 +777,19 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       discount: (totals.totalDiscountAmt - totals.itemDiscounts) || 0,
       miscCharges: parseFloat(miscCharges) || 0,
       paymentMethod: paymentMethodStr, notes,
-      userId: currentUser?.id
+      userId: currentUser?.id,
+      customerPrevBalance: customerPrevBalance
     };
     try {
       const result = isEditing
         ? await ipcRenderer.invoke('update-sale', { ...payload, id: saleToEdit.id })
         : await ipcRenderer.invoke('save-sale', payload);
-      if (result.success) onSaveSuccess?.();
+      if (result.success) {
+        if (result.invoiceNo && !isEditing) {
+          setInvoiceNo(result.invoiceNo);
+        }
+        onSaveSuccess?.();
+      }
       else { setMessage(result.error || 'Failed to save'); setIsSubmitting(false); }
     } catch (err) {
       setMessage(err.message || 'Error');
@@ -805,13 +816,19 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   };
 
   const handlePaymentConfirm = async (paymentData) => {
-    const paymentMethodStr = paymentData.payments.map(p => {
-      const accStr = p.accNo ? ` (${p.accNo})` : '';
-      return `${p.method}${accStr}: ${p.amount}`;
-    }).join(', ');
+    const paymentMethodStr = paymentData.payments.length > 0
+      ? paymentData.payments.map(p => {
+          const accStr = p.accNo ? ` (${p.accNo})` : '';
+          return `${p.method}${accStr}: ${p.amount}`;
+        }).join(', ')
+      : 'Credit';
 
     setReceivedPayments(paymentData.payments);
     setPaymentMethod(paymentMethodStr);
+    // Store cash account names so invoice print can classify cash vs bank correctly
+    if (paymentData.cashAccountNames) {
+      setCashAccountNames(paymentData.cashAccountNames);
+    }
 
     await executeSave(paymentMethodStr);
     setPaymentModalOpen(false);
@@ -975,7 +992,28 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       `;
     };
 
-    const finalNetPayable = customerPrevBalance !== 0 ? (totals.grandTotal + customerPrevBalance) : totals.grandTotal;
+    // Calculate payment breakdown
+    // A payment is "cash" if its method is 'Cash Received', 'cash', or matches a known Cash GL account name
+    const knownCashNames = paymentData?.cashAccountNames || cashAccountNames || [];
+    const isCashPaymentMethod = (method) => {
+      if (!method) return false;
+      const m = method.toLowerCase().trim();
+      if (m === 'cash received' || m === 'cash') return true;
+      // Check against known GL cash account names
+      if (knownCashNames.some(n => n.toLowerCase() === method.toLowerCase())) return true;
+      return false;
+    };
+    const payments = paymentData?.payments || [];
+    const cashReceived = payments
+      .filter(p => isCashPaymentMethod(p.method))
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+    const bankReceived = payments
+      .filter(p => !isCashPaymentMethod(p.method))
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+    const totalReceived = cashReceived + bankReceived;
+    const useMasterCashier = (currentUser?.permissions || []).includes('use_master_cashier');
+    const finalNetPayable = (customerPrevBalance !== 0 && useMasterCashier) ? (totals.grandTotal + parseFloat(customerPrevBalance || 0)) : totals.grandTotal;
+    const balanceAmount = finalNetPayable - totalReceived;
 
     // Net Payable + footer notes — reused on every single page so it's
     // always pinned to the bottom of whichever page it's printed on.
@@ -1053,21 +1091,34 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
               ` : ''}
             </div>
           </div>
-          ${(customerPrevBalance !== 0) ? `
+          ${(customerPrevBalance !== 0 && (currentUser?.permissions || []).includes('use_master_cashier')) ? `
             <div class="net-total" style="margin-bottom: 2px;">
               <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
             </div>
             <div class="net-total" style="margin-bottom: 2px;">
-              <strong>Previous Balance:</strong> ${customerPrevBalance > 0 ? '+' : '-'}${formatAmt(Math.abs(customerPrevBalance))}
+              <strong>Previous Balance:</strong> ${customerPrevBalance > 0 ? '+' : '-'}${formatAmt(Math.abs(parseFloat(customerPrevBalance)))}
             </div>
             <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 0; margin-top: 2px;">
-              <strong>Net Payable Total:</strong> ${formatAmt(totals.grandTotal + customerPrevBalance)}
+              <strong>Net Payable Total:</strong> ${formatAmt(totals.grandTotal + parseFloat(customerPrevBalance))}
             </div>
           ` : `
             <div class="net-total">
               <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
             </div>
           `}
+          ${payments.length > 0 ? `
+            <div class="net-total" style="margin-bottom: 2px;">
+              <strong>Cash Received:</strong> ${formatAmt(cashReceived)}
+            </div>
+            ${bankReceived > 0 ? `
+              <div class="net-total" style="margin-bottom: 2px;">
+                <strong>Bank Online/Cheque Received:</strong> ${formatAmt(bankReceived)}
+              </div>
+            ` : ''}
+            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 0; margin-top: 2px;">
+              <strong>Balance Amount:</strong> ${formatAmt(balanceAmount)}
+            </div>
+          ` : ''}
           <div class="signatures">
             <div class="sig-box">
               <div style="text-transform: uppercase;">${currentUser?.username || 'OPERATOR'}</div>
@@ -1563,7 +1614,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
         <div className="footer-discount">
           <span>Extra Disc % (-)</span>
           <input type="number" className="discount-input" value={extraDiscountPct}
-            onChange={e => setExtraDiscountPct(e.target.value)} placeholder="-" />
+            onChange={e => setExtraDiscountPct(e.target.value)} placeholder="%" />
         </div>
         <div className="footer-total-qty">
           <span>Total Items</span>
@@ -1720,15 +1771,16 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
         invoiceNo={invoiceNo}
         grandTotal={totals.grandTotal}
         isEditMode={isEditing}
-        existingPayments={isEditing && receivedPayments ? receivedPayments : null}
+        existingPayments={isEditing ? receivedPayments : null}
         onConfirm={handlePaymentConfirm}
         onCancel={() => setPaymentModalOpen(false)}
         onChange={() => { }}
         cashOnly={false}
         useMasterCashier={(currentUser?.permissions || []).includes('use_master_cashier')}
-        allowCredit={!!customerId}
+        allowCredit={isEditing ? true : !!customerId}
         customerName={customerName}
         customerId={customerId}
+        customerPrevBalance={customerPrevBalance}
       />
 
       {/* Receipt Preview Modal */}

@@ -31,7 +31,8 @@
   background: #ffffff;
   width: 100%;
   max-width: 1050px;
-  min-height: 297mm;
+  height: fit-content;
+  min-height: 100%;
   padding: 30px 45px;
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
   font-family: 'Times New Roman', Times, serif;

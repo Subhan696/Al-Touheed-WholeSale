@@ -20,33 +20,57 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
         const banks = accounts.filter(a => a.account_type === 'Bank').map(a => a.account_name);
         setBankMethods(banks);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const availableMethods = useMemo(() => {
+    let methods = [];
     if (bankMethods.length > 0) {
-      return ['Cash Received', ...bankMethods];
+      methods = ['Cash Received', ...bankMethods];
+    } else {
+      methods = [...PRESET_METHODS];
     }
-    return PRESET_METHODS;
-  }, [bankMethods]);
+    // When editing, ensure existing payment methods are available even if not in current list
+    if (isEditMode && existingPayments && existingPayments.length > 0) {
+      existingPayments.forEach(p => {
+        if (p.method && !methods.includes(p.method)) {
+          methods.push(p.method);
+        }
+      });
+    }
+    return methods;
+  }, [bankMethods, isEditMode, existingPayments]);
 
   const setDefaultAccount = (method, accNo) => {
     const updated = { ...defaultAccounts, [method]: accNo };
     setDefaultAccounts(updated);
-    ipcRenderer.invoke('save-payment-accounts', { savedAccounts, defaultAccounts: updated }).catch(() => {});
+    ipcRenderer.invoke('save-payment-accounts', { savedAccounts, defaultAccounts: updated }).catch(() => { });
   };
 
   const total = Math.round(grandTotal) || 0;
-  const totalReceived = lines.reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0);
+
+  // Cash Received always settles whatever the bank lines don't cover — the
+  // typed Cash Received amount is only used to work out change to hand back,
+  // it never determines how much actually gets posted. Bank lines, on the
+  // other hand, post exactly what was typed regardless of the invoice total.
+  const cashLinesAmount = lines
+    .filter(line => line.method === 'Cash Received')
+    .reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0);
+  const bankLinesAmount = lines
+    .filter(line => line.method !== 'Cash Received')
+    .reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0);
+  const requiredCash = Math.max(total - bankLinesAmount, 0);
+
+  const totalReceived = cashLinesAmount + bankLinesAmount;
   const hasInput = lines.some(line => line.amount !== '');
-  const change = hasInput ? totalReceived - total : 0;
+  const change = hasInput ? cashLinesAmount - requiredCash : 0;
   const canConfirm = totalReceived >= total && totalReceived > 0;
 
   const saveAccountToHistory = (acc) => {
     if (!acc || savedAccounts.includes(acc)) return;
     const newAccs = [...savedAccounts, acc];
     setSavedAccounts(newAccs);
-    ipcRenderer.invoke('save-payment-accounts', { savedAccounts: newAccs, defaultAccounts }).catch(() => {});
+    ipcRenderer.invoke('save-payment-accounts', { savedAccounts: newAccs, defaultAccounts }).catch(() => { });
   };
 
   useEffect(() => {
@@ -58,7 +82,7 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
         setSavedAccounts(data.savedAccounts || []);
         setDefaultAccounts(data.defaultAccounts || {});
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     const roundedTotal = Math.round(grandTotal);
     if (existingPayments && existingPayments.length > 0) {
@@ -66,9 +90,11 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
         return { id: Date.now() + i, method: p.method, accNo: p.accNo || '', amount: p.amount };
       });
 
-      // Smart adjustment: If there's only one payment line and it doesn't match the new total,
-      // auto-adjust it so the user doesn't have to re-type.
-      if (paymentsArray.length === 1 && Math.round(paymentsArray[0].amount) !== roundedTotal) {
+      // Smart adjustment: If there's only one payment line and it's Cash Received,
+      // auto-adjust it so the user doesn't have to re-type. Don't adjust bank/JazzCash payments.
+      if (paymentsArray.length === 1 && 
+          paymentsArray[0].method === 'Cash Received' && 
+          Math.round(paymentsArray[0].amount) !== roundedTotal) {
         paymentsArray[0].amount = roundedTotal;
       }
 
@@ -87,20 +113,30 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
     if (!canConfirm || isSubmitting) return;
     setIsSubmitting(true);
 
-    const validPayments = lines
-      .filter(line => (parseFloat(line.amount) || 0) > 0)
-      .map(line => {
-        const isCash = line.method === 'Cash Received';
-        if (line.accNo && !isCash) saveAccountToHistory(line.accNo);
-        return {
-          method: line.method || 'Cash Received',
-          accNo: isCash ? '' : line.accNo,
-          amount: parseFloat(line.amount) || 0
-        };
+    // Bank lines are posted exactly as entered, whatever the invoice total is.
+    const bankLines = lines.filter(line => line.method !== 'Cash Received' && (parseFloat(line.amount) || 0) > 0);
+    const totalBankAmount = bankLines.reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0);
+
+    // Cash always posts exactly enough to fully settle the invoice (total minus
+    // whatever the bank lines already cover) — never the raw typed amount,
+    // which may include extra cash tendered that's actually change owed back.
+    const cashPortion = Math.max(total - totalBankAmount, 0);
+
+    const validPayments = [];
+    if (cashPortion > 0) {
+      validPayments.push({ method: 'Cash Received', accNo: '', amount: cashPortion });
+    }
+    bankLines.forEach(line => {
+      if (line.accNo) saveAccountToHistory(line.accNo);
+      validPayments.push({
+        method: line.method || 'Cash Received',
+        accNo: line.accNo,
+        amount: parseFloat(line.amount) || 0
       });
+    });
 
     try {
-      await Promise.resolve(onConfirm({ payments: validPayments, totalReceived, change }));
+      await Promise.resolve(onConfirm({ payments: validPayments, totalReceived: cashPortion + totalBankAmount, change }));
     } finally {
       setIsSubmitting(false);
     }
@@ -230,28 +266,32 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
   );
 }
 
-function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayments, onConfirm, onCancel, cashOnly, allowCredit, customerName, customerId }) {
+function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayments, onConfirm, onCancel, cashOnly, allowCredit, customerName, customerId, customerPrevBalance }) {
   const [cashAccounts, setCashAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
-  
+
   const [selectedCashAcc, setSelectedCashAcc] = useState('');
   const [cashAmount, setCashAmount] = useState('');
-  
-  const [bankPayments, setBankPayments] = useState({});
+
+  const [bankRows, setBankRows] = useState([]); // [{id, accountName, amount, remarks}]
   const [custBalance, setCustBalance] = useState(null);
 
   useEffect(() => {
-    if (customerName || customerId) {
+    // When editing, use the stored customerPrevBalance from the invoice
+    // When creating new invoice, fetch current balance
+    if (isEditMode && customerPrevBalance !== undefined) {
+      setCustBalance(customerPrevBalance);
+    } else if (customerName || customerId) {
       ipcRenderer.invoke('get-customer-balance', { customerName, customerId })
         .then(res => {
           if (res && res.balance !== undefined) {
             setCustBalance(res.balance);
           }
-        }).catch(() => {});
+        }).catch(() => { });
     } else {
       setCustBalance(null);
     }
-  }, [customerName, customerId]);
+  }, [customerName, customerId, isEditMode, customerPrevBalance]);
 
   useEffect(() => {
     const fetchAccounts = async () => {
@@ -259,35 +299,68 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
         const glAccounts = await ipcRenderer.invoke('get-gl-accounts') || [];
         const cashAccs = glAccounts.filter(a => a.account_type === 'Cash');
         const bankAccs = glAccounts.filter(a => a.account_type === 'Bank');
-        
+
         setCashAccounts(cashAccs);
         setBankAccounts(bankAccs);
 
+        // Set default cash account
         if (cashAccs.length > 0) {
           setSelectedCashAcc(cashAccs[0].account_name);
         }
-        
-        // Parse existing payments
-        if (isEditMode && existingPayments) {
-          let initialBankPayments = {};
+
+        // Parse existing payments when editing
+        if (isEditMode) {
+          const payments = Array.isArray(existingPayments) ? existingPayments : [];
+
+          // If no payments exist or only "Credit" with 0 amount (was a credit invoice) — leave fields empty
+          const isCreditInvoice = payments.length === 0 ||
+            (payments.length === 1 && payments[0].method.toLowerCase() === 'credit' && parseFloat(payments[0].amount || 0) === 0);
+
+          if (isCreditInvoice) {
+            setCashAmount('');
+            setBankRows([]);
+            return;
+          }
+
+          let initialBankRows = [];
           let totalCashFound = 0;
           let cashMethodUsed = '';
-          
-          if (Array.isArray(existingPayments) && existingPayments.length > 0) {
-            existingPayments.forEach(p => {
-              const matchedBank = bankAccs.find(b => b.account_name === p.method || p.method.includes(b.account_name) || b.account_name.includes(p.method));
-              if (matchedBank) {
-                initialBankPayments[matchedBank.account_name] = { amount: p.amount, remarks: p.accNo || '' };
-              } else {
-                totalCashFound += parseFloat(p.amount) || 0;
-                if (p.method) cashMethodUsed = p.method;
-              }
-            });
-          }
-          
-          if (cashMethodUsed) setSelectedCashAcc(cashMethodUsed);
-          setCashAmount(totalCashFound > 0 ? totalCashFound.toString() : '0');
-          setBankPayments(initialBankPayments);
+
+          payments.forEach((p, i) => {
+            // Try to match this payment entry to a known bank account
+            const matchedBank = bankAccs.find(b =>
+              b.account_name === p.method ||
+              p.method.toLowerCase().includes(b.account_name.toLowerCase()) ||
+              b.account_name.toLowerCase().includes(p.method.toLowerCase())
+            );
+            if (matchedBank) {
+              initialBankRows.push({
+                id: `bankrow-${Date.now()}-${i}`,
+                accountName: matchedBank.account_name,
+                amount: String(p.amount || ''),
+                remarks: p.accNo || ''
+              });
+            } else {
+              // Treat as cash
+              totalCashFound += parseFloat(p.amount) || 0;
+              if (p.method && p.method !== 'Cash Received') cashMethodUsed = p.method;
+            }
+          });
+
+          // Restore the correct cash account name if it's one of our GL cash accounts
+          const matchedCashAcc = cashAccs.find(c =>
+            c.account_name === cashMethodUsed ||
+            cashMethodUsed.toLowerCase().includes(c.account_name.toLowerCase())
+          );
+          if (matchedCashAcc) setSelectedCashAcc(matchedCashAcc.account_name);
+          else if (cashMethodUsed) setSelectedCashAcc(cashMethodUsed);
+
+          setCashAmount(totalCashFound > 0 ? totalCashFound.toString() : '');
+          setBankRows(initialBankRows);
+        } else {
+          // For a new invoice, clear cash amount so leaving it empty saves as a credit invoice
+          setCashAmount('');
+          setBankRows([]);
         }
       } catch (err) {
         console.error('Failed to fetch GL accounts', err);
@@ -297,26 +370,36 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
   }, [isEditMode, existingPayments]);
 
   const totalBankAmount = useMemo(() => {
-    return Object.values(bankPayments).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-  }, [bankPayments]);
+    return bankRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+  }, [bankRows]);
 
   const parsedCashAmount = parseFloat(cashAmount) || 0;
   const totalReceived = parsedCashAmount + totalBankAmount;
   const invoiceBalance = grandTotal - totalReceived;
 
-  const handleBankInputChange = (accountName, field, value) => {
-    setBankPayments(prev => ({
-      ...prev,
-      [accountName]: {
-        ...prev[accountName],
-        [field]: value
-      }
-    }));
+  const usedBankNames = useMemo(() => new Set(bankRows.map(r => r.accountName)), [bankRows]);
+  const availableBankAccounts = useMemo(
+    () => bankAccounts.filter(a => !usedBankNames.has(a.account_name)),
+    [bankAccounts, usedBankNames]
+  );
+
+  const updateBankRow = (id, field, value) => {
+    setBankRows(prev => prev.map(r => (r.id === id ? { ...r, [field]: value } : r)));
+  };
+
+  const addBankRow = () => {
+    const next = availableBankAccounts[0];
+    if (!next) return;
+    setBankRows(prev => [...prev, { id: `bankrow-${Date.now()}-${Math.random()}`, accountName: next.account_name, amount: '', remarks: '' }]);
+  };
+
+  const removeBankRow = (id) => {
+    setBankRows(prev => prev.filter(r => r.id !== id));
   };
 
   const handleConfirm = () => {
     const validPayments = [];
-    
+
     // Add Cash Payment
     if (parsedCashAmount > 0) {
       validPayments.push({
@@ -327,19 +410,21 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
     }
 
     // Add Bank Payments
-    Object.entries(bankPayments).forEach(([accName, data]) => {
-      const amt = parseFloat(data.amount);
+    bankRows.forEach(row => {
+      const amt = parseFloat(row.amount);
       if (amt > 0) {
         validPayments.push({
-          method: accName,
-          accNo: data.remarks || '',
+          method: row.accountName,
+          accNo: row.remarks || '',
           amount: amt
         });
       }
     });
-    
+
     const change = totalReceived > grandTotal ? totalReceived - grandTotal : 0;
-    onConfirm({ payments: validPayments, totalReceived, change });
+    // Pass the list of cash account names so callers can classify payments correctly
+    const cashAccountNames = cashAccounts.map(a => a.account_name);
+    onConfirm({ payments: validPayments, totalReceived, change, cashAccountNames });
   };
 
   const fillCashAmount = () => {
@@ -355,16 +440,21 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
       <div className="payment-modal-body">
         <div className="pm-top-section">
           {isEditMode && totalReceived === 0 && (
-            <div style={{ background: '#fffbebe6', color: '#b45309', border: '1px solid #fcd34d', padding: '6px 12px', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 700, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>📝</span> Saved as Credit Invoice (Unpaid / Balance on Customer Account)
+            <div className="pm-status-banner pm-status-banner-warn">
+              <span>📝</span> Saved as <strong>Credit Invoice</strong> — fill amounts to convert to paid.
+            </div>
+          )}
+          {isEditMode && totalReceived > 0 && (
+            <div className="pm-status-banner pm-status-banner-ok">
+              <span>✏️</span> Previous payment: <strong>PKR {totalReceived.toLocaleString()}</strong> — adjust or clear to save as credit.
             </div>
           )}
 
           {customerName && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9', padding: '8px 12px', borderRadius: '6px', marginBottom: '12px', border: '1px solid #cbd5e1' }}>
-              <span style={{ fontSize: '0.9rem', color: '#1e293b', fontWeight: 700 }}>👤 Customer: {customerName}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9', padding: '6px 10px', borderRadius: '6px', marginBottom: '6px', border: '1px solid #cbd5e1' }}>
+              <span style={{ fontSize: '0.85rem', color: '#1e293b', fontWeight: 700 }}>👤 Customer: {customerName}</span>
               {custBalance !== null && (
-                <span style={{ fontSize: '0.9rem', fontWeight: 800, color: custBalance > 0 ? '#dc2626' : custBalance < 0 ? '#059669' : '#475569' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: custBalance > 0 ? '#dc2626' : custBalance < 0 ? '#059669' : '#475569' }}>
                   Prev Bal: {custBalance > 0 ? `+${custBalance.toLocaleString()} (Due)` : custBalance < 0 ? `${custBalance.toLocaleString()} (Adv)` : 'PKR 0'}
                 </span>
               )}
@@ -378,19 +468,19 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
               {cashAccounts.map(a => <option key={a.id} value={a.account_name}>{a.account_name}</option>)}
             </select>
           </div>
-          
+
           <div className="pm-summary-row pm-total-row">
             <label>Invoice Total</label>
             <div className="pm-val">{grandTotal.toLocaleString()}</div>
           </div>
-          
+
           <div className="pm-summary-row">
-            <label style={{cursor:'pointer', color:'#4f46e5'}} onClick={fillCashAmount}>Cash Amount</label>
-            <input 
-              type="number" 
-              className="pm-input" 
-              value={cashAmount} 
-              onChange={e => setCashAmount(e.target.value)} 
+            <label style={{ cursor: 'pointer', color: '#4f46e5' }} onClick={fillCashAmount}>Cash Amount</label>
+            <input
+              type="number"
+              className="pm-input"
+              value={cashAmount}
+              onChange={e => setCashAmount(e.target.value)}
               placeholder="0"
               autoFocus
             />
@@ -398,39 +488,73 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
         </div>
 
         {!cashOnly && bankAccounts.length > 0 && (
-          <div className="pm-bank-grid">
-            <div className="pm-grid-header">
-              <div className="pm-grid-cell">#</div>
-              <div className="pm-grid-cell">Bank Account</div>
-              <div className="pm-grid-cell">Amount</div>
-              <div className="pm-grid-cell">Remarks</div>
-            </div>
-            <div className="pm-bank-grid-scroll">
-              {bankAccounts.map((acc, idx) => (
-                <div className="pm-grid-row" key={acc.id}>
-                  <div className="pm-grid-cell" style={{ justifyContent: 'center' }}>{idx + 1}</div>
-                  <div className="pm-grid-cell" style={{ fontWeight: 600 }}>{acc.account_name}</div>
-                  <div className="pm-grid-cell" style={{ padding: '2px' }}>
-                    <input 
-                      type="number" 
-                      className="pm-grid-input amount" 
-                      placeholder="0.00" 
-                      value={bankPayments[acc.account_name]?.amount || ''}
-                      onChange={e => handleBankInputChange(acc.account_name, 'amount', e.target.value)}
-                    />
-                  </div>
-                  <div className="pm-grid-cell" style={{ padding: '2px' }}>
-                    <input 
-                      type="text" 
-                      className="pm-grid-input remarks" 
-                      placeholder="..." 
-                      value={bankPayments[acc.account_name]?.remarks || ''}
-                      onChange={e => handleBankInputChange(acc.account_name, 'remarks', e.target.value)}
-                    />
-                  </div>
+          <div className="pm-bank-section">
+            {bankRows.length > 0 && (
+              <div className="pm-bank-grid">
+                <div className="pm-grid-header">
+                  <div className="pm-grid-cell">#</div>
+                  <div className="pm-grid-cell">Bank Account</div>
+                  <div className="pm-grid-cell">Amount</div>
+                  <div className="pm-grid-cell">Remarks</div>
+                  <div className="pm-grid-cell pm-grid-cell-actions"></div>
                 </div>
-              ))}
-            </div>
+                <div className="pm-bank-grid-scroll">
+                  {bankRows.map((row, idx) => (
+                    <div className="pm-grid-row" key={row.id}>
+                      <div className="pm-grid-cell" style={{ justifyContent: 'center' }}>{idx + 1}</div>
+                      <div className="pm-grid-cell" style={{ padding: '2px' }}>
+                        <select
+                          className="pm-grid-select"
+                          value={row.accountName}
+                          onChange={e => updateBankRow(row.id, 'accountName', e.target.value)}
+                          title="Select Bank Account"
+                        >
+                          <option value={row.accountName}>{row.accountName}</option>
+                          {availableBankAccounts.map(a => (
+                            <option key={a.id} value={a.account_name}>{a.account_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="pm-grid-cell" style={{ padding: '2px' }}>
+                        <input
+                          type="number"
+                          className="pm-grid-input amount"
+                          placeholder="0.00"
+                          value={row.amount}
+                          onChange={e => updateBankRow(row.id, 'amount', e.target.value)}
+                        />
+                      </div>
+                      <div className="pm-grid-cell" style={{ padding: '2px' }}>
+                        <input
+                          type="text"
+                          className="pm-grid-input remarks"
+                          placeholder="..."
+                          value={row.remarks}
+                          onChange={e => updateBankRow(row.id, 'remarks', e.target.value)}
+                        />
+                      </div>
+                      <div className="pm-grid-cell pm-grid-cell-actions">
+                        <button
+                          type="button"
+                          className="pm-grid-remove-btn"
+                          onClick={() => removeBankRow(row.id)}
+                          aria-label="Remove bank payment"
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {availableBankAccounts.length > 0 && (
+              <button type="button" className="pm-add-split-btn" onClick={addBankRow}>
+                + Add Split Payment
+              </button>
+            )}
           </div>
         )}
 
@@ -439,8 +563,8 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
             <label>Invoice Balance</label>
             {custBalance !== null && (
               <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                New Customer Balance: <strong style={{ color: (custBalance + invoiceBalance) > 0 ? '#dc2626' : (custBalance + invoiceBalance) < 0 ? '#059669' : '#111827' }}>
-                  {(custBalance + invoiceBalance) > 0 ? `+${(custBalance + invoiceBalance).toLocaleString()} (Due)` : (custBalance + invoiceBalance) < 0 ? `${(custBalance + invoiceBalance).toLocaleString()} (Adv)` : 'PKR 0'}
+                New Customer Balance: <strong style={{ color: (parseFloat(custBalance) + invoiceBalance) > 0 ? '#dc2626' : (parseFloat(custBalance) + invoiceBalance) < 0 ? '#059669' : '#111827' }}>
+                  {(parseFloat(custBalance) + invoiceBalance) > 0 ? `+${(parseFloat(custBalance) + invoiceBalance).toLocaleString()} (Due)` : (parseFloat(custBalance) + invoiceBalance) < 0 ? `${(parseFloat(custBalance) + invoiceBalance).toLocaleString()} (Adv)` : 'PKR 0'}
                 </strong>
               </span>
             )}
@@ -450,11 +574,11 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
           </div>
         </div>
       </div>
-      
+
       <div className="payment-modal-footer">
         <button className="btn ghost" onClick={onCancel}>Cancel</button>
-        <button 
-          className="btn primary" 
+        <button
+          className="btn primary"
           onClick={handleConfirm}
           disabled={allowCredit ? false : totalReceived < grandTotal}
         >

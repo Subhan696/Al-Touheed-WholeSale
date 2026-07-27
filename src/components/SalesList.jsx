@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useDataVersion } from '../context/DataContext';
 import './SalesList.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -9,6 +10,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedRowRef = useRef(null);
+  const version = useDataVersion('sales');
 
   const [filterDate, setFilterDate] = useState(() => {
     const today = new Date();
@@ -22,7 +24,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
     if (isActive) {
       load();
     }
-  }, [isActive]);
+  }, [isActive, version]);
 
   const load = async () => {
     setLoading(true);
