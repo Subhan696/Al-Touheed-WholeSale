@@ -630,7 +630,7 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
               <input ref={invoiceRef} type="text" value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} onKeyDown={e => handleHeaderKD(e, 'invoice')} placeholder="Inv #" className="form-input" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
             </div>
             <div className="form-group" style={{ width: 100 }}>
-              <label style={{ fontSize: '0.75rem' }}>Date</label>
+              <label style={{ fontSize: '0.75rem' }}>Supplier Date</label>
               <input ref={dateRef} type="text" value={purchaseDate} onChange={handleDateChange} onKeyDown={e => handleHeaderKD(e, 'date')} placeholder="DD-MM-YYYY" className="form-input center-text" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
             </div>
             <div className="form-group flex-grow" style={{ minWidth: 200 }}>

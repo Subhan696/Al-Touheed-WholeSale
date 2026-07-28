@@ -113,7 +113,7 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
             ) : filtered.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ ...td, fontWeight: 'bold', color: '#3699ff' }}>#{p.id}</td>
-                <td style={td}>{p.purchase_date instanceof Date ? p.purchase_date.toISOString().split('T')[0] : (typeof p.purchase_date === 'string' ? p.purchase_date.split('T')[0] : '—')}</td>
+                <td style={td}>{p.created_at instanceof Date ? p.created_at.toISOString().split('T')[0] : (typeof p.created_at === 'string' ? p.created_at.split('T')[0] : '—')}</td>
                 <td style={td}>{p.invoice_no || '—'}</td>
                 <td style={td}>{p.supplier_name}</td>
                 <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#555' }}>{p.total_qty || 0}</td>

@@ -30,10 +30,10 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   };
 
   const [purchaseDate, setPurchaseDate] = useState(todayDMY);
+  const [supplierDate, setSupplierDate] = useState(todayDMY);
   const [invoiceNo, setInvoiceNo] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierInvNo, setSupplierInvNo] = useState('');
-  const [supplierDate, setSupplierDate] = useState('');
   const [vehicleNo, setVehicleNo] = useState('');
   const [godown, setGodown] = useState('1-SHOP');
   const [notes, setNotes] = useState('');
@@ -111,10 +111,26 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         const [y, m, d] = raw.split('-');
         setPurchaseDate(`${d}-${m}-${y}`);
       }
+      let rawSupplierDate = '';
+      if (p.supplier_date instanceof Date) {
+        // Use local date parts to avoid UTC conversion
+        const d = String(p.supplier_date.getDate()).padStart(2, '0');
+        const m = String(p.supplier_date.getMonth() + 1).padStart(2, '0');
+        const y = p.supplier_date.getFullYear();
+        rawSupplierDate = `${y}-${m}-${d}`;
+      } else if (typeof p.supplier_date === 'string') {
+        rawSupplierDate = p.supplier_date;
+      }
+      console.log('[FRONTEND LOAD] supplier_date from DB:', p.supplier_date, '→ rawSupplierDate:', rawSupplierDate);
+      if (rawSupplierDate) {
+        const [y, m, d] = rawSupplierDate.split('-');
+        setSupplierDate(`${d}-${m}-${y}`);
+      } else {
+        setSupplierDate(''); // Keep empty if not set, don't default to today
+      }
       setInvoiceNo(p.invoice_no || '');
       setSupplierName(p.supplier_name || '');
       setSupplierInvNo(p.supplier_inv_no || '');
-      setSupplierDate(p.supplier_date || '');
       setVehicleNo(p.vehicle_no || '');
       setGodown(p.godown || '1-SHOP');
       setBltNumber(p.blt_number || '');
@@ -184,17 +200,28 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const handleDateChange = (e) => {
     let val = e.target.value;
     // Allow user to delete back
-    if (val.length < purchaseDate.length) {
-      setPurchaseDate(val);
+    if (val.length < supplierDate.length) {
+      setSupplierDate(val);
       return;
     }
 
     // Auto-insert hyphen
     val = val.replace(/[^0-9-]/g, '');
+    
+    // If 2 digits and no hyphen, add hyphen (after day)
     if (val.length === 2 && !val.includes('-')) val += '-';
+    // Smart month formatting: if single digit (2-9) after hyphen, pad with 0 and add hyphen
+    if (val.length === 4 && val.includes('-') && !val.endsWith('-')) {
+      const monthDigit = val.split('-')[1];
+      if (monthDigit.length === 1 && parseInt(monthDigit) >= 2) {
+        val = val.split('-')[0] + '-' + monthDigit.padStart(2, '0') + '-';
+      }
+    }
+    // If 5 characters with 2 hyphens, add final hyphen for year
     if (val.length === 5 && val.split('-').length === 2) val += '-';
+    
     // Limit length to DD-MM-YYYY (10 chars)
-    if (val.length <= 10) setPurchaseDate(val);
+    if (val.length <= 10) setSupplierDate(val);
   };
 
   const handleHeaderKD = (e, field) => {
@@ -437,11 +464,11 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
 
   const resetForm = () => {
     setPurchaseDate(todayDMY());
+    setSupplierDate(todayDMY());
     setInvoiceNo('');
     setSupplierName('');
     setSupplierInvNo('');
     setBltNumber('');
-    setSupplierDate('');
     setVehicleNo('');
     setGodown('1-SHOP');
     setNotes('');
@@ -547,14 +574,25 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
 
     try {
       // DD-MM-YYYY → YYYY-MM-DD for DB
-      let dbDate = purchaseDate;
-      if (purchaseDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
+      let dbSupplierDate = null;
+      if (supplierDate && supplierDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
+        const [d, m, y] = supplierDate.split('-');
+        dbSupplierDate = `${y}-${m}-${d}`;
+      }
+      console.log('[FRONTEND] supplierDate input:', supplierDate, '→ dbSupplierDate:', dbSupplierDate);
+      // For new purchases, use today's date for purchase_date (created_at will track actual save time)
+      // For edits, preserve original purchase_date to avoid changing historical data
+      let dbPurchaseDate = purchaseDate;
+      if (!isEditing) {
+        dbPurchaseDate = new Date().toISOString().split('T')[0];
+      } else if (purchaseDate && purchaseDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
         const [d, m, y] = purchaseDate.split('-');
-        dbDate = `${y}-${m}-${d}`;
+        dbPurchaseDate = `${y}-${m}-${d}`;
       }
       const payload = {
-        purchaseDate: dbDate, invoiceNo, supplierName, notes,
-        supplierInvNo, supplierDate, vehicleNo, godown, bltNumber,
+        purchaseDate: dbPurchaseDate,
+        invoiceNo, supplierName, notes,
+        supplierInvNo, supplierDate: dbSupplierDate, vehicleNo, godown, bltNumber,
         discount: parseFloat(discount) || 0,
         miscCharges: parseFloat(miscCharges) || 0,
         purchaseExpenseTotal: parseFloat(purchaseExpenseTotal) || 0,
@@ -734,8 +772,8 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
               <input ref={invoiceRef} type="text" value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} onKeyDown={e => handleHeaderKD(e, 'invoice')} placeholder="Inv #" className="form-input" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
             </div>
             <div className="form-group" style={{ width: 100 }}>
-              <label style={{ fontSize: '0.75rem' }}>Date</label>
-              <input ref={dateRef} type="text" value={purchaseDate} onChange={handleDateChange} onKeyDown={e => handleHeaderKD(e, 'date')} placeholder="DD-MM-YYYY" className="form-input center-text" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
+              <label style={{ fontSize: '0.75rem' }}>Supplier Date</label>
+              <input ref={dateRef} type="text" value={supplierDate} onChange={handleDateChange} onKeyDown={e => handleHeaderKD(e, 'date')} placeholder="DD-MM-YYYY" className="form-input center-text" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
             </div>
             <div className="form-group flex-grow" style={{ minWidth: 200 }}>
               <label style={{ fontSize: '0.75rem' }}>Supplier Name *</label>

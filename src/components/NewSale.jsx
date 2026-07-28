@@ -1091,7 +1091,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
               ` : ''}
             </div>
           </div>
-          ${(customerPrevBalance !== 0 && (currentUser?.permissions || []).includes('use_master_cashier')) ? `
+          ${(customerPrevBalance && parseFloat(customerPrevBalance) !== 0 && (currentUser?.permissions || []).includes('use_master_cashier')) ? `
             <div class="net-total" style="margin-bottom: 2px;">
               <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
             </div>
