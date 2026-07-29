@@ -253,7 +253,7 @@ async function runRestore(fileToRestore, skipBackup = false) {
 
     // Broadcast updates to all relevant listeners
     for (const ch of ['stock', 'purchases', 'sales', 'purchase-returns', 'sales-returns',
-                       'customers', 'suppliers', 'gl-accounts', 'vouchers']) {
+      'customers', 'suppliers', 'gl-accounts', 'vouchers']) {
       broadcast(ch);
     }
     isRestoring = false;
@@ -265,7 +265,7 @@ async function runRestore(fileToRestore, skipBackup = false) {
     return { success: true, message: 'Database restored successfully!' };
   } catch (err) {
     isRestoring = false;
-    try { await query('ROLLBACK'); } catch (_) {}
+    try { await query('ROLLBACK'); } catch (_) { }
     console.error('[Restore] Error:', err);
     return { success: false, error: 'Restore failed: ' + err.message };
   }
@@ -506,6 +506,7 @@ async function initDatabase() {
       );
 
       ALTER TABLE manufacturer_brands ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) NOT NULL DEFAULT 0;
+      ALTER TABLE manufacturer_brands ADD COLUMN IF NOT EXISTS supplier_id INTEGER;
 
       CREATE TABLE IF NOT EXISTS profit_rules (
       id SERIAL PRIMARY KEY,
@@ -1864,11 +1865,24 @@ async function handleIPC(channel, ...args) {
 
     // ── MANUFACTURER BRANDS (PURCHASE DISCOUNTS) ──
     case 'get-manufacturer-brands': {
-      const r = await query('SELECT * FROM manufacturer_brands ORDER BY company_name, brand_name');
+      const r = await query(`
+        SELECT mb.*, s.name AS supplier_name
+        FROM manufacturer_brands mb
+        LEFT JOIN suppliers s ON s.id = mb.supplier_id
+        ORDER BY mb.company_name, mb.brand_name
+      `);
       return r.rows;
     }
     case 'get-raw-manufacturer-brands': {
-      const r = await query('SELECT * FROM manufacturer_brands');
+      const r = await query(`
+        SELECT mb.*, s.name AS supplier_name
+        FROM manufacturer_brands mb
+        LEFT JOIN suppliers s ON s.id = mb.supplier_id
+      `);
+      return r.rows;
+    }
+    case 'get-suppliers-list': {
+      const r = await query('SELECT id, name FROM suppliers ORDER BY name');
       return r.rows;
     }
     case 'save-manufacturer-discounts-bulk': {
@@ -1881,13 +1895,14 @@ async function handleIPC(channel, ...args) {
           const b = row.brand || '';
           const pd = parseFloat(row.discount_pct) || 0;
           const da = parseFloat(row.discount_amount) || 0;
+          const supplierId = row.supplier_id ? parseInt(row.supplier_id) : null;
           if (!mfg || !b) continue;
 
           await query(
-            `INSERT INTO manufacturer_brands (company_name, brand_name, purchase_discount_pct, discount_amount)
-             VALUES ($1,$2,$3,$4)
+            `INSERT INTO manufacturer_brands (company_name, brand_name, purchase_discount_pct, discount_amount, supplier_id)
+             VALUES ($1,$2,$3,$4,$5)
              ON CONFLICT (company_name, brand_name) DO NOTHING`,
-            [mfg, b, pd, da]
+            [mfg, b, pd, da, supplierId]
           );
         }
         await query('COMMIT');
@@ -3498,6 +3513,71 @@ async function handleIPC(channel, ...args) {
       }
     }
 
+    case 'get-supplier-stock-report': {
+      try {
+        const res = await query(`
+          SELECT * FROM (
+            SELECT
+              p.item_code,
+              p.description,
+              p.category,
+              p.size_range,
+              p.brand,
+              p.year,
+              CASE
+                WHEN s.name IS NOT NULL THEN s.name
+                WHEN s2.name IS NOT NULL THEN s2.name
+                WHEN NULLIF(p.brand, '') IS NOT NULL THEN 'Unmapped: ' || p.brand
+                ELSE 'Unassigned'
+              END AS supplier_name,
+              p.purchase_rate AS list_rate,
+              p.sale_rate,
+              CAST((
+                COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
+              ) AS INTEGER) AS stock_packets,
+              CASE
+                WHEN COALESCE(net_cost.total_packets, 0) > 0 THEN net_cost.total_net_amount / net_cost.total_packets
+                ELSE p.purchase_rate
+              END AS actual_rate
+            FROM products p
+            LEFT JOIN manufacturer_brands mb ON LOWER(TRIM(mb.brand_name)) = LOWER(TRIM(p.brand))
+            LEFT JOIN suppliers s ON s.id = mb.supplier_id
+            LEFT JOIN suppliers s2 ON LOWER(TRIM(s2.name)) = LOWER(TRIM(mb.company_name))
+            LEFT JOIN (
+              SELECT pi.item_code, SUM(pi.packets) as qty
+              FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
+              WHERE pu.is_posted = 1
+              GROUP BY pi.item_code
+            ) purchases ON purchases.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(packets) as qty FROM sale_items GROUP BY item_code
+            ) sales ON sales.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(packets) as qty FROM purchase_return_items GROUP BY item_code
+            ) returns_out ON returns_out.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(packets) as qty FROM sales_return_items GROUP BY item_code
+            ) returns_in ON returns_in.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
+            ) adjustments ON adjustments.item_code = p.item_code
+            LEFT JOIN (
+              SELECT pi.item_code, SUM(pi.packets) as total_packets, SUM(pi.net_rate * pi.packets) as total_net_amount
+              FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
+              WHERE pu.is_posted = 1 AND pi.net_rate > 0
+              GROUP BY pi.item_code
+            ) net_cost ON net_cost.item_code = p.item_code
+          ) stock_data
+          WHERE stock_packets > 0
+          ORDER BY supplier_name, category, item_code
+        `);
+        return res.rows;
+      } catch (err) {
+        console.error('Error in get-supplier-stock-report:', err);
+        return { error: err.message };
+      }
+    }
+
     case 'get-stock-report': {
       try {
         const res = await query(`
@@ -3788,7 +3868,7 @@ function registerIPC() {
     'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-products-chunked', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo', 'start-new-item-session', 'get-item-sessions', 'get-products-by-session', 'get-products-by-session-range', 'check-duplicate-product',
     'get-companies', 'save-company', 'delete-company',
     'get-profit-rules', 'save-profit-rule', 'delete-profit-rule',
-    'get-manufacturer-brands', 'get-raw-manufacturer-brands', 'save-manufacturer-discounts-bulk',
+    'get-manufacturer-brands', 'get-raw-manufacturer-brands', 'save-manufacturer-discounts-bulk', 'get-suppliers-list',
     'get-overall-profit', 'save-overall-profit', 'confirm-dialog', 'alert-dialog',
     'get-stock-list', 'get-stock-list-chunked', 'get-stock-single', 'adjust-stock',
     'save-purchase', 'update-purchase', 'get-purchases', 'get-purchase-items', 'delete-purchase', 'post-purchase', 'post-purchase-bulk', 'get-purchase-barcode-data',
@@ -3797,7 +3877,7 @@ function registerIPC() {
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
     'get-customers', 'add-customer', 'get-customer-balance', 'update-customer', 'update-customer-balance', 'get-customer-statement', 'add-customer-payment',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
-    'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report',
+    'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report', 'get-supplier-stock-report',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
     'get-payment-accounts', 'save-payment-accounts',
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
@@ -3846,12 +3926,14 @@ function registerIPC() {
       try {
         let htmlContent = '';
         let printerName = null;
+        let copies = 2; // default: seller + buyer
 
         if (typeof receiptData === 'string') {
           htmlContent = receiptData;
         } else if (receiptData && receiptData.html) {
           htmlContent = receiptData.html;
           printerName = receiptData.printer;
+          if (receiptData.copies !== undefined) copies = receiptData.copies;
         }
 
         if (!htmlContent) {
@@ -3865,11 +3947,16 @@ function registerIPC() {
 
         printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
 
+        // Guard against did-finish-load firing multiple times (known Electron issue with data URLs)
+        let printed = false;
         printWin.webContents.on('did-finish-load', () => {
+          if (printed) return;
+          printed = true;
+
           const printOptions = {
             silent: true,
             printBackground: true,
-            copies: 2
+            copies
           };
 
           if (printerName) {

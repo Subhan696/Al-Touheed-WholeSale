@@ -4,7 +4,7 @@ import './ManufacturerDiscounts.css';
 const { ipcRenderer } = window.require('electron');
 
 const nextId = () => Math.random().toString(36).substr(2, 9);
-const makeRow = () => ({ id: nextId(), manufacturer: '', brand: '', discount_pct: '', discount_amount: '' });
+const makeRow = () => ({ id: nextId(), manufacturer: '', supplier_id: '', brand: '', discount_pct: '', discount_amount: '' });
 
 // Pastel colors for grouping
 const groupColors = [
@@ -21,10 +21,11 @@ function ManufacturerDiscounts({ openWindow }) {
   const [manufacturers, setManufacturers] = useState([]);
   const [mfgListFull, setMfgListFull] = useState([]);
   const [allBrands, setAllBrands] = useState([]);
+  const [suppliersList, setSuppliersList] = useState([]);
   const [rows, setRows] = useState([makeRow()]);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-  
+
   const [showManageModal, setShowManageModal] = useState(false);
   const [newMfgName, setNewMfgName] = useState('');
 
@@ -39,19 +40,31 @@ function ManufacturerDiscounts({ openWindow }) {
       const m = await ipcRenderer.invoke('get-manufacturers');
       setManufacturers(m.map(x => x.name));
       setMfgListFull(m);
-      
+
       const b = await ipcRenderer.invoke('get-brands');
       setAllBrands(b.map(x => x.name));
 
+      const s = await ipcRenderer.invoke('get-suppliers-list').catch(() => []);
+      setSuppliersList(s || []);
+      const supplierByName = {};
+      (s || []).forEach(sup => { supplierByName[sup.name.trim().toLowerCase()] = sup.id; });
+
       const d = await ipcRenderer.invoke('get-manufacturer-brands');
       if (d && d.length > 0) {
-        const mapped = d.map(r => ({
-          id: nextId(),
-          manufacturer: r.company_name || '',
-          brand: r.brand_name || '',
-          discount_pct: r.purchase_discount_pct ? String(r.purchase_discount_pct) : '',
-          discount_amount: r.discount_amount ? String(r.discount_amount) : ''
-        }));
+        const mapped = d.map(r => {
+          const mfgName = r.company_name || '';
+          // Fall back to auto-matching a supplier with the same name, so
+          // existing rows saved before the supplier link existed self-heal.
+          const autoMatchId = supplierByName[mfgName.trim().toLowerCase()];
+          return {
+            id: nextId(),
+            manufacturer: mfgName,
+            supplier_id: r.supplier_id ? String(r.supplier_id) : (autoMatchId ? String(autoMatchId) : ''),
+            brand: r.brand_name || '',
+            discount_pct: r.purchase_discount_pct ? String(r.purchase_discount_pct) : '',
+            discount_amount: r.discount_amount ? String(r.discount_amount) : ''
+          };
+        });
         mapped.push(makeRow());
         setRows(mapped);
       } else {
@@ -73,10 +86,11 @@ function ManufacturerDiscounts({ openWindow }) {
 
       if (brandsArr.length > 1) {
         newRows[idx] = { ...currentRow, brand: brandsArr[0] };
-        
+
         const generatedRows = brandsArr.slice(1).map(b => ({
           id: nextId(),
           manufacturer: currentRow.manufacturer,
+          supplier_id: currentRow.supplier_id,
           brand: b,
           discount_pct: currentRow.discount_pct,
           discount_amount: currentRow.discount_amount
@@ -84,7 +98,7 @@ function ManufacturerDiscounts({ openWindow }) {
 
         newRows.splice(idx + 1, 0, ...generatedRows);
       }
-      
+
       const lastRow = newRows[newRows.length - 1];
       if (lastRow.manufacturer || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
         newRows.push(makeRow());
@@ -143,9 +157,16 @@ function ManufacturerDiscounts({ openWindow }) {
       const newRows = [...prev];
       const idx = newRows.findIndex(r => r.id === id);
       if (idx === -1) return prev;
-      
+
       newRows[idx] = { ...newRows[idx], [field]: value };
-      
+
+      // If manufacturer changed and no supplier is picked yet, try to auto-match
+      // a supplier account with the same name — user can still override it.
+      if (field === 'manufacturer' && !newRows[idx].supplier_id) {
+        const match = suppliersList.find(s => s.name.trim().toLowerCase() === value.trim().toLowerCase());
+        if (match) newRows[idx].supplier_id = String(match.id);
+      }
+
       const lastRow = newRows[newRows.length - 1];
       if (lastRow.manufacturer || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
         newRows.push(makeRow());
@@ -159,14 +180,14 @@ function ManufacturerDiscounts({ openWindow }) {
       const newRows = [...prev];
       const idx = newRows.findIndex(r => r.id === id);
       if (idx === -1) return prev;
-      
+
       let currentBrands = newRows[idx].brand.split(',').map(b => b.trim()).filter(b => b);
       if (currentBrands.includes(brandName)) {
         currentBrands = currentBrands.filter(b => b !== brandName);
       } else {
         currentBrands.push(brandName);
       }
-      
+
       newRows[idx] = { ...newRows[idx], brand: currentBrands.join(', ') };
       return newRows;
     });
@@ -193,7 +214,7 @@ function ManufacturerDiscounts({ openWindow }) {
 
     let targetIdx = idx;
     let targetField = field;
-    const fields = ['manufacturer', 'brand', 'discount_pct', 'discount_amount'];
+    const fields = ['manufacturer', 'supplier_id', 'brand', 'discount_pct', 'discount_amount'];
     const fieldIdx = fields.indexOf(field);
 
     if (e.key === 'Escape' && field === 'brand') {
@@ -227,7 +248,7 @@ function ManufacturerDiscounts({ openWindow }) {
       if (e.key.length === 1 && /[a-zA-Z0-9 ]/.test(e.key)) {
         e.preventDefault();
         searchBufferRef.current += e.key.toLowerCase();
-        
+
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = setTimeout(() => {
           searchBufferRef.current = '';
@@ -300,7 +321,7 @@ function ManufacturerDiscounts({ openWindow }) {
   const decoratedRows = rows.map((r, idx) => {
     const prev = idx > 0 ? rows[idx - 1] : null;
     const next = idx < rows.length - 1 ? rows[idx + 1] : null;
-    
+
     // If it's a blank row at the end, default white
     if (!r.manufacturer && !r.brand) {
       return { ...r, _bg: '#ffffff', _hideMfg: false };
@@ -312,7 +333,7 @@ function ManufacturerDiscounts({ openWindow }) {
     }
 
     const _bg = groupColors[(currentColorIdx % (groupColors.length - 1)) + 1];
-    
+
     const isStart = !prev || r.manufacturer !== prev.manufacturer;
     const isEnd = !next || r.manufacturer !== next.manufacturer;
     const _hideMfg = !isStart && r.manufacturer !== '';
@@ -325,10 +346,15 @@ function ManufacturerDiscounts({ openWindow }) {
       <div className="md-header">
         <div>
           <h2 className="md-title">Manufacturer Discounts</h2>
-          <p className="md-subtitle">Select multiple brands to auto-split them into rows! Empty row at bottom for new manufacturers.</p>
+          <p className="md-subtitle">Link each brand to its supplier account so stock &amp; ledger reports group correctly. Select multiple brands to auto-split them into rows! Empty row at bottom for new manufacturers.</p>
         </div>
         <div className="md-actions">
           {statusMsg && <span className="md-status">{statusMsg}</span>}
+          {rows.filter(r => r.brand && !r.supplier_id).length > 0 && (
+            <span style={{ color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '4px 10px', fontSize: '0.82rem', fontWeight: 600 }}>
+              ⚠️ {rows.filter(r => r.brand && !r.supplier_id).length} brand(s) not linked to a supplier
+            </span>
+          )}
           <button className="md-btn md-btn-secondary" onClick={() => { setShowManageModal(true); setTimeout(() => manageInputRef.current?.focus(), 100); }}>⚙️ Manage Manufacturers List</button>
           <button className="md-btn md-btn-primary" onClick={handleSave} disabled={isSaving}>
             {isSaving ? 'Saving...' : 'Save All Discounts'}
@@ -341,10 +367,11 @@ function ManufacturerDiscounts({ openWindow }) {
           <thead>
             <tr>
               <th style={{ width: 40 }}>#</th>
-              <th style={{ width: '25%' }}>Manufacturer</th>
-              <th style={{ width: '35%' }}>Brand (Check multiple!)</th>
-              <th style={{ width: '15%' }}>Disc (%)</th>
-              <th style={{ width: '15%' }}>Disc Amount</th>
+              <th style={{ width: '18%' }}>Manufacturer</th>
+              <th style={{ width: '18%' }}>Supplier (Account)</th>
+              <th style={{ width: '29%' }}>Brand (Check multiple!)</th>
+              <th style={{ width: '13%' }}>Disc (%)</th>
+              <th style={{ width: '13%' }}>Disc Amount</th>
               <th style={{ width: 60 }}>Act</th>
             </tr>
           </thead>
@@ -364,6 +391,23 @@ function ManufacturerDiscounts({ openWindow }) {
                     {manufacturers.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </td>
+                <td className="md-cell-mfg" style={{ position: 'relative' }}>
+                  <select
+                    ref={el => gridRefs.current[`${r.id}-supplier_id`] = el}
+                    value={r.supplier_id}
+                    onChange={e => handleRowChange(r.id, 'supplier_id', e.target.value)}
+                    onKeyDown={e => handleKeyDown(e, r.id, 'supplier_id')}
+                    className="md-select-input"
+                    style={!r.supplier_id && r.brand ? { border: '1px solid #f59e0b', background: '#fffbeb' } : undefined}
+                    title={!r.supplier_id && r.brand ? 'No supplier linked — this brand will show as "Unmapped" on stock reports' : ''}
+                  >
+                    <option value="">— none —</option>
+                    {suppliersList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  {!r.supplier_id && r.brand && (
+                    <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: '#f59e0b', fontSize: '0.9rem' }} title="Unmapped">⚠️</span>
+                  )}
+                </td>
                 <td className="md-cell-brand" style={{ position: 'relative' }}>
                   <input
                     ref={el => gridRefs.current[`${r.id}-brand`] = el}
@@ -381,10 +425,10 @@ function ManufacturerDiscounts({ openWindow }) {
                         const isChecked = r.brand.split(',').map(x => x.trim()).includes(b);
                         const isHighlighted = bIdx === highlightedBrandIdx;
                         return (
-                          <div 
-                            key={b} 
+                          <div
+                            key={b}
                             id={`md-brand-item-${bIdx}`}
-                            className={`md-brand-item ${isHighlighted ? 'md-brand-item-highlight' : ''}`} 
+                            className={`md-brand-item ${isHighlighted ? 'md-brand-item-highlight' : ''}`}
                             onClick={() => handleBrandToggle(r.id, b)}
                           >
                             <input type="checkbox" checked={isChecked} readOnly style={{ width: 'auto' }} />
