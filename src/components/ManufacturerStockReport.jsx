@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
+import { printManufacturerStock, saveManufacturerStockPDF } from '../utils/printManufacturerStock';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -17,6 +18,8 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
         <tr className="ssr-supplier-row" onClick={() => toggleCollapsed(sup.name)}>
           <th colSpan={2}>{isCollapsed ? '▶' : '▼'} {sup.name}</th>
           <th className="ssr-val">Qty: {fmt(sup.totalQty)}</th>
+          <th className="ssr-val"></th>
+          <th className="ssr-val"></th>
           <th className="ssr-val">
             Value: {fmt(sup.totalValue)}
             {balance !== undefined && (
@@ -30,8 +33,10 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           <tr>
             <th style={{ width: 100 }}>Item Code</th>
             <th>Description / Brand</th>
-            <th className="ssr-val" style={{ width: 90 }}>Qty</th>
-            <th className="ssr-val" style={{ width: 140 }}>{priceMode === 'actual' ? 'Actual Rate' : 'ListRate'} / Value</th>
+            <th className="ssr-val" style={{ width: 80 }}>Qty</th>
+            <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'List Price'}</th>
+            <th className="ssr-val" style={{ width: 100 }}>Sale Price</th>
+            <th className="ssr-val" style={{ width: 120 }}>Value</th>
           </tr>
         )}
       </thead>
@@ -42,18 +47,20 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
               <tr className="ssr-cat-row">
                 <td colSpan={2}>{cat.name}</td>
                 <td className="ssr-val">{fmt(cat.totalQty)}</td>
+                <td className="ssr-val"></td>
+                <td className="ssr-val"></td>
                 <td className="ssr-val">{fmt(cat.totalValue)}</td>
               </tr>
               {cat.items.map(item => (
                 <tr key={item.item_code}>
                   <td>{item.item_code}</td>
-                  <td style={{ color: '#475569' }}>
-                    {item.description}
-                    {item.brand ? <span style={{ color: '#94a3b8' }}> — {item.brand}</span> : null}
-                    {item.size_range ? <span style={{ color: '#94a3b8' }}> ({item.size_range})</span> : null}
+                  <td style={{ color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim() || '—'}
                   </td>
                   <td className="ssr-val">{fmt(item.qty)}</td>
-                  <td className="ssr-val">{fmt2(item.rate)} / {fmt(item.value)}</td>
+                  <td className="ssr-val">{fmt2(Math.round((priceMode === 'actual' ? (item.latest_net_rate || item.actual_rate || 0) : (item.list_rate || 0)) * 100) / 100)}</td>
+                  <td className="ssr-val">{fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
+                  <td className="ssr-val">{fmt(item.value)}</td>
                 </tr>
               ))}
             </React.Fragment>
@@ -61,6 +68,8 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           <tr className="ssr-subtotal-row">
             <td colSpan={2} style={{ textAlign: 'right' }}>Supplier Total:</td>
             <td className="ssr-val">{fmt(sup.totalQty)}</td>
+            <td className="ssr-val"></td>
+            <td className="ssr-val"></td>
             <td className="ssr-val">{fmt(sup.totalValue)}</td>
           </tr>
         </tbody>
@@ -129,7 +138,22 @@ function SupplierStockReport() {
     setLoading(false);
   }, []);
 
-  const handlePrint = () => window.print();
+  const [statusMsg, setStatusMsg] = useState('');
+
+  const handlePrint = () => {
+    printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances);
+  };
+
+  const handleSavePDF = async () => {
+    const res = await saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances);
+    if (res?.success) {
+      setStatusMsg(`✓ PDF saved!`);
+      setTimeout(() => setStatusMsg(''), 3000);
+    } else if (res?.error) {
+      setStatusMsg(`Error: ${res.error}`);
+      setTimeout(() => setStatusMsg(''), 3000);
+    }
+  };
 
   // Unique filter option lists derived from the data itself
   const allSuppliers = useMemo(() => {
@@ -245,9 +269,11 @@ function SupplierStockReport() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', border: '1px solid #e4e6ef', borderRadius: 10, padding: '12px 20px', flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: '#1e293b' }}>Stock in Hand — Supplier Wise</h2>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {statusMsg && <span style={{ fontSize: '0.85rem', fontWeight: 600, color: statusMsg.startsWith('Error') ? '#dc2626' : '#16a34a' }}>{statusMsg}</span>}
           <button onClick={loadReport} className="btn btn-secondary" disabled={loading}>{loading ? 'Loading...' : '↻ Refresh'}</button>
-          <button onClick={handlePrint} className="btn btn-primary">🖨️ Print Report</button>
+          <button onClick={handlePrint} className="btn btn-primary" style={{ background: '#3b82f6', borderColor: '#3b82f6' }}>🖨️ Print Report</button>
+          <button onClick={handleSavePDF} className="btn btn-primary" style={{ background: '#10b981', borderColor: '#10b981' }}>📄 Save PDF</button>
         </div>
       </div>
 
@@ -445,6 +471,8 @@ function SupplierStockReport() {
                 <tr className="ssr-grand-row">
                   <td colSpan={2} style={{ textAlign: 'right' }}>GRAND TOTAL:</td>
                   <td className="ssr-val">{fmt(grandQty)}</td>
+                  <td className="ssr-val"></td>
+                  <td className="ssr-val"></td>
                   <td className="ssr-val">{fmt(grandValue)}</td>
                 </tr>
                 {filteredSupplierBalances.length > 0 && (
@@ -453,7 +481,7 @@ function SupplierStockReport() {
                       <td colSpan={2} style={{ textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}>
                         Supp. Balance:
                       </td>
-                      <td colSpan={2} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+                      <td colSpan={4} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
                         {fmt2(Math.abs(filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0)))}{' '}
                         {filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0) >= 0 ? 'Cr' : 'Dr'}
                       </td>
@@ -462,7 +490,7 @@ function SupplierStockReport() {
                       <td colSpan={2} style={{ textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}>
                         Balance:
                       </td>
-                      <td colSpan={2} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+                      <td colSpan={4} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
                         {fmt2(Math.abs(filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0)))}{' '}
                         {filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0) >= 0 ? 'Cr' : 'Dr'}
                       </td>
@@ -484,7 +512,7 @@ function SupplierStockReport() {
                   <tr>
                     <th>Supplier</th>
                     <th>Balance Type</th>
-                    <th className="ssr-val" colSpan={2}>Amount</th>
+                    <th className="ssr-val" colSpan={4}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -492,7 +520,7 @@ function SupplierStockReport() {
                     <tr key={name}>
                       <td>{name}</td>
                       <td>{balance >= 0 ? 'Cr' : 'Dr'}</td>
-                      <td className="ssr-val" colSpan={2}>{fmt2(Math.abs(balance))}</td>
+                      <td className="ssr-val" colSpan={4}>{fmt2(Math.abs(balance))}</td>
                     </tr>
                   ))}
                 </tbody>

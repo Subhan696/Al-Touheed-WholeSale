@@ -664,6 +664,24 @@ async function initDatabase() {
   await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS disc_pct NUMERIC(5,2) DEFAULT 0');
   await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) DEFAULT 0');
   await query('ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS net_rate NUMERIC(12,5) DEFAULT 0');
+
+  // Purchase Returns migrations
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS supplier_inv_no TEXT');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS supplier_date DATE');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS vehicle_no TEXT');
+  await query("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS godown TEXT DEFAULT '1-SHOP'");
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS blt_number TEXT');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS freight_account_name TEXT');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS ctn_qty INTEGER DEFAULT 0');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS misc_charges NUMERIC(10,2) DEFAULT 0');
+
+  await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
+  await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS pre_disc_price NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS flat_discount NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS disc_pct NUMERIC(5,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) DEFAULT 0');
+  await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS net_rate NUMERIC(12,5) DEFAULT 0');
   await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT ''");
   try {
     // Migration: if gender is empty and category has Boy/Girl, move it
@@ -2120,36 +2138,134 @@ async function handleIPC(channel, ...args) {
 
     // ─── PURCHASE RETURNS ─────────────────────────────────────────────────────
     case 'save-purchase-return': {
-      const { returnDate, invoiceNo, supplierName, items, notes } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0);
+      const {
+        returnDate, invoiceNo, supplierName, supplierDate, supplierInvNo,
+        vehicleNo, godown, bltNumber, freightAccountName, ctnQty,
+        discount, miscCharges, notes, items
+      } = data;
+      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
+
+      if (supplierName && supplierName.trim()) {
+        try {
+          const suppRes = await query(
+            'INSERT INTO suppliers (name, initial_balance) VALUES ($1, 0) ON CONFLICT (name) DO NOTHING RETURNING id',
+            [supplierName.trim()]
+          );
+          let suppId = suppRes.rows[0]?.id;
+          if (!suppId) {
+            const sRow = await query('SELECT id FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [supplierName.trim()]);
+            suppId = sRow.rows[0]?.id;
+          }
+          if (suppId) {
+            await query(
+              "INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Supplier', $2, 'Cr') ON CONFLICT (account_name) DO NOTHING",
+              ['Supplier - ' + supplierName.trim(), suppId]
+            );
+          }
+        } catch (e) {
+          console.error('Auto-creating supplier in save-purchase-return error:', e);
+        }
+      }
+
       const maxNo = await query('SELECT MAX(CAST(return_no AS INTEGER)) FROM purchase_returns WHERE return_no ~ $1', ['^[0-9]+$']);
       const nextNo = String((parseInt(maxNo.rows[0].max) || 0) + 1);
       const rr = await query(
-        'INSERT INTO purchase_returns (return_date, return_no, invoice_no, supplier_name, total_amount, notes, is_posted) VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING id',
-        [returnDate, nextNo, invoiceNo || null, supplierName, total, notes || null]
+        `INSERT INTO purchase_returns (
+          return_date, return_no, invoice_no, supplier_name, total_amount, discount, misc_charges, notes, is_posted,
+          supplier_inv_no, supplier_date, vehicle_no, godown, blt_number, freight_account_name, ctn_qty
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10::DATE,$11,$12,$13,$14,$15) RETURNING id`,
+        [
+          returnDate, nextNo, invoiceNo || null, supplierName, total,
+          discount || 0, miscCharges || 0, notes || null,
+          supplierInvNo || null, supplierDate || null, vehicleNo || null,
+          godown || '1-SHOP', bltNumber || null, freightAccountName || null, parseInt(ctnQty) || 0
+        ]
       );
       const returnId = rr.rows[0].id;
+
       for (const item of items) {
         await query(
-          'INSERT INTO purchase_return_items (return_id, item_code, item_description, packets, rate, amount) VALUES ($1,$2,$3,$4,$5,$6)',
-          [returnId, item.itemCode, item.itemDescription, item.packets, item.rate, item.amount]
+          `INSERT INTO purchase_return_items (
+            return_id, item_code, item_description, packets, packing_qty, rate, amount,
+            pre_disc_price, flat_discount, disc_pct, discount_amount, net_rate
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [
+            returnId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0,
+            item.rate, item.amount, item.preDiscPrice || 0, item.flatDiscount || 0,
+            item.discPct || 0, item.discountAmount || 0, item.netRate || 0
+          ]
         );
       }
-      broadcast('purchase-returns'); broadcast('stock');
+
+      broadcast('purchase-returns'); broadcast('stock'); broadcast('suppliers');
       return { success: true, id: returnId, returnNo: nextNo };
     }
     case 'update-purchase-return': {
-      const { id, returnDate, invoiceNo, supplierName, items, notes } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0);
-      await query('UPDATE purchase_returns SET return_date=$1, invoice_no=$2, supplier_name=$3, total_amount=$4, notes=$5 WHERE id=$6',
-        [returnDate, invoiceNo || null, supplierName, total, notes || null, id]);
-      await query('DELETE FROM purchase_return_items WHERE return_id=$1', [id]);
-      for (const item of items) {
-        await query('INSERT INTO purchase_return_items (return_id, item_code, item_description, packets, rate, amount) VALUES ($1,$2,$3,$4,$5,$6)',
-          [id, item.itemCode, item.itemDescription, item.packets, item.rate, item.amount]);
+      const {
+        id, returnDate, invoiceNo, supplierName, supplierDate, supplierInvNo,
+        vehicleNo, godown, bltNumber, freightAccountName, ctnQty,
+        discount, miscCharges, notes, items
+      } = data;
+      const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
+
+      if (supplierName && supplierName.trim()) {
+        try {
+          const suppRes = await query(
+            'INSERT INTO suppliers (name, initial_balance) VALUES ($1, 0) ON CONFLICT (name) DO NOTHING RETURNING id',
+            [supplierName.trim()]
+          );
+          let suppId = suppRes.rows[0]?.id;
+          if (!suppId) {
+            const sRow = await query('SELECT id FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [supplierName.trim()]);
+            suppId = sRow.rows[0]?.id;
+          }
+          if (suppId) {
+            await query(
+              "INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Supplier', $2, 'Cr') ON CONFLICT (account_name) DO NOTHING",
+              ['Supplier - ' + supplierName.trim(), suppId]
+            );
+          }
+        } catch (e) {
+          console.error('Auto-creating supplier in update-purchase-return error:', e);
+        }
       }
-      broadcast('purchase-returns'); broadcast('stock');
+
+      await query(
+        `UPDATE purchase_returns SET 
+          return_date=$1, invoice_no=$2, supplier_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7,
+          supplier_inv_no=$8, supplier_date=CASE WHEN $9::DATE IS NOT NULL THEN $9::DATE ELSE supplier_date END,
+          vehicle_no=$10, godown=$11, blt_number=$12, freight_account_name=$13, ctn_qty=$14
+         WHERE id=$15`,
+        [
+          returnDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null,
+          supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', bltNumber || null,
+          freightAccountName || null, parseInt(ctnQty) || 0, id
+        ]
+      );
+
+      await query('DELETE FROM purchase_return_items WHERE return_id=$1', [id]);
+
+      for (const item of items) {
+        await query(
+          `INSERT INTO purchase_return_items (
+            return_id, item_code, item_description, packets, packing_qty, rate, amount,
+            pre_disc_price, flat_discount, disc_pct, discount_amount, net_rate
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [
+            id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0,
+            item.rate, item.amount, item.preDiscPrice || 0, item.flatDiscount || 0,
+            item.discPct || 0, item.discountAmount || 0, item.netRate || 0
+          ]
+        );
+      }
+
+      broadcast('purchase-returns'); broadcast('stock'); broadcast('suppliers');
       return { success: true };
+    }
+    case 'get-next-purchase-return-no': {
+      const maxNo = await query('SELECT MAX(CAST(return_no AS INTEGER)) FROM purchase_returns WHERE return_no ~ $1', ['^[0-9]+$']);
+      const nextNo = String((parseInt(maxNo.rows[0]?.max) || 0) + 1);
+      return nextNo;
     }
     case 'get-purchase-returns': {
       const r = await query('SELECT * FROM purchase_returns ORDER BY id DESC');
@@ -2161,8 +2277,164 @@ async function handleIPC(channel, ...args) {
     }
     case 'delete-purchase-return': {
       await query('DELETE FROM purchase_returns WHERE id=$1', [data]);
-      broadcast('purchase-returns'); broadcast('stock');
+      broadcast('purchase-returns'); broadcast('stock'); broadcast('suppliers');
       return { success: true };
+    }
+    case 'save-purchase-return-pdf': {
+      try {
+        const { html, filename } = data || {};
+        if (!html) return { success: false, error: 'No HTML content provided' };
+        const { dialog, BrowserWindow, shell } = require('electron');
+        const fs = require('fs');
+
+        const saveResult = await dialog.showSaveDialog({
+          title: 'Save Purchase Return PDF',
+          defaultPath: filename || 'Purchase_Return.pdf',
+          filters: [{ name: 'PDF Files (*.pdf)', extensions: ['pdf'] }]
+        });
+
+        if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true };
+
+        return new Promise((resolve) => {
+          try {
+            const pdfWin = new BrowserWindow({
+              show: false,
+              webPreferences: { nodeIntegration: true, contextIsolation: false }
+            });
+
+            pdfWin.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+
+            pdfWin.webContents.on('did-finish-load', async () => {
+              try {
+                const pdfBuffer = await pdfWin.webContents.printToPDF({
+                  printBackground: true,
+                  marginsType: 1,
+                  pageSize: 'A4',
+                  landscape: false
+                });
+                fs.writeFileSync(saveResult.filePath, pdfBuffer);
+                pdfWin.close();
+                resolve({ success: true, filePath: saveResult.filePath });
+              } catch (err) {
+                pdfWin.close();
+                resolve({ success: false, error: err.message });
+              }
+            });
+          } catch (err) {
+            resolve({ success: false, error: err.message });
+          }
+        });
+      } catch (err) {
+        console.error('Error saving PDF:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    case 'print-purchase-return-html': {
+      try {
+        const { html } = data || {};
+        const { BrowserWindow } = require('electron');
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const url = require('url');
+
+        const tempPath = path.join(os.tmpdir(), `purchase_return_print_${Date.now()}.html`);
+        await fs.promises.writeFile(tempPath, html || '', 'utf8');
+
+        const printWin = new BrowserWindow({ 
+          show: true, 
+          width: 920, 
+          height: 950, 
+          autoHideMenuBar: true, 
+          title: 'Print Preview - Purchase Return' 
+        });
+        await printWin.loadURL(url.pathToFileURL(tempPath).href);
+        printWin.on('closed', () => {
+          fs.promises.unlink(tempPath).catch(() => {});
+        });
+        return { success: true };
+      } catch (err) {
+        console.error('Error printing HTML:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    case 'save-manufacturer-stock-pdf': {
+      try {
+        const { html, filename } = data || {};
+        if (!html) return { success: false, error: 'No HTML content provided' };
+        const { dialog, BrowserWindow, shell } = require('electron');
+        const fs = require('fs');
+
+        const saveResult = await dialog.showSaveDialog({
+          title: 'Save Manufacturer Stock Report PDF',
+          defaultPath: filename || 'Manufacturer_Stock_Report.pdf',
+          filters: [{ name: 'PDF Files (*.pdf)', extensions: ['pdf'] }]
+        });
+
+        if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true };
+
+        return new Promise((resolve) => {
+          try {
+            const pdfWin = new BrowserWindow({
+              show: false,
+              webPreferences: { nodeIntegration: true, contextIsolation: false }
+            });
+
+            pdfWin.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+
+            pdfWin.webContents.on('did-finish-load', async () => {
+              try {
+                const pdfBuffer = await pdfWin.webContents.printToPDF({
+                  printBackground: true,
+                  marginsType: 1,
+                  pageSize: 'A4',
+                  landscape: false
+                });
+                fs.writeFileSync(saveResult.filePath, pdfBuffer);
+                pdfWin.close();
+                resolve({ success: true, filePath: saveResult.filePath });
+              } catch (err) {
+                pdfWin.close();
+                resolve({ success: false, error: err.message });
+              }
+            });
+          } catch (err) {
+            resolve({ success: false, error: err.message });
+          }
+        });
+      } catch (err) {
+        console.error('Error saving PDF:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    case 'print-manufacturer-stock-html': {
+      try {
+        const { html } = data || {};
+        const { BrowserWindow } = require('electron');
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const url = require('url');
+
+        const tempPath = path.join(os.tmpdir(), `mfr_stock_print_${Date.now()}.html`);
+        await fs.promises.writeFile(tempPath, html || '', 'utf8');
+
+        const printWin = new BrowserWindow({ 
+          show: true, 
+          width: 950, 
+          height: 950, 
+          autoHideMenuBar: true, 
+          title: 'Print Preview - Manufacturer Stock Report' 
+        });
+        await printWin.loadURL(url.pathToFileURL(tempPath).href);
+        printWin.on('closed', () => {
+          fs.promises.unlink(tempPath).catch(() => {});
+        });
+        return { success: true };
+      } catch (err) {
+        console.error('Error printing HTML:', err);
+        return { success: false, error: err.message };
+      }
     }
 
     // ─── SUPPLIER LEDGER ──────────────────────────────────────────────────────
@@ -2234,20 +2506,22 @@ async function handleIPC(channel, ...args) {
       const res = await query(`
         SELECT 
           'PV-' || p.id as type,
-          DATE(p.created_at) as txn_date,
+          p.purchase_date as txn_date,
           p.invoice_no as ref_no,
           p.notes,
           p.supplier_date as supp_date,
           p.invoice_no as supp_inv_no,
           p.blt_number as bilty_no,
           COALESCE((SELECT SUM(cartons) FROM purchase_expenses WHERE purchase_id = p.id), 0) as ctn_bag,
-          COALESCE((SELECT SUM(amount) FROM purchase_expenses WHERE purchase_id = p.id), 0) as freight,
+          CAST(COALESCE((SELECT SUM(amount) FROM purchase_expenses WHERE purchase_id = p.id), 0) AS TEXT) as freight,
           COALESCE((SELECT SUM(packets) FROM purchase_items WHERE purchase_id = p.id), 0) as total_qty,
           COALESCE((SELECT SUM(pre_disc_price * packets) FROM purchase_items WHERE purchase_id = p.id), 0) as supplier_amount,
           (COALESCE((SELECT SUM(pre_disc_price * packets) FROM purchase_items WHERE purchase_id = p.id), 0) - COALESCE((SELECT SUM(amount) FROM purchase_items WHERE purchase_id = p.id), 0) + p.discount) as discount_amount,
           '' as cheque_no,
           0 as debit,
-          p.total_amount as credit
+          p.total_amount as credit,
+          COALESCE(p.created_at, p.purchase_date::timestamp) as raw_date,
+          p.id as id
         FROM purchases p
         WHERE LOWER(TRIM(p.supplier_name)) = LOWER(TRIM($1)) AND p.is_posted = 1
         
@@ -2257,18 +2531,20 @@ async function handleIPC(channel, ...args) {
           'PR-' || r.id as type,
           r.return_date as txn_date,
           r.return_no as ref_no,
-          r.notes,
-          NULL as supp_date,
-          '' as supp_inv_no,
-          '' as bilty_no,
-          COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE return_id = r.id), 0) as ctn_bag,
-          0 as freight,
+          r.notes as notes,
+          r.supplier_date as supp_date,
+          r.supplier_inv_no as supp_inv_no,
+          r.blt_number as bilty_no,
+          COALESCE(r.ctn_qty, COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE return_id = r.id), 0)) as ctn_bag,
+          COALESCE(r.freight_account_name, '')::TEXT as freight,
           COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE return_id = r.id), 0) as total_qty,
           r.total_amount as supplier_amount,
           0 as discount_amount,
           '' as cheque_no,
           r.total_amount as debit,
-          0 as credit
+          0 as credit,
+          COALESCE(r.created_at, r.return_date::timestamp) as raw_date,
+          r.id as id
         FROM purchase_returns r
         WHERE LOWER(TRIM(r.supplier_name)) = LOWER(TRIM($1)) AND r.is_posted = 1
         
@@ -2283,13 +2559,15 @@ async function handleIPC(channel, ...args) {
           '' as supp_inv_no,
           '' as bilty_no,
           0 as ctn_bag,
-          0 as freight,
+          ''::TEXT as freight,
           0 as total_qty,
           0 as supplier_amount,
           0 as discount_amount,
           p.notes as cheque_no,
           p.amount as debit,
-          0 as credit
+          0 as credit,
+          p.payment_date::timestamp as raw_date,
+          p.id as id
         FROM supplier_payments p
         WHERE LOWER(TRIM(p.supplier_name)) = LOWER(TRIM($1))
 
@@ -2330,13 +2608,15 @@ async function handleIPC(channel, ...args) {
           '' as supp_inv_no,
           '' as bilty_no,
           0 as ctn_bag,
-          0 as freight,
+          ''::TEXT as freight,
           0 as total_qty,
           0 as supplier_amount,
           0 as discount_amount,
           COALESCE(vd.reference_no, '') as cheque_no,
           vd.debit as debit,
-          vd.credit as credit
+          vd.credit as credit,
+          COALESCE(v.created_at, v.voucher_date::timestamp) as raw_date,
+          v.id as id
         FROM voucher_details vd
         JOIN vouchers v ON v.id = vd.voucher_id
         JOIN gl_accounts g ON g.id = vd.account_id
@@ -2346,7 +2626,7 @@ async function handleIPC(channel, ...args) {
             OR LOWER(TRIM(replace(g.account_name, 'Supplier - ', ''))) = LOWER(TRIM($1))
           )
         
-        ORDER BY txn_date ASC, type DESC
+        ORDER BY txn_date ASC, raw_date ASC, id ASC
       `, [supplier_name]);
 
       console.log(`[SUPP STMT] Returned ${res.rows.length} transactions for supplier:`, supplier_name);
@@ -3522,6 +3802,7 @@ async function handleIPC(channel, ...args) {
               p.description,
               p.category,
               p.size_range,
+              p.gender,
               p.brand,
               p.year,
               CASE
@@ -3538,7 +3819,8 @@ async function handleIPC(channel, ...args) {
               CASE
                 WHEN COALESCE(net_cost.total_packets, 0) > 0 THEN net_cost.total_net_amount / net_cost.total_packets
                 ELSE p.purchase_rate
-              END AS actual_rate
+              END AS actual_rate,
+              latest_purchase.net_rate AS latest_net_rate
             FROM products p
             LEFT JOIN manufacturer_brands mb ON LOWER(TRIM(mb.brand_name)) = LOWER(TRIM(p.brand))
             LEFT JOIN suppliers s ON s.id = mb.supplier_id
@@ -3567,6 +3849,18 @@ async function handleIPC(channel, ...args) {
               WHERE pu.is_posted = 1 AND pi.net_rate > 0
               GROUP BY pi.item_code
             ) net_cost ON net_cost.item_code = p.item_code
+            LEFT JOIN (
+              SELECT item_code, net_rate FROM (
+                SELECT 
+                  pi.item_code, 
+                  pi.net_rate,
+                  ROW_NUMBER() OVER (PARTITION BY pi.item_code ORDER BY pu.id DESC, pi.id DESC) as rn
+                FROM purchase_items pi
+                JOIN purchases pu ON pi.purchase_id = pu.id
+                WHERE pu.is_posted = 1 AND pi.net_rate > 0
+              ) ranked
+              WHERE rn = 1
+            ) latest_purchase ON latest_purchase.item_code = p.item_code
           ) stock_data
           WHERE stock_packets > 0
           ORDER BY supplier_name, category, item_code
@@ -3872,7 +4166,7 @@ function registerIPC() {
     'get-overall-profit', 'save-overall-profit', 'confirm-dialog', 'alert-dialog',
     'get-stock-list', 'get-stock-list-chunked', 'get-stock-single', 'adjust-stock',
     'save-purchase', 'update-purchase', 'get-purchases', 'get-purchase-items', 'delete-purchase', 'post-purchase', 'post-purchase-bulk', 'get-purchase-barcode-data',
-    'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return',
+    'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return', 'get-next-purchase-return-no', 'save-purchase-return-pdf', 'print-purchase-return-html', 'save-manufacturer-stock-pdf', 'print-manufacturer-stock-html',
     'get-suppliers-ledger', 'update-supplier-balance', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
     'get-customers', 'add-customer', 'get-customer-balance', 'update-customer', 'update-customer-balance', 'get-customer-statement', 'add-customer-payment',
@@ -3945,7 +4239,7 @@ function registerIPC() {
           webPreferences: { nodeIntegration: true, contextIsolation: false }
         });
 
-        printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+        printWin.loadURL(`data:text/html;base64,${Buffer.from(htmlContent || '').toString('base64')}`);
 
         // Guard against did-finish-load firing multiple times (known Electron issue with data URLs)
         let printed = false;
@@ -4006,7 +4300,7 @@ function registerIPC() {
           webPreferences: { nodeIntegration: true, contextIsolation: false }
         });
 
-        pdfWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+        pdfWin.loadURL(`data:text/html;base64,${Buffer.from(htmlContent || '').toString('base64')}`);
 
         pdfWin.webContents.on('did-finish-load', async () => {
           try {

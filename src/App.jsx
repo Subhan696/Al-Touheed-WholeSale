@@ -217,7 +217,7 @@ function App() {
 
   const activeBaseKey = windowStack[windowStack.length - 1]?.rootKey || activeTab;
   const isFullScreenMode = ['sale', 'sales-return'].includes(activeBaseKey);
-  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'open-purchase';
+  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'open-purchase' || activeBaseKey === 'purchase-return';
 
   return (
     <div className="app-container">

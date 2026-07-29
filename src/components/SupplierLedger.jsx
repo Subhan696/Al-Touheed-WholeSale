@@ -301,7 +301,7 @@ function SupplierLedger() {
                         const credit = parseFloat(t.credit) || 0;
                         const ctn = parseInt(t.ctn_bag) || 0;
                         const qty = parseInt(t.total_qty) || 0;
-                        const freight = parseFloat(t.freight) || 0;
+                        const numFreight = parseFloat(t.freight) || 0;
                         const suppAmt = parseFloat(t.supplier_amount) || 0;
                         const discAmt = parseFloat(t.discount_amount) || 0;
 
@@ -314,7 +314,7 @@ function SupplierLedger() {
                         totalCredit += credit;
                         totalCTN += ctn;
                         totalQtySum += qty;
-                        totalFreight += freight;
+                        totalFreight += numFreight;
 
                         const d = new Date(t.txn_date);
                         const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()}`;
@@ -338,7 +338,7 @@ function SupplierLedger() {
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px' }}>{t.supp_inv_no || ''}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px' }}>{t.bilty_no || ''}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right' }}>{ctn > 0 ? ctn : ''}</td>
-                            <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right' }}>{freight > 0 ? freight.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
+                            <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: numFreight > 0 ? 'right' : 'center' }}>{numFreight > 0 ? numFreight.toLocaleString(undefined, {minimumFractionDigits: 2}) : (t.freight || '')}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right' }}>{qty > 0 ? qty : ''}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right' }}>{suppAmt > 0 ? suppAmt.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right' }}>{discAmt > 0 ? discAmt.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
