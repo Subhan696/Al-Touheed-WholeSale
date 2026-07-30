@@ -176,11 +176,6 @@ export function buildPurchaseReturnHTML(header, items) {
         <td style="font-weight: bold; width: 25%;">Total Discount:</td>
         <td style="text-align: right; font-weight: bold; width: 25%;">-${(totalItemDisc + discount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
       </tr>
-      ${misc > 0 ? `<tr>
-        <td style="font-weight: bold;">Misc Charges:</td>
-        <td style="font-weight: bold; text-align: right;">+${misc.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-        <td colSpan="2"></td>
-      </tr>` : ''}
       <tr class="grand-row">
         <td colSpan="2" style="font-size: 15px; font-weight: 900;">Grand Total:</td>
         <td colSpan="2" style="font-size: 16px; font-weight: 900; text-align: right;">PKR ${Math.round(grandTotal).toLocaleString()}</td>

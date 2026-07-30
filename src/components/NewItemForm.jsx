@@ -29,6 +29,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [showManageModal, setShowManageModal] = useState(false);
   const [manageListItems, setManageListItems] = useState([]);
   const [newItemName, setNewItemName] = useState('');
+  const [editingListItemId, setEditingListItemId] = useState(null);
+  const [editingListItemVal, setEditingListItemVal] = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState('');
@@ -145,6 +147,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
 
   const openListManager = (type) => {
     setManageListType(type); setNewItemName('');
+    setEditingListItemId(null); setEditingListItemVal('');
     if (type === 'genders') setManageListItems(gendersList);
     if (type === 'categories') setManageListItems(categoriesList);
     if (type === 'size_ranges') setManageListItems(sizeRangesList);
@@ -172,6 +175,26 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     if (manageListType === 'manufacturers') setManageListItems(await ipcRenderer.invoke('get-manufacturers') || []);
     await loadLists();
     setTimeout(() => refs.current.manageListInput?.focus(), 0);
+  };
+
+  const handleSaveEditListItem = async (id) => {
+    if (!editingListItemVal.trim()) return;
+    const val = manageListType === 'packings' ? parseInt(editingListItemVal) : editingListItemVal.trim();
+    if (manageListType === 'genders') await ipcRenderer.invoke('update-gender', { id, name: val });
+    if (manageListType === 'categories') await ipcRenderer.invoke('update-category', { id, name: val });
+    if (manageListType === 'size_ranges') await ipcRenderer.invoke('update-size-range', { id, name: val });
+    if (manageListType === 'packings') await ipcRenderer.invoke('update-packing', { id, value: val });
+    if (manageListType === 'brands') await ipcRenderer.invoke('update-brand', { id, name: val });
+    if (manageListType === 'manufacturers') await ipcRenderer.invoke('update-manufacturer', { id, name: val });
+    setEditingListItemId(null);
+    setEditingListItemVal('');
+    if (manageListType === 'genders') setManageListItems(await ipcRenderer.invoke('get-genders') || []);
+    if (manageListType === 'categories') setManageListItems(await ipcRenderer.invoke('get-categories') || []);
+    if (manageListType === 'size_ranges') setManageListItems(await ipcRenderer.invoke('get-size-ranges') || []);
+    if (manageListType === 'packings') setManageListItems(await ipcRenderer.invoke('get-packings') || []);
+    if (manageListType === 'brands') setManageListItems(await ipcRenderer.invoke('get-brands') || []);
+    if (manageListType === 'manufacturers') setManageListItems(await ipcRenderer.invoke('get-manufacturers') || []);
+    await loadLists();
   };
 
   const handleDeleteListItem = async (id) => {
@@ -1133,9 +1156,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
 
       {/* Manage Lists Modal */}
       {showManageModal && (
-        <div className="modal-overlay" onClick={() => setShowManageModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowManageModal(false); setEditingListItemId(null); }}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowManageModal(false)}>✕</button>
+            <button className="modal-close" onClick={() => { setShowManageModal(false); setEditingListItemId(null); }}>✕</button>
             <h3 style={{ margin: "0 0 16px", fontSize: "1.1rem", fontWeight: 700, textTransform: "capitalize" }}>⚙️ Manage {manageListType.replace("_", " ")}</h3>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input ref={el => refs.current.manageListInput = el} type={manageListType === "packings" ? "number" : "text"} value={newItemName}
@@ -1149,10 +1172,32 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
                 <tbody>
                   {manageListItems.map(item => (
                     <tr key={item.id}>
-                      <td>{manageListType === "packings" ? item.value : item.name}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <button onClick={() => handleDeleteListItem(item.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Delete</button>
-                      </td>
+                      {editingListItemId === item.id ? (
+                        <>
+                          <td style={{ padding: '6px 10px' }}>
+                            <input
+                              type={manageListType === 'packings' ? 'number' : 'text'}
+                              value={editingListItemVal}
+                              onChange={e => setEditingListItemVal(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveEditListItem(item.id); else if (e.key === 'Escape') setEditingListItemId(null); }}
+                              autoFocus
+                              style={{ width: '100%', padding: '4px 8px', border: '1px solid #3b82f6', borderRadius: 4, fontSize: '0.88rem' }}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap', padding: '6px 10px' }}>
+                            <button onClick={() => handleSaveEditListItem(item.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', marginRight: 4 }}>Save</button>
+                            <button onClick={() => setEditingListItemId(null)} style={{ background: '#94a3b8', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: '6px 10px' }}>{manageListType === "packings" ? item.value : item.name}</td>
+                          <td style={{ textAlign: "right", whiteSpace: 'nowrap', padding: '6px 10px' }}>
+                            <button onClick={() => { setEditingListItemId(item.id); setEditingListItemVal(manageListType === "packings" ? String(item.value) : item.name); }} style={{ background: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem", marginRight: 4 }}>Edit</button>
+                            <button onClick={() => handleDeleteListItem(item.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Delete</button>
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>

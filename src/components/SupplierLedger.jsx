@@ -49,9 +49,9 @@ function SupplierLedger() {
     setLoading(false);
   };
 
-  const handleUpdateBalance = async () => {
+  const handleUpdateSupplier = async () => {
     if (!editSupplier) return;
-    await ipcRenderer.invoke('update-supplier-balance', { id: editSupplier.id, initial_balance: editBalance });
+    await ipcRenderer.invoke('update-supplier', { id: editSupplier.id, name: editName, initial_balance: editBalance });
     setEditSupplier(null);
     loadLedger();
   };
@@ -144,10 +144,12 @@ function SupplierLedger() {
 
               return (
                 <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0', cursor: 'pointer' }} onClick={() => openStatement(s)}>
-                  <td style={{ padding: '12px', fontWeight: 600 }}>{s.name}</td>
+                  <td style={{ padding: '12px', fontWeight: 600 }}>
+                    {s.name}
+                    <button onClick={(e) => { e.stopPropagation(); setEditSupplier(s); setEditName(s.name); setEditBalance(s.initial_balance); }} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer' }} title="Edit Supplier Name & Initial Balance">✎ Edit</button>
+                  </td>
                   <td style={{ padding: '12px', textAlign: 'right' }}>
                     {initBal.toLocaleString()}
-                    <button onClick={(e) => { e.stopPropagation(); setEditSupplier(s); setEditBalance(s.initial_balance); }} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer' }}>✎</button>
                   </td>
                   <td style={{ padding: '12px', textAlign: 'right' }}>{purch.toLocaleString()}</td>
                   <td style={{ padding: '12px', textAlign: 'right' }}>{disc.toLocaleString()}</td>
@@ -166,19 +168,22 @@ function SupplierLedger() {
         </table>
       </div>
 
-      {/* Edit Initial Balance Modal */}
+      {/* Edit Supplier Modal */}
       {editSupplier && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setEditSupplier(null)}>
           <div style={{ background: 'white', padding: 24, borderRadius: 8, width: 400 }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>Set Initial Balance</h3>
-            <p><strong>{editSupplier.name}</strong></p>
+            <h3 style={{ marginTop: 0 }}>Edit Supplier</h3>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem', fontWeight: 600 }}>Supplier Name</label>
+              <input type="text" value={editName} onChange={e => setEditName(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #cbd5e1', boxSizing: 'border-box' }} autoFocus />
+            </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem' }}>Amount (Positive = We owe them, Negative = They owe us)</label>
-              <input type="number" value={editBalance} onChange={e => setEditBalance(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #cbd5e1', boxSizing: 'border-box' }} autoFocus />
+              <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem', fontWeight: 600 }}>Initial Balance (Positive = We owe them, Negative = They owe us)</label>
+              <input type="number" value={editBalance} onChange={e => setEditBalance(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={() => setEditSupplier(null)} style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleUpdateBalance} style={{ padding: '8px 16px', borderRadius: 4, border: 'none', background: '#3b82f6', color: 'white', cursor: 'pointer' }}>Save</button>
+              <button onClick={handleUpdateSupplier} style={{ padding: '8px 16px', borderRadius: 4, border: 'none', background: '#3b82f6', color: 'white', cursor: 'pointer', fontWeight: 600 }}>Save Changes</button>
             </div>
           </div>
         </div>
@@ -316,14 +321,23 @@ function SupplierLedger() {
                         totalQtySum += qty;
                         totalFreight += numFreight;
 
-                        const d = new Date(t.txn_date);
-                        const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()}`;
-                        
-                        let suppDateStr = '';
-                        if (t.supp_date) {
-                          const sd = new Date(t.supp_date);
-                          suppDateStr = `${String(sd.getDate()).padStart(2, '0')}/${String(sd.getMonth()+1).padStart(2, '0')}/${sd.getFullYear()}`;
-                        }
+                        const fmtDate = (dStr) => {
+                          if (!dStr) return '';
+                          if (typeof dStr === 'string') {
+                            const clean = dStr.split('T')[0];
+                            const parts = clean.split('-');
+                            if (parts.length === 3) {
+                              const [y, m, d] = parts;
+                              return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+                            }
+                          }
+                          const d = new Date(dStr);
+                          if (isNaN(d.getTime())) return String(dStr);
+                          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                        };
+
+                        const dateStr = fmtDate(t.txn_date);
+                        const suppDateStr = fmtDate(t.supp_date);
 
                         // Determine Dr/Cr tag for Balance
                         const balTag = runningBal >= 0 ? 'Cr' : 'Dr';

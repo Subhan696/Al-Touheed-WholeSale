@@ -299,21 +299,40 @@ function ManufacturerDiscounts({ openWindow }) {
     }
   };
 
+  const [mfgError, setMfgError] = useState('');
+  const [editingMfgId, setEditingMfgId] = useState(null);
+  const [editingMfgName, setEditingMfgName] = useState('');
+
   const handleAddMfg = async () => {
+    setMfgError('');
     if (!newMfgName.trim()) return;
     await ipcRenderer.invoke('add-manufacturer', newMfgName.trim());
     setNewMfgName('');
-    const m = await ipcRenderer.invoke('get-manufacturers');
-    setManufacturers(m.map(x => x.name));
-    setMfgListFull(m);
+    await loadData();
     setTimeout(() => manageInputRef.current?.focus(), 0);
   };
 
+  const handleUpdateMfg = async (id) => {
+    setMfgError('');
+    if (!editingMfgName.trim()) return;
+    const res = await ipcRenderer.invoke('update-supplier', { id, name: editingMfgName.trim() });
+    if (res && res.success === false && res.error) {
+      setMfgError(res.error);
+      return;
+    }
+    setEditingMfgId(null);
+    setEditingMfgName('');
+    await loadData();
+  };
+
   const handleDeleteMfg = async (id) => {
-    await ipcRenderer.invoke('delete-manufacturer', id);
-    const m = await ipcRenderer.invoke('get-manufacturers');
-    setManufacturers(m.map(x => x.name));
-    setMfgListFull(m);
+    setMfgError('');
+    const res = await ipcRenderer.invoke('delete-supplier', id);
+    if (res && res.success === false && res.error) {
+      setMfgError(res.error);
+      return;
+    }
+    await loadData();
   };
 
   // Pre-calculate groups and colors
@@ -367,11 +386,10 @@ function ManufacturerDiscounts({ openWindow }) {
           <thead>
             <tr>
               <th style={{ width: 40 }}>#</th>
-              <th style={{ width: '18%' }}>Manufacturer</th>
-              <th style={{ width: '18%' }}>Supplier (Account)</th>
-              <th style={{ width: '29%' }}>Brand (Check multiple!)</th>
-              <th style={{ width: '13%' }}>Disc (%)</th>
-              <th style={{ width: '13%' }}>Disc Amount</th>
+              <th style={{ width: '36%' }}>Supplier</th>
+              <th style={{ width: '36%' }}>Brand (Check multiple!)</th>
+              <th style={{ width: '14%' }}>Disc (%)</th>
+              <th style={{ width: '14%' }}>Disc Amount</th>
               <th style={{ width: 60 }}>Act</th>
             </tr>
           </thead>
@@ -379,18 +397,6 @@ function ManufacturerDiscounts({ openWindow }) {
             {decoratedRows.map((r, i) => (
               <tr key={r.id} style={{ backgroundColor: r._bg }} className={`${r.isStart ? 'md-group-start' : ''} ${r.isEnd ? 'md-group-end' : ''} ${r._hideMfg ? 'md-mfg-hide' : ''}`}>
                 <td className="center-text">{i + 1}</td>
-                <td className="md-cell-mfg">
-                  <select
-                    ref={el => gridRefs.current[`${r.id}-manufacturer`] = el}
-                    value={r.manufacturer}
-                    onChange={e => handleRowChange(r.id, 'manufacturer', e.target.value)}
-                    onKeyDown={e => handleKeyDown(e, r.id, 'manufacturer')}
-                    className="md-select-input"
-                  >
-                    <option value=""></option>
-                    {manufacturers.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </td>
                 <td className="md-cell-mfg" style={{ position: 'relative' }}>
                   <select
                     ref={el => gridRefs.current[`${r.id}-supplier_id`] = el}
@@ -401,7 +407,7 @@ function ManufacturerDiscounts({ openWindow }) {
                     style={!r.supplier_id && r.brand ? { border: '1px solid #f59e0b', background: '#fffbeb' } : undefined}
                     title={!r.supplier_id && r.brand ? 'No supplier linked — this brand will show as "Unmapped" on stock reports' : ''}
                   >
-                    <option value="">— none —</option>
+                    <option value="">— Select Supplier —</option>
                     {suppliersList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                   {!r.supplier_id && r.brand && (
@@ -472,33 +478,60 @@ function ManufacturerDiscounts({ openWindow }) {
       </div>
 
       {showManageModal && (
-        <div className="modal-overlay" onClick={() => setShowManageModal(false)} style={{
+        <div className="modal-overlay" onClick={() => { setShowManageModal(false); setEditingMfgId(null); setMfgError(''); }} style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{
-            background: 'white', padding: '24px', borderRadius: '8px', width: '400px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+            background: 'white', padding: '24px', borderRadius: '8px', width: '420px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
           }}>
-            <button className="modal-close" onClick={() => setShowManageModal(false)} style={{ float: 'right', background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
-            <h3 style={{ margin: "0 0 16px", fontSize: "1.1rem", fontWeight: 700 }}>🏭 Manage Manufacturers</h3>
+            <button className="modal-close" onClick={() => { setShowManageModal(false); setEditingMfgId(null); setMfgError(''); }} style={{ float: 'right', background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+            <h3 style={{ margin: "0 0 16px", fontSize: "1.1rem", fontWeight: 700 }}>🏭 Manage Suppliers List</h3>
+            {mfgError && (
+              <div style={{ color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 6, padding: '8px 12px', fontSize: '0.85rem', marginBottom: 14, fontWeight: 500 }}>
+                ⚠️ {mfgError}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input ref={manageInputRef} type="text" value={newMfgName}
                 onChange={e => setNewMfgName(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") handleAddMfg(); }}
-                placeholder="New Manufacturer..." style={{ flex: 1, padding: "8px 10px", border: "1px solid #e4e6ef", borderRadius: 5, fontSize: "0.9rem" }} />
+                placeholder="New Supplier Name..." style={{ flex: 1, padding: "8px 10px", border: "1px solid #e4e6ef", borderRadius: 5, fontSize: "0.9rem" }} />
               <button className="md-btn md-btn-primary" onClick={handleAddMfg}>Add</button>
             </div>
             <div style={{ maxHeight: 300, overflowY: "auto" }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
-                  {mfgListFull.map(item => (
+                  {suppliersList.map(item => (
                     <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 0', fontSize: '0.95rem' }}>{item.name}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <button onClick={() => handleDeleteMfg(item.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Delete</button>
-                      </td>
+                      {editingMfgId === item.id ? (
+                        <>
+                          <td style={{ padding: '6px 0' }}>
+                            <input
+                              type="text"
+                              value={editingMfgName}
+                              onChange={e => setEditingMfgName(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleUpdateMfg(item.id); else if (e.key === 'Escape') setEditingMfgId(null); }}
+                              autoFocus
+                              style={{ width: '90%', padding: '4px 8px', border: '1px solid #3b82f6', borderRadius: 4, fontSize: '0.9rem' }}
+                            />
+                          </td>
+                          <td style={{ textAlign: "right", whiteSpace: 'nowrap', padding: '6px 0' }}>
+                            <button onClick={() => handleUpdateMfg(item.id)} style={{ background: "#10b981", color: "#fff", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem", marginRight: 4 }}>Save</button>
+                            <button onClick={() => setEditingMfgId(null)} style={{ background: "#94a3b8", color: "#fff", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Cancel</button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: '8px 0', fontSize: '0.95rem' }}>{item.name}</td>
+                          <td style={{ textAlign: "right", whiteSpace: 'nowrap' }}>
+                            <button onClick={() => { setEditingMfgId(item.id); setEditingMfgName(item.name); }} style={{ background: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem", marginRight: 4 }}>Edit</button>
+                            <button onClick={() => handleDeleteMfg(item.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Delete</button>
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
-                  {mfgListFull.length === 0 && <tr><td colSpan="2" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>No manufacturers found</td></tr>}
+                  {suppliersList.length === 0 && <tr><td colSpan="2" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>No suppliers found</td></tr>}
                 </tbody>
               </table>
             </div>

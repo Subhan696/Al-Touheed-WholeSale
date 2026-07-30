@@ -3,6 +3,30 @@ import { useDataVersion } from '../context/DataContext';
 
 const { ipcRenderer } = window.require('electron');
 
+const formatDateDMY = (val) => {
+  if (!val) return '—';
+  let rawStr = '';
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${d}-${m}-${y}`;
+  }
+  if (typeof val === 'string') {
+    rawStr = val.split('T')[0];
+  } else {
+    rawStr = String(val).split('T')[0];
+  }
+  const parts = rawStr.split('-');
+  if (parts.length === 3) {
+    const [y, m, d] = parts;
+    if (y && m && d) {
+      return `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
+    }
+  }
+  return rawStr;
+};
+
 function PurchaseList({ currentUser, onEditPurchase, isActive }) {
   const [purchases, setPurchases] = useState([]);
   const [search, setSearch] = useState('');
@@ -113,7 +137,7 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
             ) : filtered.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ ...td, fontWeight: 'bold', color: '#3699ff' }}>#{p.id}</td>
-                <td style={td}>{p.created_at instanceof Date ? p.created_at.toISOString().split('T')[0] : (typeof p.created_at === 'string' ? p.created_at.split('T')[0] : '—')}</td>
+                <td style={td}>{formatDateDMY(p.purchase_date || p.created_at)}</td>
                 <td style={td}>{p.invoice_no || '—'}</td>
                 <td style={td}>{p.supplier_name}</td>
                 <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#555' }}>{p.total_qty || 0}</td>

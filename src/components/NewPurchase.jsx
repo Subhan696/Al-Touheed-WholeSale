@@ -25,8 +25,8 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const isEditing = !!purchaseToEdit;
 
   const todayDMY = () => {
-    const t = new Date();
-    return `${String(t.getDate()).padStart(2, '0')}-${String(t.getMonth() + 1).padStart(2, '0')}-${t.getFullYear()}`;
+    const parts = new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi' }).split('/');
+    return `${parts[0]}-${parts[1]}-${parts[2]}`;
   };
 
   const [purchaseDate, setPurchaseDate] = useState(todayDMY);
@@ -584,7 +584,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
       // For edits, preserve original purchase_date to avoid changing historical data
       let dbPurchaseDate = purchaseDate;
       if (!isEditing) {
-        dbPurchaseDate = new Date().toISOString().split('T')[0];
+        dbPurchaseDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
       } else if (purchaseDate && purchaseDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
         const [d, m, y] = purchaseDate.split('-');
         dbPurchaseDate = `${y}-${m}-${d}`;

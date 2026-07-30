@@ -6,9 +6,34 @@ const { ipcRenderer } = window.require('electron');
 const fmt = (n) => Math.round(n || 0).toLocaleString();
 const fmt2 = (n) => (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Memoized category section component to prevent re-rendering item rows when balance visibility toggles
+const CategorySection = memo(({ cat, priceMode, fmt, fmt2 }) => (
+  <React.Fragment>
+    <tr className="ssr-cat-row">
+      <td colSpan={2}>{cat.name}</td>
+      <td className="ssr-val">{fmt(cat.totalQty)}</td>
+      <td className="ssr-val"></td>
+      <td className="ssr-val"></td>
+      <td className="ssr-val">{fmt(cat.totalValue)}</td>
+    </tr>
+    {cat.items.map(item => (
+      <tr key={item.item_code}>
+        <td>{item.item_code}</td>
+        <td style={{ color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim() || '—'}
+        </td>
+        <td className="ssr-val">{fmt(item.qty)}</td>
+        <td className="ssr-val">{fmt2(Math.round((priceMode === 'actual' ? (item.latest_net_rate || item.actual_rate || 0) : (item.list_rate || 0)) * 100) / 100)}</td>
+        <td className="ssr-val">{fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
+        <td className="ssr-val">{fmt(item.value)}</td>
+      </tr>
+    ))}
+  </React.Fragment>
+));
+
 // Memoized supplier row component for better performance
-const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplierBalances, fmt, fmt2 }) => {
-  const isCollapsed = !!collapsed[sup.name];
+const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplierBalances, showSupplierBalance, fmt, fmt2 }) => {
+  const isCollapsed = collapsed[sup.name] !== undefined ? !!collapsed[sup.name] : (sup._defaultCollapsed ?? false);
   const balKey = sup.name.trim().toLowerCase();
   const balance = supplierBalances[balKey];
 
@@ -22,7 +47,7 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           <th className="ssr-val"></th>
           <th className="ssr-val">
             Value: {fmt(sup.totalValue)}
-            {balance !== undefined && (
+            {showSupplierBalance && balance !== undefined && (
               <span style={{ marginLeft: 16, fontWeight: 400 }}>
                 | Balance: {fmt2(Math.abs(balance))} {balance >= 0 ? 'Cr' : 'Dr'}
               </span>
@@ -34,7 +59,7 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
             <th style={{ width: 100 }}>Item Code</th>
             <th>Description / Brand</th>
             <th className="ssr-val" style={{ width: 80 }}>Qty</th>
-            <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'List Price'}</th>
+            <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
             <th className="ssr-val" style={{ width: 100 }}>Sale Price</th>
             <th className="ssr-val" style={{ width: 120 }}>Value</th>
           </tr>
@@ -43,27 +68,7 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
       {!isCollapsed && (
         <tbody>
           {sup.categories.map(cat => (
-            <React.Fragment key={cat.name}>
-              <tr className="ssr-cat-row">
-                <td colSpan={2}>{cat.name}</td>
-                <td className="ssr-val">{fmt(cat.totalQty)}</td>
-                <td className="ssr-val"></td>
-                <td className="ssr-val"></td>
-                <td className="ssr-val">{fmt(cat.totalValue)}</td>
-              </tr>
-              {cat.items.map(item => (
-                <tr key={item.item_code}>
-                  <td>{item.item_code}</td>
-                  <td style={{ color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim() || '—'}
-                  </td>
-                  <td className="ssr-val">{fmt(item.qty)}</td>
-                  <td className="ssr-val">{fmt2(Math.round((priceMode === 'actual' ? (item.latest_net_rate || item.actual_rate || 0) : (item.list_rate || 0)) * 100) / 100)}</td>
-                  <td className="ssr-val">{fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
-                  <td className="ssr-val">{fmt(item.value)}</td>
-                </tr>
-              ))}
-            </React.Fragment>
+            <CategorySection key={cat.name} cat={cat} priceMode={priceMode} fmt={fmt} fmt2={fmt2} />
           ))}
           <tr className="ssr-subtotal-row">
             <td colSpan={2} style={{ textAlign: 'right' }}>Supplier Total:</td>
@@ -87,15 +92,18 @@ function SupplierStockReport() {
   // to "everything" whenever fresh data loads, so "select all" is a real,
   // visible state rather than an implicit null.
   const [priceMode, setPriceMode] = useState('actual'); // 'list' | 'actual'
+  const [showSupplierBalance, setShowSupplierBalance] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedSuppliers, setSelectedSuppliers] = useState(new Set());
   const [selectedCategories, setSelectedCategories] = useState(new Set());
+  const [selectedYears, setSelectedYears] = useState(new Set());
   const [collapsed, setCollapsed] = useState({});
 
   // Dropdown popover state (kept compact — no permanent full-width panel)
-  const [openDropdown, setOpenDropdown] = useState(null); // 'suppliers' | 'categories' | null
+  const [openDropdown, setOpenDropdown] = useState(null); // 'suppliers' | 'categories' | 'years' | null
   const [supplierSearch, setSupplierSearch] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
+  const [yearSearch, setYearSearch] = useState('');
   const toolbarRef = useRef(null);
 
   useEffect(() => {
@@ -122,9 +130,10 @@ function SupplierStockReport() {
       const rows = Array.isArray(stockData) ? stockData : [];
       setReportData(rows);
 
-      // Filters default to "everything selected" on every fresh load.
-      setSelectedSuppliers(new Set(rows.map(r => r.supplier_name || 'Unassigned')));
+      // Filters default to NO suppliers selected by default on initial load for instant performance.
+      setSelectedSuppliers(new Set());
       setSelectedCategories(new Set(rows.map(r => r.category || 'Uncategorized')));
+      setSelectedYears(new Set(rows.map(r => r.year ? String(r.year).trim() : 'Unspecified')));
       setSearch('');
 
       const balMap = {};
@@ -141,11 +150,11 @@ function SupplierStockReport() {
   const [statusMsg, setStatusMsg] = useState('');
 
   const handlePrint = () => {
-    printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances);
+    printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
   };
 
   const handleSavePDF = async () => {
-    const res = await saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances);
+    const res = await saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
     if (res?.success) {
       setStatusMsg(`✓ PDF saved!`);
       setTimeout(() => setStatusMsg(''), 3000);
@@ -166,6 +175,11 @@ function SupplierStockReport() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [reportData]);
 
+  const allYears = useMemo(() => {
+    const set = new Set(reportData.map(r => r.year ? String(r.year).trim() : 'Unspecified'));
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [reportData]);
+
   const unmappedCount = useMemo(
     () => reportData.filter(r => (r.supplier_name || '').startsWith('Unmapped:')).length,
     [reportData]
@@ -184,10 +198,12 @@ function SupplierStockReport() {
     const filtered = reportData.filter(r => {
       const supplier = r.supplier_name || 'Unassigned';
       const category = r.category || 'Uncategorized';
+      const itemYear = r.year ? String(r.year).trim() : 'Unspecified';
       if (!selectedSuppliers.has(supplier)) return false;
       if (!selectedCategories.has(category)) return false;
+      if (!selectedYears.has(itemYear)) return false;
       if (q) {
-        const hay = `${r.item_code} ${r.description} ${r.brand}`.toLowerCase();
+        const hay = `${r.item_code} ${r.description} ${r.brand} ${r.year || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -223,28 +239,42 @@ function SupplierStockReport() {
       gVal += value;
     });
 
+    const defaultCollapse = selectedSuppliers.size > 1;
     const groupList = Object.values(bySupplier)
-      .map(sup => ({ ...sup, categories: Object.values(sup.categories).sort((a, b) => a.name.localeCompare(b.name)) }))
+      .map(sup => ({
+        ...sup,
+        _defaultCollapsed: defaultCollapse,
+        categories: Object.values(sup.categories).sort((a, b) => a.name.localeCompare(b.name))
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return { groups: groupList, grandQty: gQty, grandValue: gVal };
-  }, [reportData, priceMode, search, selectedSuppliers, selectedCategories]);
+  }, [reportData, priceMode, search, selectedSuppliers, selectedCategories, selectedYears]);
 
   const toggleCollapsed = useCallback((name) => setCollapsed(prev => ({ ...prev, [name]: !prev[name] })), []);
 
   const clearFilters = useCallback(() => {
-    setSelectedSuppliers(new Set(allSuppliers));
+    setSelectedSuppliers(new Set());
     setSelectedCategories(new Set(allCategories));
+    setSelectedYears(new Set(allYears));
     setSearch('');
     setSupplierSearch('');
     setCategorySearch('');
-  }, [allSuppliers, allCategories]);
+    setYearSearch('');
+    setCollapsed({});
+  }, [allCategories, allYears]);
 
-  const suppliersFilterActive = useMemo(() => selectedSuppliers.size < allSuppliers.length, [selectedSuppliers, allSuppliers]);
+  const allAreCollapsed = useMemo(() => {
+    if (groups.length === 0) return false;
+    return groups.every(g => (collapsed[g.name] !== undefined ? collapsed[g.name] : g._defaultCollapsed));
+  }, [groups, collapsed]);
+
+  const suppliersFilterActive = useMemo(() => selectedSuppliers.size > 0 && selectedSuppliers.size < allSuppliers.length, [selectedSuppliers, allSuppliers]);
   const categoriesFilterActive = useMemo(() => selectedCategories.size < allCategories.length, [selectedCategories, allCategories]);
+  const yearsFilterActive = useMemo(() => selectedYears.size < allYears.length, [selectedYears, allYears]);
   const activeFilterCount = useMemo(
-    () => (suppliersFilterActive ? 1 : 0) + (categoriesFilterActive ? 1 : 0) + (search.trim() ? 1 : 0),
-    [suppliersFilterActive, categoriesFilterActive, search]
+    () => (selectedSuppliers.size > 0 ? 1 : 0) + (categoriesFilterActive ? 1 : 0) + (yearsFilterActive ? 1 : 0) + (search.trim() ? 1 : 0),
+    [selectedSuppliers, categoriesFilterActive, yearsFilterActive, search]
   );
 
   const visibleSupplierOptions = useMemo(() =>
@@ -257,12 +287,23 @@ function SupplierStockReport() {
     [allCategories, categorySearch]
   );
 
+  const visibleYearOptions = useMemo(() =>
+    allYears.filter(y => y.toLowerCase().includes(yearSearch.toLowerCase())),
+    [allYears, yearSearch]
+  );
+
   // Memoize filtered supplier balances for the summary table
   const filteredSupplierBalances = useMemo(() => {
+    if (!showSupplierBalance) return [];
     return Object.entries(supplierBalances)
       .filter(([name]) => !suppliersFilterActive || selectedSuppliers.has(name))
       .sort((a, b) => a[0].localeCompare(b[0]));
-  }, [supplierBalances, suppliersFilterActive, selectedSuppliers]);
+  }, [supplierBalances, suppliersFilterActive, selectedSuppliers, showSupplierBalance]);
+
+  const totalSupplierBalance = useMemo(() => {
+    if (!showSupplierBalance || filteredSupplierBalances.length === 0) return 0;
+    return filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0);
+  }, [showSupplierBalance, filteredSupplierBalances]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12, overflowY: 'auto' }}>
@@ -271,16 +312,16 @@ function SupplierStockReport() {
         <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: '#1e293b' }}>Stock in Hand — Supplier Wise</h2>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {statusMsg && <span style={{ fontSize: '0.85rem', fontWeight: 600, color: statusMsg.startsWith('Error') ? '#dc2626' : '#16a34a' }}>{statusMsg}</span>}
-          <button onClick={loadReport} className="btn btn-secondary" disabled={loading}>{loading ? 'Loading...' : '↻ Refresh'}</button>
-          <button onClick={handlePrint} className="btn btn-primary" style={{ background: '#3b82f6', borderColor: '#3b82f6' }}>🖨️ Print Report</button>
-          <button onClick={handleSavePDF} className="btn btn-primary" style={{ background: '#10b981', borderColor: '#10b981' }}>📄 Save PDF</button>
+          <button onClick={loadReport} className="btn btn-secondary" disabled={loading}>{loading ? 'Loading...' : 'Refresh'}</button>
+          <button onClick={handlePrint} className="btn btn-primary" style={{ background: '#3b82f6', borderColor: '#3b82f6' }}>Print Report</button>
+          <button onClick={handleSavePDF} className="btn btn-primary" style={{ background: '#10b981', borderColor: '#10b981' }}>Save PDF</button>
         </div>
       </div>
 
       {unmappedCount > 0 && (
         <div className="no-print" style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '9px 16px', color: '#92400e', fontSize: '0.85rem' }}>
-          ⚠️ {unmappedCount} item{unmappedCount === 1 ? '' : 's'} in stock have a brand not linked to a supplier — grouped under "Unmapped: [brand]" below.
-          Fix it on the <b>Manufacturer Discounts</b> page.
+          {unmappedCount} item{unmappedCount === 1 ? '' : 's'} in stock have a brand not linked to a supplier — grouped under "Unmapped: [brand]" below.
+          Fix it on the Manufacturer Discounts page.
         </div>
       )}
 
@@ -302,7 +343,7 @@ function SupplierStockReport() {
               background: priceMode === 'list' ? '#0369a1' : '#fff', color: priceMode === 'list' ? '#fff' : '#334155'
             }}
           >
-            List Price
+            Purchase Price
           </button>
           <button
             onClick={() => setPriceMode('actual')}
@@ -315,6 +356,20 @@ function SupplierStockReport() {
           </button>
         </div>
 
+        {/* Supplier Balance show/hide toggle */}
+        <button
+          onClick={() => setShowSupplierBalance(prev => !prev)}
+          style={{
+            padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+            border: `1px solid ${showSupplierBalance ? '#0369a1' : '#cbd5e1'}`,
+            background: showSupplierBalance ? '#e0f2fe' : '#fff',
+            color: showSupplierBalance ? '#0369a1' : '#64748b'
+          }}
+          title="Toggle visibility of supplier balance in UI, Print, and PDF"
+        >
+          {showSupplierBalance ? 'Supplier Balance: Shown' : 'Supplier Balance: Hidden'}
+        </button>
+
         <div style={{ width: 1, alignSelf: 'stretch', background: '#e2e8f0', margin: '0 2px' }} />
 
         {/* Suppliers dropdown */}
@@ -323,11 +378,11 @@ function SupplierStockReport() {
             onClick={() => setOpenDropdown(d => d === 'suppliers' ? null : 'suppliers')}
             style={{
               padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
-              border: `1px solid ${suppliersFilterActive ? '#0369a1' : '#cbd5e1'}`,
-              background: suppliersFilterActive ? '#e0f2fe' : '#fff', color: suppliersFilterActive ? '#0369a1' : '#334155'
+              border: `1px solid ${selectedSuppliers.size > 0 ? '#0369a1' : '#cbd5e1'}`,
+              background: selectedSuppliers.size > 0 ? '#e0f2fe' : '#fff', color: selectedSuppliers.size > 0 ? '#0369a1' : '#334155'
             }}
           >
-            Suppliers {suppliersFilterActive ? `(${selectedSuppliers.size}/${allSuppliers.length})` : '(All)'} ▾
+            Suppliers {selectedSuppliers.size === 0 ? '(None)' : (selectedSuppliers.size === allSuppliers.length ? '(All)' : `(${selectedSuppliers.size}/${allSuppliers.length})`)} ▾
           </button>
           {openDropdown === 'suppliers' && (
             <div style={dropdownPanelStyle}>
@@ -405,19 +460,80 @@ function SupplierStockReport() {
           )}
         </div>
 
+        {/* Year dropdown */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setOpenDropdown(d => d === 'years' ? null : 'years')}
+            style={{
+              padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+              border: `1px solid ${yearsFilterActive ? '#0369a1' : '#cbd5e1'}`,
+              background: yearsFilterActive ? '#e0f2fe' : '#fff', color: yearsFilterActive ? '#0369a1' : '#334155'
+            }}
+          >
+            Year {yearsFilterActive ? `(${selectedYears.size}/${allYears.length})` : '(All)'} ▾
+          </button>
+          {openDropdown === 'years' && (
+            <div style={dropdownPanelStyle}>
+              <input
+                autoFocus
+                value={yearSearch}
+                onChange={e => setYearSearch(e.target.value)}
+                placeholder="Filter year..."
+                style={dropdownSearchStyle}
+              />
+              <div style={{ display: 'flex', gap: 10, padding: '4px 10px 6px' }}>
+                <button onClick={() => setSelectedYears(new Set(allYears))} style={linkBtnStyle}>Select all</button>
+                <button onClick={() => setSelectedYears(new Set())} style={linkBtnStyle}>Clear</button>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                {visibleYearOptions.length === 0 && (
+                  <div style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '0.82rem' }}>No matches</div>
+                )}
+                {visibleYearOptions.map(y => (
+                  <label key={y} style={dropdownItemStyle}>
+                    <input
+                      type="checkbox"
+                      checked={selectedYears.has(y)}
+                      onChange={() => toggleValue(setSelectedYears, selectedYears, y)}
+                    />
+                    {y}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div style={{ width: 1, alignSelf: 'stretch', background: '#e2e8f0', margin: '0 2px' }} />
 
         {/* Search */}
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="🔍 Item code, description, brand..."
+          placeholder="Item code, description, brand, year..."
           style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 7, fontSize: '0.82rem', width: 220 }}
         />
 
+        {groups.length > 0 && (
+          <button
+            onClick={() => {
+              const allCol = {};
+              const nextState = !allAreCollapsed;
+              groups.forEach(g => { allCol[g.name] = nextState; });
+              setCollapsed(allCol);
+            }}
+            style={{
+              padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+              border: '1px solid #cbd5e1', background: '#f8fafc', color: '#334155'
+            }}
+          >
+            {allAreCollapsed ? '▶ Expand All' : '▼ Collapse All'}
+          </button>
+        )}
+
         {activeFilterCount > 0 && (
           <button onClick={clearFilters} style={{ ...linkBtnStyle, fontSize: '0.82rem', marginLeft: 'auto' }}>
-            ✕ Clear filters ({activeFilterCount})
+            Clear filters ({activeFilterCount})
           </button>
         )}
       </div>
@@ -426,6 +542,10 @@ function SupplierStockReport() {
       <div style={{ background: '#fff', border: '1px solid #e4e6ef', borderRadius: 10, padding: 20, flex: 1, overflowY: 'auto' }}>
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading report data...</div>
+        ) : selectedSuppliers.size === 0 ? (
+          <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: '0.95rem' }}>
+            📦 <strong>No suppliers selected.</strong> Please select a supplier from the <strong>Suppliers</strong> dropdown above to view stock.
+          </div>
         ) : groups.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>No stock matches the current filters.</div>
         ) : (
@@ -449,7 +569,7 @@ function SupplierStockReport() {
             `}</style>
 
             <h1 style={{ display: 'none', margin: '0 0 20px', textAlign: 'center' }} className="print-heading">
-              Stock in Hand — Supplier Wise ({priceMode === 'actual' ? 'Actual Cost' : 'List Price'})
+              Stock in Hand — Supplier Wise ({priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'})
             </h1>
             <style>{`@media print { .print-heading { display: block !important; } }`}</style>
 
@@ -461,6 +581,7 @@ function SupplierStockReport() {
                 toggleCollapsed={toggleCollapsed}
                 priceMode={priceMode}
                 supplierBalances={supplierBalances}
+                showSupplierBalance={showSupplierBalance}
                 fmt={fmt}
                 fmt2={fmt2}
               />
@@ -475,33 +596,22 @@ function SupplierStockReport() {
                   <td className="ssr-val"></td>
                   <td className="ssr-val">{fmt(grandValue)}</td>
                 </tr>
-                {filteredSupplierBalances.length > 0 && (
-                  <>
-                    <tr className="ssr-subtotal-row">
-                      <td colSpan={2} style={{ textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}>
-                        Supp. Balance:
-                      </td>
-                      <td colSpan={4} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                        {fmt2(Math.abs(filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0)))}{' '}
-                        {filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0) >= 0 ? 'Cr' : 'Dr'}
-                      </td>
-                    </tr>
-                    <tr className="ssr-subtotal-row">
-                      <td colSpan={2} style={{ textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}>
-                        Balance:
-                      </td>
-                      <td colSpan={4} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                        {fmt2(Math.abs(filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0)))}{' '}
-                        {filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0) >= 0 ? 'Cr' : 'Dr'}
-                      </td>
-                    </tr>
-                  </>
+                {showSupplierBalance && filteredSupplierBalances.length > 0 && (
+                  <tr className="ssr-subtotal-row">
+                    <td colSpan={2} style={{ textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}>
+                      Supp. Balance:
+                    </td>
+                    <td colSpan={4} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+                      {fmt2(Math.abs(totalSupplierBalance))}{' '}
+                      {totalSupplierBalance >= 0 ? 'Cr' : 'Dr'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
 
             {/* Supplier Balances Summary */}
-            {filteredSupplierBalances.length > 0 && (
+            {showSupplierBalance && filteredSupplierBalances.length > 0 && (
               <table className="ssr-table" style={{ marginTop: 20 }}>
                 <thead>
                   <tr>

@@ -308,7 +308,7 @@ function App() {
 
           <div className="nav-divider" />
 
-          {currentUser?.role === 'admin' && networkMode !== 'client' && (
+          {currentUser?.role === 'admin' && (
             <button className={`nav-item ${activeTab === 'backup' ? 'active' : ''}`} onClick={() => openWindow('backup')}>
               <span className="icon">💾</span> Backup
             </button>

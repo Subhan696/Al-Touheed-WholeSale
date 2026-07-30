@@ -1,9 +1,9 @@
 const { ipcRenderer } = window.require('electron');
 
-export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances = {}) {
+export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances = {}, showSupplierBalance = true) {
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
-  const priceModeText = priceMode === 'actual' ? 'Actual Cost' : 'List Price';
+  const priceModeText = priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price';
 
   const fmt = (n) => Math.round(n || 0).toLocaleString();
   const fmt2 = (n) => (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -14,7 +14,7 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     const balKey = (sup.name || '').trim().toLowerCase();
     const balance = supplierBalances[balKey];
     let balText = '';
-    if (balance !== undefined) {
+    if (showSupplierBalance && balance !== undefined) {
       balText = ` | Balance: ${fmt2(Math.abs(balance))} ${balance >= 0 ? 'Cr' : 'Dr'}`;
     }
 
@@ -77,6 +77,43 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
       </div>
     `;
   });
+
+  let supplierBalancesSummaryHtml = '';
+  if (showSupplierBalance && Object.keys(supplierBalances).length > 0) {
+    const filteredBals = Object.entries(supplierBalances)
+      .filter(([name]) => groups.some(g => (g.name || '').trim().toLowerCase() === name))
+      .sort((a, b) => a[0].localeCompare(b[0]));
+
+    if (filteredBals.length > 0) {
+      const rowsHtml = filteredBals.map(([name, bal]) => `
+        <tr>
+          <td style="border: 1px solid #000; padding: 4px 6px;">${name}</td>
+          <td style="border: 1px solid #000; padding: 4px 6px; text-align: center;">${bal >= 0 ? 'Cr' : 'Dr'}</td>
+          <td style="border: 1px solid #000; padding: 4px 6px; text-align: right; font-weight: bold;">${fmt2(Math.abs(bal))}</td>
+        </tr>
+      `).join('');
+
+      supplierBalancesSummaryHtml = `
+        <div style="margin-top: 20px; page-break-inside: avoid;">
+          <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 5px 10px; font-weight: 900; font-size: 12px;">
+            SUPPLIER LEDGER BALANCES SUMMARY
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-top: -1px;">
+            <thead>
+              <tr style="background: #f1f5f9; font-weight: bold;">
+                <th style="border: 1px solid #000; padding: 5px; text-align: left;">Supplier Name</th>
+                <th style="border: 1px solid #000; padding: 5px; width: 100px; text-align: center;">Type</th>
+                <th style="border: 1px solid #000; padding: 5px; width: 120px; text-align: right;">Net Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
 
   return `
   <!DOCTYPE html>
@@ -151,13 +188,14 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     </table>
 
     ${suppliersHtml}
+    ${supplierBalancesSummaryHtml}
   </body>
   </html>
   `;
 }
 
-export async function printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances) {
-  const html = buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances);
+export async function printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance = true) {
+  const html = buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
   try {
     return await ipcRenderer.invoke('print-manufacturer-stock-html', { html });
   } catch (err) {
@@ -166,8 +204,8 @@ export async function printManufacturerStock(groups, grandQty, grandValue, price
   }
 }
 
-export async function saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances) {
-  const html = buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances);
+export async function saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance = true) {
+  const html = buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
   const filename = `Manufacturer_Stock_Report_${new Date().toISOString().split('T')[0]}.pdf`;
   try {
     return await ipcRenderer.invoke('save-manufacturer-stock-pdf', { html, filename });

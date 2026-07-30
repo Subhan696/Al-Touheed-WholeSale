@@ -175,15 +175,19 @@ async function executeAutoBackup() {
     const atgDir = path.join(backupRoot, 'SHOP_Backup');
     fs.mkdirSync(atgDir, { recursive: true });
 
-    const exportData = {};
-    for (const t of BACKUP_TABLES) {
-      const res = await query(`SELECT * FROM ${t} ORDER BY id`);
-      exportData[t] = res.rows;
-    }
-    // Also backup tables without id column
-    for (const t of BACKUP_TABLES_NO_ID) {
-      const res = await query(`SELECT * FROM ${t}`);
-      exportData[t] = res.rows;
+    let exportData = {};
+    const networkMode = store.get('networkMode', 'server');
+    if (networkMode === 'client') {
+      exportData = await forwardToServer('export-database-dump', {});
+    } else {
+      for (const t of BACKUP_TABLES) {
+        const res = await query(`SELECT * FROM ${t} ORDER BY id`);
+        exportData[t] = res.rows;
+      }
+      for (const t of BACKUP_TABLES_NO_ID) {
+        const res = await query(`SELECT * FROM ${t}`);
+        exportData[t] = res.rows;
+      }
     }
 
     const liveFile = path.join(atgDir, 'shop.json');
@@ -199,22 +203,18 @@ async function executeAutoBackup() {
   }
 }
 
-async function runRestore(fileToRestore, skipBackup = false) {
+async function runRestoreData(parsedData, skipBackup = false) {
   if (isRestoring) return { success: false, error: 'A restore is already in progress.' };
-  if (!fs.existsSync(fileToRestore)) return { success: false, error: 'Backup file not found: ' + fileToRestore };
+  if (!parsedData) return { success: false, error: 'Invalid or empty backup data provided.' };
 
   try {
     isRestoring = true;
-    const raw = fs.readFileSync(fileToRestore, 'utf-8');
-    let parsed = JSON.parse(raw);
-    let fileData = parsed.data ? parsed : { data: parsed };
+    let fileData = parsedData.data ? parsedData : { data: parsedData };
 
     await query('BEGIN');
 
     // Truncate all tables in reverse dependency order to avoid FK violations
-    // Tables with id (with CASCADE to handle all FK refs)
     await query(`TRUNCATE ${BACKUP_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
-    // Tables without serial id
     for (const t of BACKUP_TABLES_NO_ID) {
       await query(`TRUNCATE ${t}`);
     }
@@ -230,13 +230,12 @@ async function runRestore(fileToRestore, skipBackup = false) {
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
         await query(`INSERT INTO "${table}" (${colNames}) VALUES (${placeholders})`, values);
       }
-      // Reset the serial sequence so new inserts get correct next IDs
       try {
         await query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE((SELECT MAX(id) FROM "${table}"), 0) + 1, false)`);
       } catch (e) { /* table may not have a sequence */ }
     }
 
-    // Restore tables without id (daily_sessions, global_counters)
+    // Restore tables without id
     for (const table of BACKUP_TABLES_NO_ID) {
       const rows = fileData.data ? fileData.data[table] : fileData[table];
       if (!rows || rows.length === 0) continue;
@@ -251,7 +250,6 @@ async function runRestore(fileToRestore, skipBackup = false) {
 
     await query('COMMIT');
 
-    // Broadcast updates to all relevant listeners
     for (const ch of ['stock', 'purchases', 'sales', 'purchase-returns', 'sales-returns',
       'customers', 'suppliers', 'gl-accounts', 'vouchers']) {
       broadcast(ch);
@@ -268,6 +266,17 @@ async function runRestore(fileToRestore, skipBackup = false) {
     try { await query('ROLLBACK'); } catch (_) { }
     console.error('[Restore] Error:', err);
     return { success: false, error: 'Restore failed: ' + err.message };
+  }
+}
+
+async function runRestore(fileToRestore, skipBackup = false) {
+  if (!fs.existsSync(fileToRestore)) return { success: false, error: 'Backup file not found: ' + fileToRestore };
+  try {
+    const raw = fs.readFileSync(fileToRestore, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return await runRestoreData(parsed, skipBackup);
+  } catch (err) {
+    return { success: false, error: 'Invalid backup file format: ' + err.message };
   }
 }
 
@@ -546,10 +555,13 @@ async function initDatabase() {
       id SERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
       phone TEXT DEFAULT '',
+      city TEXT DEFAULT '',
       address TEXT DEFAULT '',
       initial_balance NUMERIC(15,2) NOT NULL DEFAULT 0,
       opening_date DATE
     );
+
+    ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS city TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS supplier_payments (
       id SERIAL PRIMARY KEY,
@@ -1607,7 +1619,29 @@ async function handleIPC(channel, ...args) {
 
     case 'get-brands': { const r = await query('SELECT * FROM brands ORDER BY name'); return r.rows; }
     case 'add-brand': { await query('INSERT INTO brands (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('brands'); return { success: true }; }
-    case 'update-brand': { await query('UPDATE brands SET name=$1 WHERE id=$2', [data.name, data.id]); broadcast('brands'); return { success: true }; }
+    case 'update-brand': {
+      try {
+        const { id, name } = data;
+        const newName = (name || '').trim();
+        if (!newName) return { success: false, error: 'Brand name cannot be empty' };
+
+        const prev = await query('SELECT name FROM brands WHERE id = $1', [id]);
+        const oldName = prev.rows[0]?.name;
+
+        await query('UPDATE brands SET name=$1 WHERE id=$2', [newName, id]);
+
+        if (oldName && oldName.trim().toLowerCase() !== newName.toLowerCase()) {
+          await query('UPDATE products SET brand=$1 WHERE LOWER(TRIM(brand))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE manufacturer_brands SET brand_name=$1 WHERE LOWER(TRIM(brand_name))=LOWER(TRIM($2))', [newName, oldName]);
+        }
+
+        broadcast('brands');
+        return { success: true };
+      } catch (err) {
+        console.error('Error updating brand:', err);
+        return { success: false, error: err.message };
+      }
+    }
     case 'delete-brand': { await query('DELETE FROM brands WHERE id=$1', [data]); broadcast('brands'); return { success: true }; }
     case 'get-cities': { const r = await query('SELECT * FROM cities ORDER BY name'); return r.rows; }
     case 'add-city': { await query('INSERT INTO cities (name) VALUES ($1) ON CONFLICT DO NOTHING', [data]); broadcast('cities'); return { success: true }; }
@@ -2482,6 +2516,74 @@ async function handleIPC(channel, ...args) {
       `);
       return res.rows;
     }
+    case 'update-supplier': {
+      try {
+        const { id, name, phone, city, initial_balance } = data;
+        const newName = (name || '').trim();
+        if (!newName) return { success: false, error: 'Supplier name cannot be empty' };
+
+        const prev = await query('SELECT name FROM suppliers WHERE id = $1', [id]);
+        const oldName = prev.rows[0]?.name;
+
+        const initBal = initial_balance !== undefined ? (parseFloat(initial_balance) || 0) : undefined;
+        if (initBal !== undefined) {
+          await query('UPDATE suppliers SET name=$1, initial_balance=$2 WHERE id=$3', [newName, initBal, id]);
+        } else {
+          await query('UPDATE suppliers SET name=$1 WHERE id=$2', [newName, id]);
+        }
+
+        if (oldName && oldName.trim().toLowerCase() !== newName.toLowerCase()) {
+          await query('UPDATE manufacturers SET name=$1 WHERE LOWER(TRIM(name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE manufacturer_brands SET company_name=$1 WHERE LOWER(TRIM(company_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE purchases SET supplier_name=$1 WHERE LOWER(TRIM(supplier_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE supplier_payments SET supplier_name=$1 WHERE LOWER(TRIM(supplier_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE purchase_returns SET supplier_name=$1 WHERE LOWER(TRIM(supplier_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query(`UPDATE gl_accounts SET account_name = $1 WHERE account_type = 'Supplier' AND (reference_id = $2 OR LOWER(TRIM(account_name)) = LOWER(TRIM($3)))`, ['Supplier - ' + newName, id, 'Supplier - ' + oldName]);
+        }
+
+        broadcast('suppliers');
+        broadcast('manufacturers');
+        broadcast('gl-accounts');
+        broadcast('purchases');
+        broadcast('purchase-returns');
+        return { success: true };
+      } catch (err) {
+        console.error('Error updating supplier:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    case 'delete-supplier': {
+      try {
+        const id = data;
+        const prev = await query('SELECT name FROM suppliers WHERE id = $1', [id]);
+        const oldName = prev.rows[0]?.name;
+
+        if (oldName) {
+          const purCheck = await query('SELECT id FROM purchases WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) LIMIT 1', [oldName]);
+          const payCheck = await query('SELECT id FROM supplier_payments WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) LIMIT 1', [oldName]);
+          const retCheck = await query('SELECT id FROM purchase_returns WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) LIMIT 1', [oldName]);
+
+          if (purCheck.rows.length > 0 || payCheck.rows.length > 0 || retCheck.rows.length > 0) {
+            return {
+              success: false,
+              error: `Cannot delete '${oldName}' because financial transaction records exist. All purchase bills, payments, and ledger data remain safely preserved.`
+            };
+          }
+        }
+
+        await query('DELETE FROM suppliers WHERE id=$1', [id]);
+        if (oldName) {
+          await query('DELETE FROM manufacturers WHERE LOWER(TRIM(name))=LOWER(TRIM($1))', [oldName]);
+        }
+
+        broadcast('suppliers');
+        broadcast('manufacturers');
+        return { success: true };
+      } catch (err) {
+        console.error('Error deleting supplier:', err);
+        return { success: false, error: err.message };
+      }
+    }
     case 'update-supplier-balance': {
       const { id, initial_balance } = data;
       const initBal = parseFloat(initial_balance) || 0;
@@ -3015,9 +3117,65 @@ async function handleIPC(channel, ...args) {
       }
       return { success: true };
     }
+    case 'update-manufacturer': {
+      try {
+        const { id, name } = data;
+        const newName = (name || '').trim();
+        if (!newName) return { success: false, error: 'Manufacturer name cannot be empty' };
+
+        const prev = await query('SELECT name FROM manufacturers WHERE id = $1', [id]);
+        const oldName = prev.rows[0]?.name;
+
+        await query('UPDATE manufacturers SET name=$1 WHERE id=$2', [newName, id]);
+
+        if (oldName && oldName.trim().toLowerCase() !== newName.toLowerCase()) {
+          await query('UPDATE suppliers SET name=$1 WHERE LOWER(TRIM(name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE manufacturer_brands SET company_name=$1 WHERE LOWER(TRIM(company_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE purchases SET supplier_name=$1 WHERE LOWER(TRIM(supplier_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE supplier_payments SET supplier_name=$1 WHERE LOWER(TRIM(supplier_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query('UPDATE purchase_returns SET supplier_name=$1 WHERE LOWER(TRIM(supplier_name))=LOWER(TRIM($2))', [newName, oldName]);
+          await query(`UPDATE gl_accounts SET account_name = $1 WHERE account_type = 'Supplier' AND LOWER(TRIM(account_name)) = LOWER(TRIM($2))`, ['Supplier - ' + newName, 'Supplier - ' + oldName]);
+        }
+
+        broadcast('manufacturers');
+        broadcast('suppliers');
+        broadcast('gl-accounts');
+        broadcast('purchases');
+        broadcast('purchase-returns');
+        return { success: true };
+      } catch (err) {
+        console.error('Error updating manufacturer:', err);
+        return { success: false, error: err.message };
+      }
+    }
     case 'delete-manufacturer': {
-      await query('DELETE FROM manufacturers WHERE id=$1', [data]);
-      return { success: true };
+      try {
+        const id = data;
+        const prev = await query('SELECT name FROM manufacturers WHERE id = $1', [id]);
+        const oldName = prev.rows[0]?.name;
+
+        if (oldName) {
+          const purCheck = await query('SELECT id FROM purchases WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) LIMIT 1', [oldName]);
+          const payCheck = await query('SELECT id FROM supplier_payments WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) LIMIT 1', [oldName]);
+          const retCheck = await query('SELECT id FROM purchase_returns WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) LIMIT 1', [oldName]);
+
+          if (purCheck.rows.length > 0 || payCheck.rows.length > 0 || retCheck.rows.length > 0) {
+            return {
+              success: false,
+              error: `Cannot delete '${oldName}' because financial transaction records exist. All purchase bills, payments, and ledger data remain safely preserved.`
+            };
+          }
+          await query('DELETE FROM suppliers WHERE LOWER(TRIM(name))=LOWER(TRIM($1))', [oldName]);
+        }
+
+        await query('DELETE FROM manufacturers WHERE id=$1', [id]);
+        broadcast('manufacturers');
+        broadcast('suppliers');
+        return { success: true };
+      } catch (err) {
+        console.error('Error deleting manufacturer:', err);
+        return { success: false, error: err.message };
+      }
     }
 
     // ─── PAYMENTS ─────────────────────────────────────────────────────────────
@@ -3261,7 +3419,20 @@ async function handleIPC(channel, ...args) {
       if (!backupRoot && !specificFile) return { success: false, error: 'No backup path configured' };
 
       const fileToRestore = specificFile || path.join(backupRoot, 'SHOP_Backup', 'shop.json');
-      return await runRestore(fileToRestore);
+      if (!fs.existsSync(fileToRestore)) return { success: false, error: 'Backup file not found: ' + fileToRestore };
+
+      try {
+        const raw = fs.readFileSync(fileToRestore, 'utf-8');
+        const parsed = JSON.parse(raw);
+
+        const networkMode = store.get('networkMode', 'server');
+        if (networkMode === 'client') {
+          return await forwardToServer('import-database-restore', parsed);
+        }
+        return await runRestoreData(parsed);
+      } catch (err) {
+        return { success: false, error: 'Restore failed: ' + err.message };
+      }
     }
 
 
@@ -3270,7 +3441,7 @@ async function handleIPC(channel, ...args) {
       const res = await query(`
         SELECT 
           ('PE-' || pe.id)::text as id,
-          p.purchase_date,
+          COALESCE(p.created_at::date, p.purchase_date) as purchase_date,
           pe.account_name,
           p.supplier_name,
           p.invoice_no,
@@ -3282,7 +3453,7 @@ async function handleIPC(channel, ...args) {
         FROM purchase_expenses pe
         JOIN purchases p ON p.id = pe.purchase_id
         WHERE pe.amount > 0
-          AND p.purchase_date BETWEEN $1 AND $2
+          AND COALESCE(p.created_at::date, p.purchase_date) BETWEEN $1 AND $2
 
         UNION ALL
 
@@ -3314,7 +3485,7 @@ async function handleIPC(channel, ...args) {
 
       const baseTxSql = `
         SELECT
-          p.purchase_date as txn_date,
+          COALESCE(p.created_at::date, p.purchase_date) as txn_date,
           pe.account_name,
           'PURCHASE' as source,
           ('PV-' || COALESCE(NULLIF(p.invoice_no, ''), p.id::text)) as type_code,
@@ -4116,6 +4287,40 @@ async function handleIPC(channel, ...args) {
       return r.rows;
     }
 
+    case 'export-database-dump': {
+      const exportData = {};
+      for (const t of BACKUP_TABLES) {
+        const res = await query(`SELECT * FROM ${t} ORDER BY id`);
+        exportData[t] = res.rows;
+      }
+      for (const t of BACKUP_TABLES_NO_ID) {
+        const res = await query(`SELECT * FROM ${t}`);
+        exportData[t] = res.rows;
+      }
+      return exportData;
+    }
+    case 'import-database-restore': {
+      try {
+        const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+        if (win) {
+          const { response } = await dialog.showMessageBox(win, {
+            type: 'warning',
+            buttons: ['Deny / Cancel', 'Accept & Restore Database'],
+            defaultId: 0,
+            cancelId: 0,
+            title: '⚠️ Remote Database Restore Request',
+            message: 'A Client PC is requesting to restore/overwrite the store database from a backup file.\n\nDo you want to ACCEPT and replace all database records with this backup?'
+          });
+          if (response !== 1) {
+            return { success: false, error: 'Restore request was denied on the Server PC.' };
+          }
+        }
+      } catch (e) {
+        console.error('[ImportRestore] Dialog error:', e);
+      }
+      return await runRestoreData(data);
+    }
+
     default:
       throw new Error(`No handler registered for '${channel}'`);
   }
@@ -4158,7 +4363,7 @@ function registerIPC() {
     'get-cities', 'add-city',
     'get-expense-accounts', 'add-expense-account', 'update-expense-account', 'delete-expense-account',
     'get-purchase-expenses', 'get-freight-report', 'get-freight-ledger',
-    'get-manufacturers', 'add-manufacturer', 'delete-manufacturer',
+    'get-manufacturers', 'add-manufacturer', 'update-manufacturer', 'delete-manufacturer',
     'get-next-item-code', 'save-product', 'update-product', 'get-products', 'get-products-chunked', 'get-product-by-code', 'search-products', 'delete-product', 'save-product-photo', 'get-product-photo', 'start-new-item-session', 'get-item-sessions', 'get-products-by-session', 'get-products-by-session-range', 'check-duplicate-product',
     'get-companies', 'save-company', 'delete-company',
     'get-profit-rules', 'save-profit-rule', 'delete-profit-rule',
@@ -4167,7 +4372,7 @@ function registerIPC() {
     'get-stock-list', 'get-stock-list-chunked', 'get-stock-single', 'adjust-stock',
     'save-purchase', 'update-purchase', 'get-purchases', 'get-purchase-items', 'delete-purchase', 'post-purchase', 'post-purchase-bulk', 'get-purchase-barcode-data',
     'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return', 'get-next-purchase-return-no', 'save-purchase-return-pdf', 'print-purchase-return-html', 'save-manufacturer-stock-pdf', 'print-manufacturer-stock-html',
-    'get-suppliers-ledger', 'update-supplier-balance', 'add-supplier-payment', 'get-supplier-statement',
+    'get-suppliers-ledger', 'update-supplier', 'update-supplier-balance', 'delete-supplier', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
     'get-customers', 'add-customer', 'get-customer-balance', 'update-customer', 'update-customer-balance', 'get-customer-statement', 'add-customer-payment',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
@@ -4177,7 +4382,7 @@ function registerIPC() {
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
     'get-receipt-settings', 'save-receipt-settings',
     'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
-    'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
+    'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup', 'export-database-dump',
     'get-gl-accounts', 'add-gl-account', 'update-gl-account', 'delete-gl-account', 'get-account-closing-balance',
     'get-vouchers', 'get-voucher-details', 'save-voucher', 'delete-voucher',
     'get-ledger-report', 'get-cash-activity-report'
