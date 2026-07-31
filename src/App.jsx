@@ -101,8 +101,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [networkMode, setNetworkMode] = useState('server');
   const [windowStack, setWindowStack] = useState([]);
-  const [purchaseMenuOpen, setPurchaseMenuOpen] = useState(false);
-  const [purchaseMenuIndex, setPurchaseMenuIndex] = useState(0);
+  const [openMenu, setOpenMenu] = useState('sales');
   const [showNetworkSetup, setShowNetworkSetup] = useState(false);
 
   useEffect(() => {
@@ -121,6 +120,13 @@ function App() {
     return false;
   };
 
+  const salesMenuOptions = [
+    { label: 'New Sale', tab: 'sale', icon: '🧾', perm: 'create_sale', forceNewInstance: true },
+    { label: 'Sales History', tab: 'sales-list', icon: '📈', perm: 'view_sales' },
+    { label: 'Sales Return', tab: 'sales-return', icon: '↩️', perm: 'manage_sales_returns', forceNewInstance: true },
+    { label: 'Returns List', tab: 'sales-return-list', icon: '📋', perm: 'manage_sales_returns' },
+  ].filter(opt => hasPermission(opt.perm));
+
   const purchaseMenuOptions = [
     { label: 'New Purchase', tab: 'new-purchase', icon: '🛒', perm: 'manage_purchases' },
     { label: 'Open Purchase', tab: 'open-purchase', icon: '📦', perm: 'manage_purchases' },
@@ -129,6 +135,31 @@ function App() {
     { label: 'Returns List', tab: 'purchase-return-list', icon: '📋', perm: 'manage_purchase_returns' },
     { label: 'Barcode Print', tab: 'barcode-print', icon: '🏷️', perm: 'view_purchases' },
   ].filter(opt => hasPermission(opt.perm));
+
+  const productMenuOptions = [
+    { label: 'New Item', tab: 'new-item', icon: '📝', perm: 'manage_products' },
+    { label: 'Product List', tab: 'products', icon: '📦', perm: 'view_products' },
+    { label: 'Stock Inventory', tab: 'stock', icon: '📊', perm: 'view_stock' },
+    { label: 'Mfg/Brand Stock', tab: 'manufacturer-stock', icon: '🏭', perm: 'view_reports' },
+  ].filter(opt => hasPermission(opt.perm));
+
+  const accountsMenuOptions = [
+    { label: 'Chart of Accounts', tab: 'gl-accounts', icon: '🏛️', perm: 'view_reports' },
+    { label: 'Transaction Entry', tab: 'gl-vouchers', icon: '🧾', perm: 'view_reports' },
+    { label: 'Account Ledger', tab: 'gl-ledger', icon: '📖', perm: 'view_reports' },
+    { label: 'Cash Activity', tab: 'gl-cash-activity', icon: '💸', perm: 'view_reports' },
+    { label: 'Ledgers', tab: 'ledgers', icon: '📒', always: true },
+    { label: 'Customers', tab: 'customers', icon: '🧑‍🤝‍🧑', always: true },
+    { label: 'Mfg Discounts', tab: 'manufacturer-discounts', icon: '🏭', admin: true },
+    { label: 'Freight Expense', tab: 'expense-accounts', icon: '💰', admin: true },
+  ].filter(opt => opt.always || (opt.admin ? currentUser?.role === 'admin' : hasPermission(opt.perm)));
+
+  const settingsMenuOptions = [
+    { label: 'Users', tab: 'users', icon: '👥', perm: 'manage_users' },
+    { label: 'Backup', tab: 'backup', icon: '💾', admin: true },
+    { label: 'Print Settings', tab: 'receipt-settings', icon: '🖨️', admin: true },
+    { label: 'Network', tab: 'network-settings', icon: '🌐', admin: true },
+  ].filter(opt => opt.admin ? currentUser?.role === 'admin' : hasPermission(opt.perm));
 
   const handleLoginSuccess = (userId, username, password, role, permissions) => {
     setIsAuthenticated(true);
@@ -151,6 +182,14 @@ function App() {
   };
 
   const activeTab = windowStack[windowStack.length - 1]?.key || '';
+
+  useEffect(() => {
+    if (salesMenuOptions.some(o => o.tab === activeTab || (activeTab.startsWith('sale') && o.tab === 'sale'))) setOpenMenu('sales');
+    else if (purchaseMenuOptions.some(o => o.tab === activeTab)) setOpenMenu('purchases');
+    else if (productMenuOptions.some(o => o.tab === activeTab)) setOpenMenu('products');
+    else if (accountsMenuOptions.some(o => o.tab === activeTab || ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab))) setOpenMenu('accounts');
+    else if (settingsMenuOptions.some(o => o.tab === activeTab)) setOpenMenu('settings');
+  }, [activeTab]);
 
   const openWindow = (key, props = {}) => {
     let finalKey = key;
@@ -242,39 +281,20 @@ function App() {
         </div>
 
         <nav className="sidebar-nav">
-          {hasPermission('manage_products') && (
-            <button className={`nav-item ${activeTab === 'new-item' ? 'active' : ''}`} onClick={() => openWindow('new-item', { editItemData: null })}>
-              <span className="icon">📝</span> New Item
-            </button>
-          )}
-          {hasPermission('view_products') && (
-            <button className={`nav-item ${activeTab === 'products' ? 'active' : ''}`} onClick={() => openWindow('products')}>
-              <span className="icon">📦</span> Product List
-            </button>
-          )}
-          {hasPermission('view_stock') && (
-            <button className={`nav-item ${activeTab === 'stock' ? 'active' : ''}`} onClick={() => openWindow('stock')}>
-              <span className="icon">📊</span> Stock Inventory
-            </button>
-          )}
-
-          <div className="nav-divider" />
-
-          {purchaseMenuOptions.length > 0 && (
+          {/* 1. SALES DROPDOWN (ON TOP) */}
+          {salesMenuOptions.length > 0 && (
             <div className="nav-item-with-dropdown">
               <button
-                className={`nav-item ${purchaseMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
-                onClick={() => { setPurchaseMenuOpen(!purchaseMenuOpen); setPurchaseMenuIndex(0); }}
-                onBlur={e => { if (!e.currentTarget.parentNode.contains(e.relatedTarget)) setTimeout(() => setPurchaseMenuOpen(false), 150); }}
+                className={`nav-item ${salesMenuOptions.some(o => o.tab === activeTab || (activeTab.startsWith('sale') && o.tab === 'sale')) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'sales' ? null : 'sales')}
               >
-                <span className="icon">🛒</span> Purchase {purchaseMenuOpen ? '▲' : '▼'}
+                <span className="icon">🧾</span> Sales {openMenu === 'sales' ? '▲' : '▼'}
               </button>
-              {purchaseMenuOpen && (
+              {openMenu === 'sales' && (
                 <div className="dropdown-menu">
-                  {purchaseMenuOptions.map((opt, idx) => (
-                    <button key={opt.tab} className={`dropdown-item ${purchaseMenuIndex === idx ? 'selected' : ''} ${activeTab === opt.tab ? 'current' : ''}`}
-                      onMouseEnter={() => setPurchaseMenuIndex(idx)}
-                      onClick={() => { openWindow(opt.tab, { purchaseToEdit: null, returnToEdit: null }); setPurchaseMenuOpen(false); }}>
+                  {salesMenuOptions.map(opt => (
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab || (activeTab.startsWith(opt.tab) && opt.tab === 'sale') ? 'current' : ''}`}
+                      onClick={() => openWindow(opt.tab, opt.forceNewInstance ? { forceNewInstance: true } : {})}>
                       <span className="icon">{opt.icon}</span> {opt.label}
                     </button>
                   ))}
@@ -285,90 +305,98 @@ function App() {
 
           <div className="nav-divider" />
 
-          {hasPermission('create_sale') && (
-            <button className={`nav-item ${activeTab.startsWith('sale') && !activeTab.startsWith('sales-') ? 'active' : ''}`} onClick={() => openWindow('sale', { forceNewInstance: true })}>
-              <span className="icon">🧾</span> New Sale
-            </button>
-          )}
-          {hasPermission('manage_sales_returns') && (
-            <button className={`nav-item ${activeTab.startsWith('sales-return') && !activeTab.includes('list') ? 'active' : ''}`} onClick={() => openWindow('sales-return', { forceNewInstance: true })}>
-              <span className="icon">↩️</span> Sales Return
-            </button>
-          )}
-          {hasPermission('view_sales') && (
-            <button className={`nav-item ${activeTab === 'sales-list' ? 'active' : ''}`} onClick={() => openWindow('sales-list')}>
-              <span className="icon">📈</span> Sales History
-            </button>
-          )}
-          {hasPermission('manage_sales_returns') && (
-            <button className={`nav-item ${activeTab === 'sales-return-list' ? 'active' : ''}`} onClick={() => openWindow('sales-return-list')}>
-              <span className="icon">📋</span> Returns List
-            </button>
+          {/* 2. PURCHASES DROPDOWN */}
+          {purchaseMenuOptions.length > 0 && (
+            <div className="nav-item-with-dropdown">
+              <button
+                className={`nav-item ${purchaseMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'purchases' ? null : 'purchases')}
+              >
+                <span className="icon">🛒</span> Purchase {openMenu === 'purchases' ? '▲' : '▼'}
+              </button>
+              {openMenu === 'purchases' && (
+                <div className="dropdown-menu">
+                  {purchaseMenuOptions.map(opt => (
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab ? 'current' : ''}`}
+                      onClick={() => openWindow(opt.tab, { purchaseToEdit: null, returnToEdit: null })}>
+                      <span className="icon">{opt.icon}</span> {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           <div className="nav-divider" />
 
-          {currentUser?.role === 'admin' && (
-            <button className={`nav-item ${activeTab === 'backup' ? 'active' : ''}`} onClick={() => openWindow('backup')}>
-              <span className="icon">💾</span> Backup
-            </button>
-          )}
-          {hasPermission('manage_users') && (
-            <button className={`nav-item ${activeTab === 'users' ? 'active' : ''}`} onClick={() => openWindow('users')}>
-              <span className="icon">👥</span> Users
-            </button>
-          )}
-          <button className={`nav-item ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => openWindow('customers')}>
-            <span className="icon">🧑‍🤝‍🧑</span> Customers
-          </button>
-          <button className={`nav-item ${['ledgers', 'customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab) ? 'active' : ''}`} onClick={() => openWindow('ledgers')}>
-            <span className="icon">📒</span> Ledgers
-          </button>
-
-          {currentUser?.role === 'admin' && (
-            <button className={`nav-item ${activeTab === 'network-settings' ? 'active' : ''}`} onClick={() => openWindow('network-settings')}>
-              <span className="icon">🌐</span> Network
-            </button>
-          )}
-          {currentUser?.role === 'admin' && (
-            <button className={`nav-item ${activeTab === 'receipt-settings' ? 'active' : ''}`} onClick={() => openWindow('receipt-settings')}>
-              <span className="icon">🖨️</span> Print Settings
-            </button>
+          {/* 3. PRODUCTS & STOCK DROPDOWN */}
+          {productMenuOptions.length > 0 && (
+            <div className="nav-item-with-dropdown">
+              <button
+                className={`nav-item ${productMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'products' ? null : 'products')}
+              >
+                <span className="icon">📦</span> Products & Stock {openMenu === 'products' ? '▲' : '▼'}
+              </button>
+              {openMenu === 'products' && (
+                <div className="dropdown-menu">
+                  {productMenuOptions.map(opt => (
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab ? 'current' : ''}`}
+                      onClick={() => openWindow(opt.tab, opt.tab === 'new-item' ? { editItemData: null } : {})}>
+                      <span className="icon">{opt.icon}</span> {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           <div className="nav-divider" />
-          {hasPermission('view_reports') && (
-            <>
-              <button className={`nav-item ${activeTab === 'gl-accounts' ? 'active' : ''}`} onClick={() => openWindow('gl-accounts')}>
-                <span className="icon">🏛️</span> Chart of Accounts
+
+          {/* 4. ACCOUNTS & LEDGERS DROPDOWN */}
+          {accountsMenuOptions.length > 0 && (
+            <div className="nav-item-with-dropdown">
+              <button
+                className={`nav-item ${accountsMenuOptions.some(o => o.tab === activeTab || ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab)) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'accounts' ? null : 'accounts')}
+              >
+                <span className="icon">🏛️</span> Accounts & Ledgers {openMenu === 'accounts' ? '▲' : '▼'}
               </button>
-              <button className={`nav-item ${activeTab === 'gl-vouchers' ? 'active' : ''}`} onClick={() => openWindow('gl-vouchers')}>
-                <span className="icon">🧾</span> Transaction Entry
-              </button>
-              <button className={`nav-item ${activeTab === 'gl-ledger' ? 'active' : ''}`} onClick={() => openWindow('gl-ledger')}>
-                <span className="icon">📖</span> Account Ledger
-              </button>
-              <button className={`nav-item ${activeTab === 'gl-cash-activity' ? 'active' : ''}`} onClick={() => openWindow('gl-cash-activity')}>
-                <span className="icon">💸</span> Cash Activity
-              </button>
-            </>
+              {openMenu === 'accounts' && (
+                <div className="dropdown-menu">
+                  {accountsMenuOptions.map(opt => (
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab || (opt.tab === 'ledgers' && ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab)) ? 'current' : ''}`}
+                      onClick={() => openWindow(opt.tab)}>
+                      <span className="icon">{opt.icon}</span> {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
+
           <div className="nav-divider" />
 
-          {hasPermission('view_reports') && (
-            <button className={`nav-item ${activeTab === 'manufacturer-stock' ? 'active' : ''}`} onClick={() => openWindow('manufacturer-stock')}>
-              <span className="icon">📊</span> Mfg/Brand Stock
-            </button>
-          )}
-          {currentUser?.role === 'admin' && (
-            <button className={`nav-item ${activeTab === 'manufacturer-discounts' ? 'active' : ''}`} onClick={() => openWindow('manufacturer-discounts')}>
-              <span className="icon">🏭</span> Mfg Discounts
-            </button>
-          )}
-          {currentUser?.role === 'admin' && (
-            <button className={`nav-item ${activeTab === 'expense-accounts' ? 'active' : ''}`} onClick={() => openWindow('expense-accounts')}>
-              <span className="icon">💰</span> Freight Expense
-            </button>
+          {/* 5. SETTINGS & SYSTEM DROPDOWN (ON BOTTOM) */}
+          {settingsMenuOptions.length > 0 && (
+            <div className="nav-item-with-dropdown" style={{ marginTop: 'auto' }}>
+              <button
+                className={`nav-item ${settingsMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'settings' ? null : 'settings')}
+              >
+                <span className="icon">⚙️</span> Settings & System {openMenu === 'settings' ? '▲' : '▼'}
+              </button>
+              {openMenu === 'settings' && (
+                <div className="dropdown-menu">
+                  {settingsMenuOptions.map(opt => (
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab ? 'current' : ''}`}
+                      onClick={() => openWindow(opt.tab)}>
+                      <span className="icon">{opt.icon}</span> {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </nav>
 

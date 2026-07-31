@@ -23,54 +23,54 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     sup.categories.forEach(cat => {
       let itemsHtml = cat.items.map(item => `
         <tr>
-          <td style="border: 1px solid #000; padding: 3px 4px; font-family: monospace; font-weight: bold; text-align: center;">${item.item_code}</td>
-          <td style="border: 1px solid #000; padding: 3px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;">
+          <td style="border: 1px solid #000; padding: 5px 6px; font-weight: 900; text-align: center; font-size: 15px; color: #000;">${item.item_code}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; font-size: 13.5px; font-weight: 600;">
             ${`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim()}
           </td>
-          <td style="border: 1px solid #000; padding: 3px 4px; text-align: center; font-weight: bold;">${fmt(item.qty)}</td>
-          <td style="border: 1px solid #000; padding: 3px 4px; text-align: right;">${fmt2(Math.round((item.rate || 0) * 100) / 100)}</td>
-          <td style="border: 1px solid #000; padding: 3px 4px; text-align: right;">${fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
-          <td style="border: 1px solid #000; padding: 3px 4px; text-align: right; font-weight: bold;">${fmt(item.value)}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: center; font-weight: 900; font-size: 14px;">${fmt(item.qty)}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-size: 13.5px; font-weight: bold;">${fmt2(Math.round((item.rate || 0) * 100) / 100)}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-weight: 900; font-size: 15px; color: #000;">${fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-weight: 900; font-size: 14px;">${fmt(item.value)}</td>
         </tr>
       `).join('');
 
       categoriesHtml += `
-        <tr style="background: #f1f5f9; font-weight: bold;">
-          <td colSpan="2" style="border: 1px solid #000; padding: 5px 6px;">CATEGORY: ${cat.name}</td>
-          <td style="border: 1px solid #000; padding: 5px; text-align: center;">${fmt(cat.totalQty)}</td>
-          <td style="border: 1px solid #000; padding: 5px;"></td>
-          <td style="border: 1px solid #000; padding: 5px;"></td>
-          <td style="border: 1px solid #000; padding: 5px; text-align: right;">${fmt(cat.totalValue)}</td>
+        <tr style="background: #f1f5f9; font-weight: 900; font-size: 14px;">
+          <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px;">CATEGORY: ${cat.name}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: center;">${fmt(cat.totalQty)}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px;"></td>
+          <td style="border: 1px solid #000; padding: 6px 8px;"></td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right;">${fmt(cat.totalValue)}</td>
         </tr>
         ${itemsHtml}
       `;
     });
 
     suppliersHtml += `
-      <div style="margin-bottom: 18px; page-break-inside: avoid;">
-        <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 6px 10px; font-weight: 900; font-size: 12px; display: flex; justify-content: space-between;">
+      <div style="margin-bottom: 20px; page-break-inside: avoid;">
+        <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 8px 12px; font-weight: 900; font-size: 14.5px; display: flex; justify-content: space-between;">
           <span>SUPPLIER: ${sup.name}${balText}</span>
           <span>Total Qty: ${fmt(sup.totalQty)} | Total Value: PKR ${fmt(sup.totalValue)}</span>
         </div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-top: -1px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: -1px;">
           <thead>
-            <tr style="background: #f1f5f9; font-weight: bold; border: 1px solid #000;">
-              <th style="border: 1px solid #000; padding: 5px; width: 95px; text-align: center;">Item Code</th>
-              <th style="border: 1px solid #000; padding: 5px; text-align: left;">Description / Brand</th>
-              <th style="border: 1px solid #000; padding: 5px; width: 65px; text-align: center;">Qty</th>
-              <th style="border: 1px solid #000; padding: 5px; width: 85px; text-align: right;">Cost Rate</th>
-              <th style="border: 1px solid #000; padding: 5px; width: 85px; text-align: right;">Sale Rate</th>
-              <th style="border: 1px solid #000; padding: 5px; width: 100px; text-align: right;">Total Value</th>
+            <tr style="background: #f1f5f9; font-weight: 900; border: 1px solid #000; font-size: 13.5px;">
+              <th style="border: 1px solid #000; padding: 6px; width: 150px; text-align: center;">Item Code</th>
+              <th style="border: 1px solid #000; padding: 6px; text-align: left;">Description / Brand</th>
+              <th style="border: 1px solid #000; padding: 6px; width: 70px; text-align: center;">Qty</th>
+              <th style="border: 1px solid #000; padding: 6px; width: 95px; text-align: right;">Cost Rate</th>
+              <th style="border: 1px solid #000; padding: 6px; width: 95px; text-align: right;">Sale Rate</th>
+              <th style="border: 1px solid #000; padding: 6px; width: 115px; text-align: right;">Total Value</th>
             </tr>
           </thead>
           <tbody>
             ${categoriesHtml}
-            <tr style="background: #e2e8f0; font-weight: 900;">
-              <td colSpan="2" style="border: 1px solid #000; padding: 5px; text-align: right;">Supplier Subtotal:</td>
-              <td style="border: 1px solid #000; padding: 5px; text-align: center;">${fmt(sup.totalQty)}</td>
-              <td style="border: 1px solid #000; padding: 5px;"></td>
-              <td style="border: 1px solid #000; padding: 5px;"></td>
-              <td style="border: 1px solid #000; padding: 5px; text-align: right;">${fmt(sup.totalValue)}</td>
+            <tr style="background: #e2e8f0; font-weight: 900; font-size: 14px;">
+              <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">Supplier Subtotal:</td>
+              <td style="border: 1px solid #000; padding: 6px 8px; text-align: center;">${fmt(sup.totalQty)}</td>
+              <td style="border: 1px solid #000; padding: 6px 8px;"></td>
+              <td style="border: 1px solid #000; padding: 6px 8px;"></td>
+              <td style="border: 1px solid #000; padding: 6px 8px; text-align: right;">${fmt(sup.totalValue)}</td>
             </tr>
           </tbody>
         </table>
@@ -87,23 +87,23 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     if (filteredBals.length > 0) {
       const rowsHtml = filteredBals.map(([name, bal]) => `
         <tr>
-          <td style="border: 1px solid #000; padding: 4px 6px;">${name}</td>
-          <td style="border: 1px solid #000; padding: 4px 6px; text-align: center;">${bal >= 0 ? 'Cr' : 'Dr'}</td>
-          <td style="border: 1px solid #000; padding: 4px 6px; text-align: right; font-weight: bold;">${fmt2(Math.abs(bal))}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; font-size: 13.5px; font-weight: 600;">${name}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 13.5px; font-weight: bold;">${bal >= 0 ? 'Cr' : 'Dr'}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: 900; font-size: 14px;">${fmt2(Math.abs(bal))}</td>
         </tr>
       `).join('');
 
       supplierBalancesSummaryHtml = `
         <div style="margin-top: 20px; page-break-inside: avoid;">
-          <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 5px 10px; font-weight: 900; font-size: 12px;">
+          <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 8px 12px; font-weight: 900; font-size: 14.5px;">
             SUPPLIER LEDGER BALANCES SUMMARY
           </div>
-          <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-top: -1px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: -1px;">
             <thead>
-              <tr style="background: #f1f5f9; font-weight: bold;">
-                <th style="border: 1px solid #000; padding: 5px; text-align: left;">Supplier Name</th>
-                <th style="border: 1px solid #000; padding: 5px; width: 100px; text-align: center;">Type</th>
-                <th style="border: 1px solid #000; padding: 5px; width: 120px; text-align: right;">Net Balance</th>
+              <tr style="background: #f1f5f9; font-weight: 900; font-size: 13.5px;">
+                <th style="border: 1px solid #000; padding: 6px; text-align: left;">Supplier Name</th>
+                <th style="border: 1px solid #000; padding: 6px; width: 100px; text-align: center;">Type</th>
+                <th style="border: 1px solid #000; padding: 6px; width: 130px; text-align: right;">Net Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -124,11 +124,11 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     <style>
       @media print {
         @page { size: A4; margin: 8mm; }
-        body { font-family: 'Arial', sans-serif; color: #000; background: #fff; margin: 0; padding: 0; font-size: 11px; font-weight: bold; -webkit-print-color-adjust: exact; }
+        body { font-family: 'Arial', sans-serif; color: #000; background: #fff; margin: 0; padding: 0; font-size: 13px; font-weight: bold; -webkit-print-color-adjust: exact; }
         .no-print { display: none !important; }
         td, th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       }
-      body { font-family: 'Arial', sans-serif; color: #000; background: #fff; margin: 0; padding: 15px; font-size: 11px; font-weight: bold; }
+      body { font-family: 'Arial', sans-serif; color: #000; background: #fff; margin: 0; padding: 15px; font-size: 13px; font-weight: bold; }
       
       .no-print-bar {
         position: sticky;
@@ -157,11 +157,11 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
       .print-btn:hover { background: #1d4ed8; }
 
       .header-box { text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
-      .company-name { font-size: 24px; font-weight: 900; text-transform: uppercase; margin: 0; letter-spacing: 1px; color: #000; }
-      .company-sub { font-size: 11px; color: #000; margin: 3px 0; font-weight: bold; }
-      .doc-title { display: inline-block; border: 1.5px solid #000; background: #fff; color: #000; padding: 3px 18px; font-size: 13px; font-weight: 900; margin-top: 6px; letter-spacing: 1px; text-transform: uppercase; }
+      .company-name { font-size: 26px; font-weight: 900; text-transform: uppercase; margin: 0; letter-spacing: 1px; color: #000; }
+      .company-sub { font-size: 12px; color: #000; margin: 3px 0; font-weight: bold; }
+      .doc-title { display: inline-block; border: 1.5px solid #000; background: #fff; color: #000; padding: 4px 20px; font-size: 14px; font-weight: 900; margin-top: 6px; letter-spacing: 1px; text-transform: uppercase; }
       
-      .summary-header { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 11px; }
+      .summary-header { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
       .summary-header td { padding: 6px 10px; border: 1.5px solid #000; }
     </style>
   </head>
@@ -183,7 +183,7 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
         <td style="width: 25%;"><b>Report Date:</b> ${dateStr}</td>
         <td style="width: 25%;"><b>Valuation:</b> ${priceModeText}</td>
         <td style="width: 25%;"><b>Total Stock Qty:</b> ${fmt(grandQty)}</td>
-        <td style="width: 25%; font-size: 12px; font-weight: 900; text-align: right;"><b>Grand Total Value:</b> PKR ${fmt(grandValue)}</td>
+        <td style="width: 25%; font-size: 13px; font-weight: 900; text-align: right;"><b>Grand Total Value:</b> PKR ${fmt(grandValue)}</td>
       </tr>
     </table>
 

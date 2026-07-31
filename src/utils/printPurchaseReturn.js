@@ -22,14 +22,14 @@ export function buildPurchaseReturnHTML(header, items) {
   const ctnQty = header.ctnQty || header.ctn_qty || 0;
   const remarks = header.notes || '';
   const discount = parseFloat(header.discount || 0);
-  const misc = parseFloat(header.miscCharges || header.misc_charges || 0);
 
+  let totalQty = 0;
   let grossSub = 0;
   let totalItemDisc = 0;
   let netSub = 0;
 
-    const rowsHtml = items.map((item, idx) => {
-    const q = parseInt(item.packets || item.qty) || 0;
+  const rowsHtml = items.map((item, idx) => {
+    const q = parseInt(item.packets || item.qty || item.stock_packets) || 0;
     const base = parseFloat(item.preDiscPrice || item.pre_disc_price || item.rate) || 0;
     const flat = parseFloat(item.flatDiscount || item.flat_discount) || 0;
     const pPrice = Math.max(0, base - flat);
@@ -38,25 +38,50 @@ export function buildPurchaseReturnHTML(header, items) {
     const netRate = parseFloat(item.netRate || item.net_rate || (pPrice - rDisc)) || 0;
     const amt = parseFloat(item.amount || (netRate * q)) || 0;
 
+    totalQty += q;
     grossSub += base * q;
     totalItemDisc += (flat + rDisc) * q;
     netSub += amt;
 
     const code = item.itemCode || item.item_code || '';
     const desc = item.itemDescription || item.item_description || item.description || '';
-    const fullDesc = code ? `${code} ${desc}`.trim() : desc;
 
     return `
       <tr>
         <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: bold;">${idx + 1}</td>
-        <td style="border: 1px solid #000; padding: 5px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;">${fullDesc}</td>
-        <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: bold;">${q}</td>
-        <td style="text-align: right; border: 1px solid #000; padding: 5px 6px; font-weight: bold;">${netRate > 0 ? Math.round(netRate).toLocaleString() : ''}</td>
+        <td style="border: 1px solid #000; padding: 5px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;">${desc}</td>
+        <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #000;">${code}</td>
+        <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #000;">${q}</td>
+        <td style="text-align: right; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #000;">${base > 0 ? Math.round(base).toLocaleString() : ''}</td>
       </tr>
     `;
   }).join('');
 
-  const grandTotal = netSub + misc - discount;
+  const overallDiscount = totalItemDisc + discount;
+
+  // Build exact discount expression matching the rules set in purchase return (e.g. 10% + 10)
+  const exprSet = new Set();
+  items.forEach(item => {
+    const q = parseInt(item.packets || item.qty || item.stock_packets) || 0;
+    if (q <= 0) return;
+    const dPct = parseFloat(item.discPct || item.disc_pct) || 0;
+    const flat = parseFloat(item.flatDiscount || item.flat_discount) || 0;
+    if (dPct > 0 && flat > 0) {
+      exprSet.add(`${dPct}% + ${flat}`);
+    } else if (dPct > 0) {
+      exprSet.add(`${dPct}%`);
+    } else if (flat > 0) {
+      exprSet.add(`${flat}`);
+    }
+  });
+
+  const exprList = Array.from(exprSet);
+  if (discount > 0) {
+    exprList.push(`${discount}`);
+  }
+
+  const discLabel = exprList.length > 0 ? `Total Discount (${exprList.join(', ')}):` : 'Total Discount:';
+  const grandTotal = Math.max(0, netSub - discount);
 
   return `
   <!DOCTYPE html>
@@ -112,11 +137,6 @@ export function buildPurchaseReturnHTML(header, items) {
       .items-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 11px; table-layout: fixed; }
       .items-table th { border: 1.5px solid #000; background: #f0f0f0; color: #000; padding: 6px 4px; font-weight: bold; text-align: center; text-transform: uppercase; }
       .items-table td { border: 1px solid #000; padding: 5px 4px; color: #000; }
-      
-      /* Bottom Summary Box */
-      .summary-box { width: 100%; border: 2px solid #000; font-size: 12px; border-collapse: collapse; margin-top: 15px; }
-      .summary-box td { padding: 6px 12px; border: 1px solid #000; color: #000; }
-      .grand-row { background: #f0f0f0; font-weight: 900; font-size: 15px; color: #000; }
     </style>
   </head>
   <body>
@@ -142,14 +162,14 @@ export function buildPurchaseReturnHTML(header, items) {
       <tr>
         <td class="meta-label">Supplier Name:</td>
         <td class="meta-val" style="font-weight: bold;">${supplier}</td>
-        <td class="meta-label">Bilty No:</td>
-        <td class="meta-val">${biltyNo || '-'}</td>
+        <td class="meta-label">CTN Qty:</td>
+        <td class="meta-val">${ctnQty || '-'}</td>
       </tr>
       <tr>
         <td class="meta-label">Freight Acc:</td>
         <td class="meta-val">${freightAcc || '-'}</td>
-        <td class="meta-label">CTN Qty:</td>
-        <td class="meta-val">${ctnQty || '-'}</td>
+        <td class="meta-label">Bilty No:</td>
+        <td class="meta-val">${biltyNo || '-'}</td>
       </tr>
       ${remarks ? `<tr><td class="meta-label">Remarks:</td><td class="meta-val" colSpan="3">${remarks}</td></tr>` : ''}
     </table>
@@ -157,29 +177,33 @@ export function buildPurchaseReturnHTML(header, items) {
     <table class="items-table">
       <thead>
         <tr>
-          <th style="width: 35px;">#</th>
+          <th style="width: 30px;">#</th>
           <th>Description</th>
-          <th style="width: 60px;">Qty</th>
-          <th style="width: 100px;">Net Rate</th>
+          <th style="width: 90px;">Item Code</th>
+          <th style="width: 55px;">Qty</th>
+          <th style="width: 115px;">Purchase Rate</th>
         </tr>
       </thead>
       <tbody>
         ${rowsHtml}
       </tbody>
-    </table>
-
-    <!-- Full-Width Bottom Summary Box -->
-    <table class="summary-box">
-      <tr>
-        <td style="font-weight: bold; width: 25%;">Gross Amount:</td>
-        <td style="font-weight: bold; width: 25%; text-align: right;">${grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-        <td style="font-weight: bold; width: 25%;">Total Discount:</td>
-        <td style="text-align: right; font-weight: bold; width: 25%;">-${(totalItemDisc + discount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-      </tr>
-      <tr class="grand-row">
-        <td colSpan="2" style="font-size: 15px; font-weight: 900;">Grand Total:</td>
-        <td colSpan="2" style="font-size: 16px; font-weight: 900; text-align: right;">PKR ${Math.round(grandTotal).toLocaleString()}</td>
-      </tr>
+      <tfoot>
+        <tr style="border-top: 1.5px solid #000; font-weight: bold; background: #fff;">
+          <td colSpan="3" style="border: 1px solid #000; padding: 5px 8px; font-weight: 900; text-align: right;">Total / Subtotal:</td>
+          <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 900; font-size: 14px;">${totalQty}</td>
+          <td style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-weight: 900; font-size: 14px;">${grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+        </tr>
+        ${overallDiscount > 0 ? `
+        <tr style="font-weight: bold; background: #fff;">
+          <td colSpan="4" style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-size: 14px;">${discLabel}</td>
+          <td style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-size: 14px; font-weight: 900; color: #000;">-${overallDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+        </tr>
+        ` : ''}
+        <tr style="background: #f0f0f0; font-weight: 900;">
+          <td colSpan="4" style="border: 1.5px solid #000; padding: 6px 8px; font-size: 15px; text-align: right;">Grand Total:</td>
+          <td style="border: 1.5px solid #000; padding: 6px 8px; font-size: 17px; text-align: right; font-weight: 900;">${Math.round(grandTotal).toLocaleString()}</td>
+        </tr>
+      </tfoot>
     </table>
   </body>
   </html>

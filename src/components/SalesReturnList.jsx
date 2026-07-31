@@ -4,6 +4,30 @@ import './SalesList.css';
 
 const { ipcRenderer } = window.require('electron');
 
+const formatDateDMY = (val) => {
+  if (!val) return '—';
+  let rawStr = '';
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${d}-${m}-${y}`;
+  }
+  if (typeof val === 'string') {
+    rawStr = val.split('T')[0].split(' ')[0];
+  } else {
+    rawStr = String(val).split('T')[0].split(' ')[0];
+  }
+  const parts = rawStr.split('-');
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+    }
+    return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
+  }
+  return rawStr;
+};
+
 function SalesReturnList({ currentUser, onEditReturn, isActive }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +126,7 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
                       {expandedId === r.id ? '▼' : '▶'}
                     </td>
                     <td style={{ fontWeight: 700, color: '#dc2626' }}>{r.return_no}</td>
-                    <td>{r.return_date instanceof Date ? new Date(r.return_date.getTime() - r.return_date.getTimezoneOffset() * 60000).toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '')}</td>
+                    <td>{formatDateDMY(r.return_date || r.created_at)}</td>
                     <td>{r.customer_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>—</span>}</td>
                     <td>{r.invoice_no || <span style={{ color: '#9ca3af' }}>—</span>}</td>
                     <td className="center-text"><strong>{r.total_packets}</strong></td>

@@ -121,8 +121,9 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, isActiv
   const handleSubmit = async () => {
     if (items.length === 0) { setMessage('Add at least one item'); return; }
     setIsSubmitting(true);
+    const dStr = `${returnDate.getFullYear()}-${String(returnDate.getMonth() + 1).padStart(2, '0')}-${String(returnDate.getDate()).padStart(2, '0')}`;
     const payload = {
-      returnDate: new Date(returnDate.getTime() - returnDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+      returnDate: dStr,
       returnNo, invoiceNo, customerName, items, notes, userId: currentUser?.id
     };
     try {

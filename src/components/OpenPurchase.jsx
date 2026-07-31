@@ -94,7 +94,15 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
   useEffect(() => {
     if (isEditing) {
       const p = purchaseToEdit;
-      const raw = p.purchase_date instanceof Date ? p.purchase_date.toISOString().split('T')[0] : (typeof p.purchase_date === 'string' ? p.purchase_date.split('T')[0] : '');
+      let raw = '';
+      if (p.purchase_date instanceof Date) {
+        const d = String(p.purchase_date.getDate()).padStart(2, '0');
+        const m = String(p.purchase_date.getMonth() + 1).padStart(2, '0');
+        const y = p.purchase_date.getFullYear();
+        raw = `${y}-${m}-${d}`;
+      } else if (typeof p.purchase_date === 'string') {
+        raw = p.purchase_date.split('T')[0];
+      }
       if (raw) {
         const [y, m, d] = raw.split('-');
         setPurchaseDate(`${d}-${m}-${y}`);

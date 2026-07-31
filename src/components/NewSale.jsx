@@ -4,6 +4,10 @@ import { useDataVersion } from '../context/DataContext';
 
 import './NewSale.css';
 
+import './StockList.css';
+
+import './ProductList.css';
+
 import PaymentModal from './PaymentModal';
 
 import { PAKISTAN_CITIES } from '../utils/pakistanCities';
@@ -85,6 +89,30 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
   const isEditing = !!saleToEdit;
 
   const salesVersion = useDataVersion('sales');
+
+  const stockVer = useDataVersion('stock');
+
+  const productVer = useDataVersion('products');
+
+
+
+  // Stock inventory search modal state
+
+  const [stockSearchModalOpen, setStockSearchModalOpen] = useState(false);
+
+  const [stockSearchFilters, setStockSearchFilters] = useState({ search: '', brand: '', category: '', size: '' });
+
+  const [stockSearchItems, setStockSearchItems] = useState([]);
+
+  const [stockSearchLoading, setStockSearchLoading] = useState(false);
+
+  const [stockModalSelectedIndex, setStockModalSelectedIndex] = useState(0);
+
+  const [stockToastMsg, setStockToastMsg] = useState('');
+
+  const stockSearchInputRef = useRef(null);
+
+  const stockModalRowRefs = useRef({});
 
 
 
@@ -495,6 +523,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
         setCustomerModalOpen(true);
 
+      } else if (e.key === 'F8') {
+
+        e.preventDefault();
+
+        e.stopPropagation();
+
+        setStockSearchModalOpen(true);
+
       }
 
     };
@@ -818,6 +854,282 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
     // Return focus to scan so next item can be typed immediately
 
     setTimeout(() => scanRef.current?.focus(), 50);
+
+  };
+
+
+
+  // ── Stock Search Modal Logic ────────────────────────────────────────────────
+
+  const loadStockForSearch = async () => {
+
+    setStockSearchLoading(true);
+
+    try {
+
+      const res = await ipcRenderer.invoke('get-stock-list-chunked', { limit: 100, offset: 0 });
+
+      if (res && res.items) {
+
+        setStockSearchItems(res.items);
+
+        setStockSearchLoading(false);
+
+        if (res.total > 100) {
+
+          const remaining = await ipcRenderer.invoke('get-stock-list');
+
+          setStockSearchItems(remaining || []);
+
+        }
+
+      } else {
+
+        setStockSearchLoading(false);
+
+      }
+
+    } catch (e) {
+
+      setStockSearchLoading(false);
+
+    }
+
+  };
+
+
+
+  useEffect(() => {
+
+    if (stockSearchModalOpen) {
+
+      setStockSearchFilters({ search: '', brand: '', category: '', size: '' });
+
+      setStockModalSelectedIndex(0);
+
+      loadStockForSearch();
+
+      setTimeout(() => stockSearchInputRef.current?.focus(), 50);
+
+    }
+
+  }, [stockSearchModalOpen, stockVer, productVer]);
+
+
+
+  const filteredStockItems = useMemo(() => {
+
+    const s = stockSearchFilters.search.toLowerCase().trim();
+
+    const b = stockSearchFilters.brand.toLowerCase().trim();
+
+    const c = stockSearchFilters.category.toLowerCase().trim();
+
+    const sz = stockSearchFilters.size.toLowerCase().trim();
+
+
+
+    let res = stockSearchItems.filter(p => {
+
+      if (s && !(p.item_code || '').toLowerCase().includes(s) && !(p.description || '').toLowerCase().includes(s)) return false;
+
+      if (b && !(p.brand || '').toLowerCase().includes(b)) return false;
+
+      if (c && !(p.category || '').toLowerCase().includes(c)) return false;
+
+      if (sz && !(p.size_range || '').toLowerCase().includes(sz)) return false;
+
+      return true;
+
+    });
+
+
+
+    if (s) {
+
+      res.sort((a, b) => {
+
+        const aCode = (a.item_code || '').toLowerCase();
+
+        const bCode = (b.item_code || '').toLowerCase();
+
+        if (aCode === s && bCode !== s) return -1;
+
+        if (bCode === s && aCode !== s) return 1;
+
+        const aStarts = aCode.startsWith(s);
+
+        const bStarts = bCode.startsWith(s);
+
+        if (aStarts && !bStarts) return -1;
+
+        if (bStarts && !aStarts) return 1;
+
+        return 0;
+
+      });
+
+    }
+
+
+
+    return res;
+
+  }, [stockSearchItems, stockSearchFilters]);
+
+
+
+  useEffect(() => {
+
+    if (stockSearchModalOpen) {
+
+      setStockModalSelectedIndex(filteredStockItems.length > 0 ? 0 : -1);
+
+    }
+
+  }, [filteredStockItems, stockSearchModalOpen]);
+
+
+
+  useEffect(() => {
+
+    if (stockSearchModalOpen && stockModalSelectedIndex >= 0) {
+
+      const el = stockModalRowRefs.current[stockModalSelectedIndex];
+
+      if (el) {
+
+        el.scrollIntoView({ block: 'nearest' });
+
+      }
+
+    }
+
+  }, [stockModalSelectedIndex, stockSearchModalOpen]);
+
+
+
+  const totalStockSearchValue = useMemo(() => {
+
+    return filteredStockItems.reduce((sum, p) => sum + ((p.stock_packets || 0) * (parseFloat(p.purchase_rate) || 0)), 0);
+
+  }, [filteredStockItems]);
+
+
+
+  const handleAddStockItemToSale = (product) => {
+
+    if (!product) return;
+
+    addProduct(product);
+
+    setStockSearchModalOpen(false);
+
+    setTimeout(() => {
+
+      if (scanRef.current) {
+
+        scanRef.current.focus();
+
+        scanRef.current.select?.();
+
+      }
+
+    }, 50);
+
+  };
+
+
+
+  // Dedicated capture-phase Esc key listener for Stock Search Modal
+
+  useEffect(() => {
+
+    if (!stockSearchModalOpen) return;
+
+
+
+    const handleStockSearchEsc = (e) => {
+
+      if (e.key === 'Escape' || e.code === 'Escape') {
+
+        e.preventDefault();
+
+        e.stopPropagation();
+
+        e.stopImmediatePropagation();
+
+        setStockSearchModalOpen(false);
+
+        setTimeout(() => {
+
+          if (scanRef.current) {
+
+            scanRef.current.focus();
+
+            scanRef.current.select?.();
+
+          }
+
+        }, 50);
+
+      }
+
+    };
+
+
+
+    window.addEventListener('keydown', handleStockSearchEsc, true);
+
+    return () => window.removeEventListener('keydown', handleStockSearchEsc, true);
+
+  }, [stockSearchModalOpen]);
+
+
+
+  const handleStockModalKeyDown = (e) => {
+
+    if (e.key === 'ArrowDown') {
+
+      e.preventDefault();
+
+      setStockModalSelectedIndex(prev => Math.min(prev + 1, Math.min(filteredStockItems.length - 1, 149)));
+
+    } else if (e.key === 'ArrowUp') {
+
+      e.preventDefault();
+
+      setStockModalSelectedIndex(prev => Math.max(prev - 1, 0));
+
+    } else if (e.key === 'Enter') {
+
+      e.preventDefault();
+
+      if (filteredStockItems.length > 0) {
+
+        const idx = stockModalSelectedIndex >= 0 ? stockModalSelectedIndex : 0;
+
+        if (filteredStockItems[idx]) {
+
+          handleAddStockItemToSale(filteredStockItems[idx]);
+
+        }
+
+      }
+
+    } else if (e.key === 'Escape') {
+
+      e.preventDefault();
+
+      e.stopPropagation();
+
+      e.stopImmediatePropagation();
+
+      setStockSearchModalOpen(false);
+
+      setTimeout(() => scanRef.current?.focus(), 50);
+
+    }
 
   };
 
@@ -1553,7 +1865,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const payload = {
 
-      saleDate: new Date(saleDate.getTime() - saleDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+      saleDate: `${saleDate.getFullYear()}-${String(saleDate.getMonth() + 1).padStart(2, '0')}-${String(saleDate.getDate()).padStart(2, '0')}`,
 
       invoiceNo, customerId, customerName, customerPhone,
 
@@ -1923,37 +2235,87 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
 
 
-    // ── Pagination: hard cap of 20 items per printed page ──────────────────
+    // ── Dynamic Pagination ──────────────────────────────────────────────────
 
-    const ITEMS_PER_PAGE = 20;
+    // Page 1 has full shop & customer header (~220px height) -> fits max 20 items.
+
+    // Subsequent pages omit shop header -> fit up to 30 items per page.
+
+    // Last page needs space for Totals & Signatures (~140px height) -> fits max 24 items.
+
+
+
+    const FIRST_PAGE_LIMIT = 20;
+
+    const SUBSEQUENT_PAGE_LIMIT = 30;
+
+    const LAST_PAGE_WITH_TOTALS_LIMIT = 18;
+
+
 
     const chunks = [];
 
-    for (let i = 0; i < visibleItems.length; i += ITEMS_PER_PAGE) {
+    let remainingItems = [...visibleItems];
 
-      chunks.push(visibleItems.slice(i, i + ITEMS_PER_PAGE));
+
+
+    if (remainingItems.length === 0) {
+
+      chunks.push([]);
+
+    } else {
+
+      let pageIdx = 0;
+
+      while (remainingItems.length > 0) {
+
+        pageIdx++;
+
+        let limit;
+
+
+
+        if (pageIdx === 1) {
+
+          limit = FIRST_PAGE_LIMIT;
+
+        } else {
+
+          if (remainingItems.length <= LAST_PAGE_WITH_TOTALS_LIMIT) {
+
+            limit = remainingItems.length;
+
+          } else {
+
+            limit = SUBSEQUENT_PAGE_LIMIT;
+
+          }
+
+        }
+
+
+
+        const currentChunk = remainingItems.slice(0, limit);
+
+        chunks.push(currentChunk);
+
+        remainingItems = remainingItems.slice(limit);
+
+      }
 
     }
 
-    if (chunks.length === 0) chunks.push([]);
 
 
+    const isSinglePage = chunks.length === 1;
 
-    // Heuristic: if the final page's item chunk is close to the 20-item cap,
+    const lastChunkSize = chunks[chunks.length - 1]?.length || 0;
 
-    // there's only enough leftover room for the net-total line — not
+    const compactSignatures = isSinglePage
 
-    // full-size signatures — so we shrink the signature block instead of
+      ? lastChunkSize >= 14
 
-    // spilling everything onto an extra page. Tune this threshold against
-
-    // your actual printer if the fit looks off in practice.
-
-    const COMPACT_SIGNATURE_THRESHOLD = 14;
-
-    const lastChunkSize = chunks[chunks.length - 1].length;
-
-    const compactSignatures = lastChunkSize >= COMPACT_SIGNATURE_THRESHOLD;
+      : lastChunkSize >= 22;
 
 
 
@@ -2087,13 +2449,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
       <div class="net-payable">
 
-        Net Payable Total Rs: ${formatAmt(finalNetPayable)}
+        <div class="footer-notes-inside">
 
-      </div>
+          ${(receiptSettings?.footerNotes || "THANKS FOR YOUR VISIT ****!!!!<br/>DON'T EXCHANGE DAMAGED ITEMS AND LOOSE PIECE NOTE: NO ANY RETURN<br/>BRANCH # 2 ..... SHOP NO # E-2028 KUCHA CHAH TAILIAN RANG MAHAL").replace(/\\n/g, '<br/>')}
 
-      <div class="footer-notes">
+        </div>
 
-        ${(receiptSettings?.footerNotes || "THANKS FOR YOUR VISIT ****!!!!<br/>DON'T EXCHANGE DAMAGED ITEMS AND LOOSE PIECE NOTE: NO ANY RETURN<br/>BRANCH # 2 ..... SHOP NO # E-2028 KUCHA CHAH TAILIAN RANG MAHAL").replace(/\\n/g, '<br/>')}
+        <div class="net-payable-title">
+
+          Net Payable Total Rs: ${formatAmt(finalNetPayable)}
+
+        </div>
 
       </div>
 
@@ -2163,13 +2529,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     let pagesHtml = '';
 
+    let currentStartIndex = 0;
+
     chunks.forEach((chunk, pageIdx) => {
 
       const isFirstPage = pageIdx === 0;
 
       const isLastPage = pageIdx === chunks.length - 1;
 
-      const startIndex = pageIdx * ITEMS_PER_PAGE;
+      const startIndex = currentStartIndex;
+
+      currentStartIndex += chunk.length;
 
       const rows = chunk.map((item, i) => rowHtml(item, startIndex + i)).join('');
 
@@ -2181,9 +2551,9 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
           <tr>
 
-            <th colspan="3" style="text-align: right; border: none; padding-right: 10px;">Sales Qty:</th>
+            <th colspan="3" style="text-align: right; border: none; padding-right: 10px; font-size: 12px; font-weight: 900;">Total Qty:</th>
 
-            <th style="border-top: 2px solid #000; border-bottom: 2px solid #000;">${totals.totalPackets}</th>
+            <th style="border-top: 2px solid #000; border-bottom: 2px solid #000; font-size: 13px; font-weight: 900;">${totals.totalPackets}</th>
 
             <th colspan="${hasDiscount ? 3 : 2}" style="border: none;"></th>
 
@@ -2203,7 +2573,35 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
         <div class="totals-signatures ${compactSignatures ? 'compact' : ''}">
 
-          <div class="summary" style="justify-content: flex-end;">
+          <div class="summary">
+
+            <div class="signatures-in-summary">
+
+              <div class="sig-box">
+
+                <div style="text-transform: uppercase;">${currentUser?.username || 'OPERATOR'}</div>
+
+                <div class="sig-role">Operator</div>
+
+              </div>
+
+              <div class="sig-box">
+
+                <div>SALES MAN</div>
+
+                <div class="sig-role">Sales Man</div>
+
+              </div>
+
+              <div class="sig-box">
+
+                <div style="visibility: hidden;">CHECKER</div>
+
+                <div class="sig-role">Checker</div>
+
+              </div>
+
+            </div>
 
             <div style="text-align: right;">
 
@@ -2286,34 +2684,6 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
             </div>
 
           ` : ''}
-
-          <div class="signatures">
-
-            <div class="sig-box">
-
-              <div style="text-transform: uppercase;">${currentUser?.username || 'OPERATOR'}</div>
-
-              <div class="sig-role">Operator</div>
-
-            </div>
-
-            <div class="sig-box">
-
-              <div>SALES MAN</div>
-
-              <div class="sig-role">Sales Man</div>
-
-            </div>
-
-            <div class="sig-box">
-
-              <div style="visibility: hidden;">CHECKER</div>
-
-              <div class="sig-role">Checker</div>
-
-            </div>
-
-          </div>
 
         </div>
 
@@ -2453,41 +2823,151 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
 
 
-          .summary { border: 1px solid #000; border-top: none; padding: 4px; font-size: 12px; display: flex; justify-content: space-between; }
+          .summary {
 
-          .net-total { text-align: right; padding: 4px; border: 1px solid #000; border-top: none; font-size: 13px; }
+            border: 1px solid #000;
+
+            border-top: none;
+
+            padding: 4px 8px;
+
+            font-size: 13px;
+
+            font-weight: 900;
+
+            display: flex;
+
+            justify-content: space-between;
+
+            align-items: flex-end;
+
+          }
+
+          .summary strong { font-weight: 900; }
 
 
 
-          .signatures { display: flex; justify-content: space-between; margin-top: 10px; margin-bottom: 6px; font-size: 12px; padding: 0 20px; }
+          .signatures-in-summary {
 
-          .sig-box { width: 25%; text-align: center; border-top: 1px solid #000; padding-top: 4px; }
+            display: flex;
 
-          .sig-role { font-weight: normal; }
+            gap: 12px;
+
+            align-items: flex-end;
+
+          }
+
+          .sig-box {
+
+            width: 60px;
+
+            text-align: center;
+
+            border-top: 1px solid #000;
+
+            padding-top: 1px;
+
+            font-size: 7.5px;
+
+            font-weight: bold;
+
+            line-height: 1.1;
+
+          }
+
+          .sig-role {
+
+            font-weight: normal;
+
+            font-size: 7px;
+
+            color: #333;
+
+          }
 
 
 
-          /* Compact mode — used only on the last page when its item chunk
+          .net-total {
 
-             is close to the 20-item cap and there's no room left for
+            text-align: right;
 
-             full-size signatures. Shrinks to the smallest legible size so
+            padding: 3px 6px;
 
-             everything still fits on that one page. */
+            border: 1px solid #000;
+
+            border-top: none;
+
+            font-size: 13px;
+
+            font-weight: 900;
+
+          }
+
+          .net-total strong { font-weight: 900; }
+
+
+
+          /* Compact mode */
 
           .totals-signatures.compact .summary,
 
-          .totals-signatures.compact .net-total { font-size: 9px; padding: 2px; }
+          .totals-signatures.compact .net-total { font-size: 11px; padding: 2px 4px; font-weight: 900; }
 
-          .totals-signatures.compact .signatures { font-size: 7px; margin-top: 2px; margin-bottom: 2px; padding: 0 8px; }
+          .totals-signatures.compact .sig-box { width: 50px; font-size: 7px; }
 
-          .totals-signatures.compact .sig-box { padding-top: 1px; }
+          .totals-signatures.compact .sig-role { font-size: 6.5px; }
 
 
 
-          .footer-notes { font-size: 10px; text-transform: uppercase; line-height: 1.3; text-align: center; margin-bottom: 3px; margin-top: 3px; }
+          .net-payable {
 
-          .net-payable { text-align: right; font-size: 15px; font-weight: 900; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 4px 10px; }
+            border-top: 2px solid #000;
+
+            border-bottom: 2px solid #000;
+
+            padding: 3px 8px;
+
+            background: #fff;
+
+            display: flex;
+
+            justify-content: space-between;
+
+            align-items: center;
+
+          }
+
+          .net-payable-title {
+
+            text-align: right;
+
+            font-size: 15px;
+
+            font-weight: 900;
+
+            white-space: nowrap;
+
+            margin-left: 10px;
+
+          }
+
+          .footer-notes-inside {
+
+            font-size: 6.5px;
+
+            font-weight: normal;
+
+            text-transform: uppercase;
+
+            line-height: 1.15;
+
+            text-align: left;
+
+            max-width: 62%;
+
+            color: #222;
+
+          }
 
         </style>
 
@@ -2537,7 +3017,67 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
       }
 
-      if (e.key === 'Escape') { e.preventDefault(); onExit?.(); }
+      if (e.key === 'Escape') {
+
+        e.preventDefault();
+
+        if (stockSearchModalOpen) {
+
+          setStockSearchModalOpen(false);
+
+          setTimeout(() => scanRef.current?.focus(), 50);
+
+          return;
+
+        }
+
+        if (customerModalOpen) {
+
+          setCustomerModalOpen(false);
+
+          return;
+
+        }
+
+        if (showReturnModal) {
+
+          setShowReturnModal(false);
+
+          setReturnSearch('');
+
+          setTempReturns([]);
+
+          return;
+
+        }
+
+        if (showInvoiceDiscountModal) {
+
+          setShowInvoiceDiscountModal(false);
+
+          return;
+
+        }
+
+        if (showReceiptPreview) {
+
+          setShowReceiptPreview(false);
+
+          return;
+
+        }
+
+        if (paymentModalOpen) {
+
+          setPaymentModalOpen(false);
+
+          return;
+
+        }
+
+        onExit?.();
+
+      }
 
     };
 
@@ -2545,7 +3085,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     return () => window.removeEventListener('keydown', handler);
 
-  }, [isActive, items, invoiceNo, customerName, discount, miscCharges, paymentMethod, notes, isEditing]);
+  }, [isActive, items, invoiceNo, customerName, discount, miscCharges, paymentMethod, notes, isEditing, stockSearchModalOpen, customerModalOpen, showReturnModal, paymentModalOpen, showInvoiceDiscountModal, showReceiptPreview]);
 
 
 
@@ -2598,6 +3138,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
         </div>
 
         <div className="topbar-right">
+
+          <button type="button" onClick={() => setStockSearchModalOpen(true)} title="Stock Search (F8)" style={{ background: '#0284c7', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>S</button>
 
           <button type="button" onClick={() => setCustomerModalOpen(true)} title="Search Customer (F4)" style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>C</button>
 
@@ -4032,6 +4574,572 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                 setShowInvoiceDiscountModal(false);
 
               }} style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>Apply & Recalculate</button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
+
+
+
+      {/* Stock Inventory Search Modal (F8) */}
+
+      {stockSearchModalOpen && (
+
+        <div
+
+          style={{
+
+            position: 'fixed',
+
+            top: 0,
+
+            left: 0,
+
+            right: 0,
+
+            bottom: 0,
+
+            background: 'rgba(15, 23, 42, 0.75)',
+
+            backdropFilter: 'blur(4px)',
+
+            zIndex: 9999,
+
+            display: 'flex',
+
+            alignItems: 'center',
+
+            justifyContent: 'center',
+
+            padding: '20px'
+
+          }}
+
+          onClick={() => setStockSearchModalOpen(false)}
+
+        >
+
+          <div
+
+            style={{
+
+              width: '95%',
+
+              maxWidth: '1200px',
+
+              height: '88vh',
+
+              background: '#fff',
+
+              borderRadius: '12px',
+
+              display: 'flex',
+
+              flexDirection: 'column',
+
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+
+              overflow: 'hidden'
+
+            }}
+
+            onClick={e => e.stopPropagation()}
+
+          >
+
+            {/* Header & Filters */}
+
+            <div style={{ background: '#1e293b', color: '#fff', padding: '14px 20px', flexShrink: 0 }}>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+
+                  <span style={{ fontSize: '1.4rem' }}>📦</span>
+
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc' }}>
+
+                    Stock Inventory Search
+
+                  </h3>
+
+                  <span style={{ background: '#38bdf8', color: '#0f172a', fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '12px', marginLeft: '6px' }}>
+
+                    F8
+
+                  </span>
+
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+
+                  {stockToastMsg && (
+
+                    <div style={{ background: '#22c55e', color: '#fff', padding: '4px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 600 }}>
+
+                      ✓ {stockToastMsg}
+
+                    </div>
+
+                  )}
+
+                  <button
+
+                    type="button"
+
+                    onClick={() => setStockSearchModalOpen(false)}
+
+                    style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+
+                  >
+
+                    ✕
+
+                  </button>
+
+                </div>
+
+              </div>
+
+
+
+              {/* Filter controls */}
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+
+                <input
+
+                  ref={stockSearchInputRef}
+
+                  autoFocus
+
+                  type="text"
+
+                  placeholder="Search Item Code or Description..."
+
+                  value={stockSearchFilters.search}
+
+                  onChange={e => {
+
+                    setStockSearchFilters(f => ({ ...f, search: e.target.value }));
+
+                    setStockModalSelectedIndex(0);
+
+                  }}
+
+                  onKeyDown={handleStockModalKeyDown}
+
+                  style={{
+
+                    flex: '2',
+
+                    minWidth: '220px',
+
+                    padding: '8px 12px',
+
+                    borderRadius: '6px',
+
+                    border: '1px solid #475569',
+
+                    background: '#0f172a',
+
+                    color: '#fff',
+
+                    fontSize: '0.9rem',
+
+                    outline: 'none'
+
+                  }}
+
+                />
+
+                <input
+
+                  type="text"
+
+                  placeholder="Brand..."
+
+                  value={stockSearchFilters.brand}
+
+                  onChange={e => {
+
+                    setStockSearchFilters(f => ({ ...f, brand: e.target.value }));
+
+                    setStockModalSelectedIndex(0);
+
+                  }}
+
+                  onKeyDown={handleStockModalKeyDown}
+
+                  style={{
+
+                    flex: '1',
+
+                    minWidth: '120px',
+
+                    padding: '8px 12px',
+
+                    borderRadius: '6px',
+
+                    border: '1px solid #475569',
+
+                    background: '#0f172a',
+
+                    color: '#fff',
+
+                    fontSize: '0.9rem',
+
+                    outline: 'none'
+
+                  }}
+
+                />
+
+                <input
+
+                  type="text"
+
+                  placeholder="Category..."
+
+                  value={stockSearchFilters.category}
+
+                  onChange={e => {
+
+                    setStockSearchFilters(f => ({ ...f, category: e.target.value }));
+
+                    setStockModalSelectedIndex(0);
+
+                  }}
+
+                  onKeyDown={handleStockModalKeyDown}
+
+                  style={{
+
+                    flex: '1',
+
+                    minWidth: '120px',
+
+                    padding: '8px 12px',
+
+                    borderRadius: '6px',
+
+                    border: '1px solid #475569',
+
+                    background: '#0f172a',
+
+                    color: '#fff',
+
+                    fontSize: '0.9rem',
+
+                    outline: 'none'
+
+                  }}
+
+                />
+
+                <input
+
+                  type="text"
+
+                  placeholder="Size..."
+
+                  value={stockSearchFilters.size}
+
+                  onChange={e => {
+
+                    setStockSearchFilters(f => ({ ...f, size: e.target.value }));
+
+                    setStockModalSelectedIndex(0);
+
+                  }}
+
+                  onKeyDown={handleStockModalKeyDown}
+
+                  style={{
+
+                    flex: '1',
+
+                    minWidth: '100px',
+
+                    padding: '8px 12px',
+
+                    borderRadius: '6px',
+
+                    border: '1px solid #475569',
+
+                    background: '#0f172a',
+
+                    color: '#fff',
+
+                    fontSize: '0.9rem',
+
+                    outline: 'none'
+
+                  }}
+
+                />
+
+                {(stockSearchFilters.search || stockSearchFilters.brand || stockSearchFilters.category || stockSearchFilters.size) && (
+
+                  <button
+
+                    type="button"
+
+                    onClick={() => setStockSearchFilters({ search: '', brand: '', category: '', size: '' })}
+
+                    style={{ background: '#475569', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 12px', fontSize: '0.85rem', cursor: 'pointer' }}
+
+                  >
+
+                    Clear Filters
+
+                  </button>
+
+                )}
+
+              </div>
+
+
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', fontSize: '0.85rem', color: '#cbd5e1' }}>
+
+                <span>
+
+                  Showing {filteredStockItems.length > 150 ? `top 150 of ${filteredStockItems.length}` : `${filteredStockItems.length}`} matching items
+
+                </span>
+
+                <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+
+                  Total Stock Value: PKR {totalStockSearchValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+
+                </span>
+
+              </div>
+
+            </div>
+
+
+
+            {/* Table Content */}
+
+            <div style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', padding: '12px 20px' }}>
+
+              <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+
+                  <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 2 }}>
+
+                    <tr>
+
+                      <th style={{ padding: '10px 12px' }}>Item Code</th>
+
+                      <th style={{ padding: '10px 12px' }}>Description</th>
+
+                      <th style={{ padding: '10px 12px' }}>Category</th>
+
+                      <th style={{ padding: '10px 12px' }}>Size Range</th>
+
+                      <th style={{ padding: '10px 12px' }} className="text-right">Purch. Rate</th>
+
+                      <th style={{ padding: '10px 12px' }} className="text-right">Sale Rate</th>
+
+                      <th style={{ padding: '10px 12px' }} className="text-center">Stock (Pcs)</th>
+
+                      <th style={{ padding: '10px 12px' }} className="text-right">Stock Value</th>
+
+                      <th style={{ padding: '10px 12px' }} className="text-center">Action</th>
+
+                    </tr>
+
+                  </thead>
+
+                  <tbody>
+
+                    {stockSearchLoading ? (
+
+                      <tr>
+
+                        <td colSpan={9} className="empty-state" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
+
+                          Loading stock inventory...
+
+                        </td>
+
+                      </tr>
+
+                    ) : filteredStockItems.length === 0 ? (
+
+                      <tr>
+
+                        <td colSpan={9} className="empty-state" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
+
+                          No items match search criteria
+
+                        </td>
+
+                      </tr>
+
+                    ) : (
+
+                      filteredStockItems.slice(0, 150).map((p, idx) => {
+
+                        const isSelected = idx === stockModalSelectedIndex;
+
+                        const stockPcs = p.stock_packets || 0;
+
+                        const chipCls = stockPcs > 5 ? 'chip-ok' : stockPcs > 0 ? 'chip-low' : 'chip-zero';
+
+                        return (
+
+                          <tr
+
+                            key={p.id || p.item_code}
+
+                            ref={el => stockModalRowRefs.current[idx] = el}
+
+                            onClick={() => setStockModalSelectedIndex(idx)}
+
+                            onDoubleClick={() => handleAddStockItemToSale(p)}
+
+                            style={{
+
+                              background: isSelected ? '#e0f2fe' : 'transparent',
+
+                              borderLeft: isSelected ? '4px solid #0284c7' : '4px solid transparent',
+
+                              cursor: 'pointer',
+
+                              transition: 'background 0.15s'
+
+                            }}
+
+                          >
+
+                            <td><span className="badge badge-code">{p.item_code}</span></td>
+
+                            <td>
+
+                              <div style={{ fontWeight: 600, color: '#0f172a' }}>{p.description}</div>
+
+                              {p.brand && <div style={{ fontSize: '11px', color: '#64748b' }}>Brand: {p.brand}</div>}
+
+                            </td>
+
+                            <td><span className="badge badge-cat">{p.category || '—'}</span></td>
+
+                            <td>{p.size_range || '—'}</td>
+
+                            <td className="text-right">PKR {(parseFloat(p.purchase_rate) || 0).toLocaleString()}</td>
+
+                            <td className="text-right" style={{ color: '#16a34a', fontWeight: 700 }}>
+
+                              PKR {(parseFloat(p.sale_rate) || 0).toLocaleString()}
+
+                            </td>
+
+                            <td className="text-center">
+
+                              <span className={`stock-chip ${chipCls}`}>{stockPcs}</span>
+
+                            </td>
+
+                            <td className="text-right" style={{ fontWeight: 600 }}>
+
+                              PKR {(stockPcs * (parseFloat(p.purchase_rate) || 0)).toLocaleString()}
+
+                            </td>
+
+                            <td className="text-center">
+
+                              <button
+
+                                type="button"
+
+                                onClick={(e) => {
+
+                                  e.stopPropagation();
+
+                                  handleAddStockItemToSale(p);
+
+                                }}
+
+                                style={{
+
+                                  background: '#16a34a',
+
+                                  color: '#fff',
+
+                                  border: 'none',
+
+                                  padding: '5px 12px',
+
+                                  borderRadius: '6px',
+
+                                  fontWeight: 600,
+
+                                  fontSize: '0.8rem',
+
+                                  cursor: 'pointer',
+
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+
+                                }}
+
+                              >
+
+                                + Add
+
+                              </button>
+
+                            </td>
+
+                          </tr>
+
+                        );
+
+                      })
+
+                    )}
+
+                  </tbody>
+
+                </table>
+
+              </div>
+
+            </div>
+
+
+
+            {/* Footer */}
+
+            <div style={{ background: '#f1f5f9', borderTop: '1px solid #cbd5e1', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+
+              <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
+
+                💡 <strong>Tip:</strong> Click <strong>+ Add</strong> or <strong>Double-Click</strong> any row to add item to invoice. Press <strong>Esc</strong> to close.
+
+              </span>
+
+              <button
+
+                type="button"
+
+                onClick={() => setStockSearchModalOpen(false)}
+
+                style={{ padding: '8px 20px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#334155', fontWeight: 600, cursor: 'pointer' }}
+
+              >
+
+                Close (Esc)
+
+              </button>
 
             </div>
 

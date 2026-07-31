@@ -8,7 +8,7 @@ let _rowId = Date.now();
 const nextId = () => ++_rowId;
 
 function makeRow() {
-  return { id: nextId(), itemCode: '', description: '', brand: '', packingQty: 0, packets: '', preDiscPrice: '', flatDiscount: 0, discPct: 0 };
+  return { id: nextId(), itemCode: '', description: '', brand: '', packingQty: 0, currentStock: 0, packets: '', preDiscPrice: '', flatDiscount: 0, discPct: 0 };
 }
 
 function descForProduct(p) {
@@ -36,6 +36,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   const [discount, setDiscount] = useState('');
   const [miscCharges, setMiscCharges] = useState('');
   const [items, setItems] = useState(() => [makeRow()]);
+  const [activeRowId, setActiveRowId] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -55,6 +56,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   const codeRefs = useRef({});
   const packetsRefs = useRef({});
   const rateRefs = useRef({});
+  const tableContainerRef = useRef(null);
   const itemsRef = useRef([]);
   itemsRef.current = items;
 
@@ -109,6 +111,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
           description: row.item_description,
           brand: row.brand || '',
           packingQty: row.packing_qty || 0,
+          currentStock: row.stock_packets !== undefined ? row.stock_packets : (row.packing_qty || 0),
           packets: String(row.packets),
           preDiscPrice: String(parseFloat(row.pre_disc_price || row.rate)),
           flatDiscount: parseFloat(row.flat_discount || 0),
@@ -118,7 +121,10 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
         setItems(mapped);
         setTimeout(() => {
           const first = mapped[0];
-          if (first) codeRefs.current[first.id]?.focus();
+          if (first) {
+            setActiveRowId(first.id);
+            codeRefs.current[first.id]?.focus();
+          }
         }, 80);
       });
     } else {
@@ -171,13 +177,38 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
     else if (field === 'ctnQty') notesRef.current?.focus();
     else if (field === 'notes') {
       const first = itemsRef.current[0];
-      if (first) setTimeout(() => codeRefs.current[first.id]?.focus(), 30);
+      if (first) {
+        setActiveRowId(first.id);
+        setTimeout(() => codeRefs.current[first.id]?.focus(), 30);
+      }
     }
   };
 
+  useEffect(() => {
+    if (!activeRowId) return;
+    const item = items.find(r => r.id === activeRowId);
+    if (item && item.itemCode && (item.currentStock === undefined || item.currentStock === 0)) {
+      ipcRenderer.invoke('get-product-by-code', item.itemCode).then(p => {
+        if (p && p.stock_packets !== undefined) {
+          setItems(prev => prev.map(r => r.id === activeRowId ? { ...r, currentStock: p.stock_packets } : r));
+        }
+      }).catch(console.error);
+    }
+  }, [activeRowId]);
+
+  const handleCodeFocus = (rowId) => {
+    setActiveRowId(rowId);
+    setTimeout(() => {
+      if (codeRefs.current[rowId]) {
+        codeRefs.current[rowId].scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }, 30);
+  };
+
   const handleCodeChange = async (rowId, val) => {
+    setActiveRowId(rowId);
     setItems(prev => prev.map(r =>
-      r.id === rowId ? { ...r, itemCode: val, description: '', brand: '', packingQty: 0, preDiscPrice: '', flatDiscount: 0, discPct: 0 } : r
+      r.id === rowId ? { ...r, itemCode: val, description: '', brand: '', packingQty: 0, currentStock: 0, preDiscPrice: '', flatDiscount: 0, discPct: 0 } : r
     ));
     if (!val.trim()) { setActiveDrop(null); return; }
     const results = await ipcRenderer.invoke('search-products', val);
@@ -185,6 +216,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   };
 
   const fillRow = (rowId, product) => {
+    setActiveRowId(rowId);
     const pkts = product.packing_qty || 0;
     const baseRate = parseFloat(product.purchase_rate) || 0;
     let flatD = 0;
@@ -208,6 +240,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
         description: descForProduct(product),
         brand: product.brand || '',
         packingQty: pkts,
+        currentStock: product.stock_packets !== undefined ? product.stock_packets : 0,
         packets: String(pkts),
         preDiscPrice: String(baseRate),
         flatDiscount: flatD,
@@ -230,7 +263,10 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
       if (prev.length <= 1) return prev;
       const idx = prev.findIndex(r => r.id === rowId);
       const focusTarget = prev[idx - 1] || prev[idx + 1];
-      if (focusTarget) setTimeout(() => codeRefs.current[focusTarget.id]?.focus(), 50);
+      if (focusTarget) {
+        setActiveRowId(focusTarget.id);
+        setTimeout(() => codeRefs.current[focusTarget.id]?.focus(), 50);
+      }
       return prev.filter(r => r.id !== rowId);
     });
   };
@@ -239,11 +275,19 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
     setItems(prev => {
       const last = prev[prev.length - 1];
       if (!last?.description && !last?.itemCode) {
-        setTimeout(() => codeRefs.current[last.id]?.focus(), 30);
+        setActiveRowId(last.id);
+        setTimeout(() => {
+          codeRefs.current[last.id]?.focus();
+          codeRefs.current[last.id]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 30);
         return prev;
       }
       const nr = makeRow();
-      setTimeout(() => codeRefs.current[nr.id]?.focus(), 50);
+      setActiveRowId(nr.id);
+      setTimeout(() => {
+        codeRefs.current[nr.id]?.focus();
+        codeRefs.current[nr.id]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 50);
       return [...prev, nr];
     });
   };
@@ -380,11 +424,15 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
 
     setIsSubmitting(true);
     try {
-      let dbReturnDate = returnDate;
-      if (!isEditing) {
-        dbReturnDate = new Date().toISOString().split('T')[0];
-      } else if (returnDate && returnDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
+      let dbReturnDate = '';
+      if (returnDate && returnDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
         const [d, m, y] = returnDate.split('-');
+        dbReturnDate = `${y}-${m}-${d}`;
+      } else {
+        const today = new Date();
+        const d = String(today.getDate()).padStart(2, '0');
+        const m = String(today.getMonth() + 1).padStart(2, '0');
+        const y = today.getFullYear();
         dbReturnDate = `${y}-${m}-${d}`;
       }
 
@@ -627,205 +675,239 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
         </section>
 
         {/* Card 2: Return Items Table */}
-        <section className="form-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
-          <div className="card-header" style={{ padding: '8px 14px 4px 14px', borderBottom: '1px solid #ebedf3' }}>
-            <h3 className="card-title" style={{ margin: 0, color: '#ef4444' }}>Return Items ({totals.count})</h3>
-          </div>
+        {(() => {
+          const activeItem = items.find(r => r.id === activeRowId) || items.find(r => r.itemCode || r.description) || items[0];
+          return (
+            <section className="form-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
+              <div className="card-header" style={{ padding: '8px 14px', borderBottom: '1px solid #ebedf3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="card-title" style={{ margin: 0, color: '#ef4444' }}>Return Items ({totals.count})</h3>
+                
+                {/* Available Stock & Purchase Rate Info Boxes */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 6 }}>
+                    <span style={{ fontSize: '0.78rem', color: '#047857', fontWeight: 700 }}>Available Stock:</span>
+                    <strong style={{ fontSize: '0.92rem', color: '#065f46', fontWeight: 800 }}>
+                      {activeItem?.currentStock !== undefined ? `${activeItem.currentStock} pcs` : '—'}
+                    </strong>
+                  </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 4px' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead style={{ position: 'sticky', top: 0, background: '#fef2f2', zIndex: 10, borderBottom: '1px solid #cbd5e1' }}>
-                <tr style={{ height: 28, fontSize: '0.75rem', color: '#991b1b' }}>
-                  <th style={{ width: 24, textAlign: 'center', padding: '0 2px' }}>No.</th>
-                  <th style={{ width: '12%', padding: '0 4px' }}>Item Code</th>
-                  <th style={{ padding: '0 4px', textAlign: 'left' }}>Description</th>
-                  <th style={{ width: 50, textAlign: 'center', padding: '0 2px' }}>Qty</th>
-                  <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Pre-Disc</th>
-                  <th style={{ width: 60, textAlign: 'right', padding: '0 4px' }}>Flat Disc</th>
-                  <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Net Rate</th>
-                  <th style={{ width: 50, textAlign: 'right', padding: '0 4px' }}>Disc%</th>
-                  <th style={{ width: 60, textAlign: 'right', padding: '0 4px' }}>Discount</th>
-                  <th style={{ width: 80, textAlign: 'right', padding: '0 4px' }}>Amount</th>
-                  <th style={{ width: 24, padding: '0' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row, idx) => {
-                  const math = rowMath[row.id] || { pPrice: 0, rowTotal: 0, netRate: 0, rowDiscTotal: 0 };
-                  const rDiscAmount = (parseFloat(row.preDiscPrice || 0) - parseFloat(row.flatDiscount || 0)) * (parseFloat(row.discPct || 0) / 100) * (parseInt(row.packets || 0));
-                  return (
-                    <tr key={row.id} style={{ height: 32, borderBottom: '1px solid #f3f4f6' }}>
-                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#1e1e2d', fontSize: '0.85rem' }}>
-                        {(row.description || row.itemCode) ? idx + 1 : ''}
-                      </td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6 }}>
+                    <span style={{ fontSize: '0.78rem', color: '#0369a1', fontWeight: 700 }}>Purchase Rate:</span>
+                    <strong style={{ fontSize: '0.92rem', color: '#075985', fontWeight: 800 }}>
+                      {activeItem?.preDiscPrice && parseFloat(activeItem.preDiscPrice) > 0 ? `PKR ${parseFloat(activeItem.preDiscPrice).toLocaleString()}` : '—'}
+                    </strong>
+                  </div>
+                </div>
+              </div>
 
-                      <td style={{ position: 'relative', padding: '0 4px' }}>
-                        <input
-                          ref={el => codeRefs.current[row.id] = el}
-                          type="text"
-                          value={row.itemCode}
-                          onChange={e => handleCodeChange(row.id, e.target.value)}
-                          onKeyDown={e => handleCodeKD(e, row.id, idx)}
-                          onBlur={() => setTimeout(() => setActiveDrop(null), 200)}
-                          placeholder="Scan / Code"
-                          className="form-input fast-entry"
-                          style={{ padding: '2px 6px', fontSize: '0.85rem' }}
-                        />
-                        {activeDrop?.rowId === row.id && activeDrop.results.length > 0 && (
-                          <div className="np-dropdown" style={{ zIndex: 100 }}>
-                            {activeDrop.results.slice(0, 8).map(p => (
-                              <div key={p.id} className="np-suggestion"
-                                onMouseDown={e => { e.preventDefault(); fillRow(row.id, p); }}>
-                                <strong style={{ fontFamily: 'monospace', color: '#ef4444', minWidth: 90, flexShrink: 0 }}>{p.item_code}</strong>
-                                <span style={{ flex: 1 }}>{descForProduct(p)}</span>
-                                <span style={{ color: '#5e6278', fontWeight: 700, minWidth: 64, textAlign: 'right', flexShrink: 0 }}>
-                                  {parseFloat(p.purchase_rate || 0).toLocaleString()}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-
-                      <td style={{ padding: '0 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0 }}>
-                        <span style={{ fontSize: '0.84rem', color: '#3f4254', whiteSpace: 'nowrap' }}>
-                          {row.description || <span style={{ color: '#d1d5db' }}>—</span>}
-                        </span>
-                      </td>
-
-                      <td style={{ textAlign: 'center', padding: '0 2px' }}>
-                        <input
-                          ref={el => packetsRefs.current[row.id] = el}
-                          type="text"
-                          inputMode="numeric"
-                          value={row.packets}
-                          onChange={e => updateRow(row.id, 'packets', e.target.value.replace(/[^\d]/g, ''))}
-                          onKeyDown={e => handlePktsKD(e, row.id, idx)}
-                          onFocus={e => e.target.select()}
-                          placeholder="0"
-                          className="form-input center-text packing-field"
-                          style={{ width: 46, margin: '0 auto', display: 'block', height: 24, padding: 2, background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' }}
-                        />
-                      </td>
-
-                      <td style={{ padding: '0 4px' }}>
-                        <input
-                          ref={el => rateRefs.current[row.id] = el}
-                          type="text"
-                          inputMode="decimal"
-                          value={row.preDiscPrice}
-                          onChange={e => updateRow(row.id, 'preDiscPrice', e.target.value.replace(/[^\d.]/g, ''))}
-                          onKeyDown={e => handleRateKD(e, row.id, idx)}
-                          onFocus={e => e.target.select()}
-                          placeholder="0"
-                          className="form-input center-text highlight-rate"
-                          style={{ height: 24, padding: 2 }}
-                        />
-                      </td>
-
-                      <td style={{ padding: '0 4px' }}>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={row.flatDiscount || ''}
-                          onChange={e => updateRow(row.id, 'flatDiscount', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
-                          onFocus={e => e.target.select()}
-                          placeholder="0"
-                          className="form-input center-text"
-                          style={{ height: 24, padding: 2 }}
-                        />
-                      </td>
-
-                      <td style={{ textAlign: 'right', fontSize: '0.85rem', fontWeight: 600, color: '#4b5563', padding: '0 4px' }}>
-                        {math.netRate > 0 ? Math.round(math.netRate).toLocaleString() : '—'}
-                      </td>
-
-                      <td style={{ padding: '0 4px' }}>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={row.discPct || ''}
-                          onChange={e => updateRow(row.id, 'discPct', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
-                          onFocus={e => e.target.select()}
-                          placeholder="0%"
-                          className="form-input center-text"
-                          style={{ height: 24, padding: 2 }}
-                        />
-                      </td>
-
-                      <td style={{ textAlign: 'right', fontSize: '0.85rem', fontWeight: 500, color: '#6b7280', padding: '0 4px' }}>
-                        {rDiscAmount > 0 ? Math.round(rDiscAmount).toLocaleString() : '—'}
-                      </td>
-
-                      <td className="amount-cell" style={{ textAlign: 'right', fontWeight: 700, color: '#991b1b', fontSize: '0.88rem', padding: '0 4px' }}>
-                        {math.rowTotal > 0 ? Math.round(math.rowTotal).toLocaleString() : '—'}
-                      </td>
-
-                      <td className="action-cell" style={{ padding: '0' }}>
-                        {(row.description || row.itemCode) && (
-                          <button type="button" onClick={() => removeRow(row.id)} className="btn-remove"
-                            disabled={items.length <= 1} tabIndex={-1} title="Remove (Ctrl+D)">✕</button>
-                        )}
-                      </td>
+              <div ref={tableContainerRef} style={{ flex: 1, overflowY: 'auto', padding: '0 4px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#fef2f2', zIndex: 10, borderBottom: '1px solid #cbd5e1' }}>
+                    <tr style={{ height: 28, fontSize: '0.75rem', color: '#991b1b' }}>
+                      <th style={{ width: 24, textAlign: 'center', padding: '0 2px' }}>No.</th>
+                      <th style={{ width: 135, padding: '0 4px' }}>Item Code</th>
+                      <th style={{ padding: '0 4px', textAlign: 'left' }}>Description</th>
+                      <th style={{ width: 50, textAlign: 'center', padding: '0 2px' }}>Qty</th>
+                      <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Pre-Disc</th>
+                      <th style={{ width: 60, textAlign: 'right', padding: '0 4px' }}>Flat Disc</th>
+                      <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Net Rate</th>
+                      <th style={{ width: 50, textAlign: 'right', padding: '0 4px' }}>Disc%</th>
+                      <th style={{ width: 60, textAlign: 'right', padding: '0 4px' }}>Discount</th>
+                      <th style={{ width: 80, textAlign: 'right', padding: '0 4px' }}>Amount</th>
+                      <th style={{ width: 24, padding: '0' }}></th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {items.map((row, idx) => {
+                      const math = rowMath[row.id] || { pPrice: 0, rowTotal: 0, netRate: 0, rowDiscTotal: 0 };
+                      const rDiscAmount = (parseFloat(row.preDiscPrice || 0) - parseFloat(row.flatDiscount || 0)) * (parseFloat(row.discPct || 0) / 100) * (parseInt(row.packets || 0));
+                      return (
+                        <tr key={row.id} style={{ height: 32, borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ textAlign: 'center', fontWeight: 700, color: '#1e1e2d', fontSize: '0.85rem' }}>
+                            {(row.description || row.itemCode) ? idx + 1 : ''}
+                          </td>
 
-          {/* Bottom Summary Bar with all fields in ONE SINGLE ROW */}
-          <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 10, padding: '8px 14px', background: '#fef2f2', borderTop: '1px solid #fecaca', alignItems: 'center', flexShrink: 0, overflowX: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', background: '#fff', borderRadius: 4, border: '1px solid #fca5a5', whiteSpace: 'nowrap' }}>
-              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#991b1b' }}>Gross Amount:</span>
-              <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{totals.grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-            </div>
+                          <td style={{ position: 'relative', padding: '0 4px' }}>
+                            <input
+                              ref={el => codeRefs.current[row.id] = el}
+                              type="text"
+                              value={row.itemCode}
+                              onChange={e => handleCodeChange(row.id, e.target.value)}
+                              onKeyDown={e => handleCodeKD(e, row.id, idx)}
+                              onFocus={() => handleCodeFocus(row.id)}
+                              onBlur={() => setTimeout(() => setActiveDrop(null), 200)}
+                              placeholder="Scan / Code"
+                              className="form-input fast-entry"
+                              style={{ padding: '2px 6px', fontSize: '0.85rem' }}
+                            />
+                            {activeDrop?.rowId === row.id && activeDrop.results.length > 0 && (
+                              <div className="np-dropdown" style={{ zIndex: 100 }}>
+                                {activeDrop.results.slice(0, 8).map(p => (
+                                  <div key={p.id} className="np-suggestion"
+                                    onMouseDown={e => { e.preventDefault(); fillRow(row.id, p); }}>
+                                    <strong style={{ fontFamily: 'monospace', color: '#ef4444', minWidth: 90, flexShrink: 0 }}>{p.item_code}</strong>
+                                    <span style={{ flex: 1 }}>{descForProduct(p)}</span>
+                                    <span style={{ color: '#5e6278', fontWeight: 700, minWidth: 64, textAlign: 'right', flexShrink: 0 }}>
+                                      {parseFloat(p.purchase_rate || 0).toLocaleString()}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', background: '#fff', borderRadius: 4, border: '1px solid #fca5a5', whiteSpace: 'nowrap' }}>
-              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#dc2626' }}>Total Disc:</span>
-              <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{(totals.totalItemDisc + totals.flatDisc).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-            </div>
+                          <td style={{ padding: '0 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0 }}>
+                            <span style={{ fontSize: '0.84rem', color: '#3f4254', whiteSpace: 'nowrap' }}>
+                              {row.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                            </span>
+                          </td>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', background: '#fff', borderRadius: 4, border: '1px solid #fca5a5', whiteSpace: 'nowrap' }}>
-              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#991b1b' }}>Net Subtotal:</span>
-              <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{totals.netSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-            </div>
+                          <td style={{ textAlign: 'center', padding: '0 2px' }}>
+                            <input
+                              ref={el => packetsRefs.current[row.id] = el}
+                              type="text"
+                              inputMode="numeric"
+                              value={row.packets}
+                              onChange={e => updateRow(row.id, 'packets', e.target.value.replace(/[^\d]/g, ''))}
+                              onKeyDown={e => handlePktsKD(e, row.id, idx)}
+                              onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
+                              placeholder="0"
+                              className="form-input center-text packing-field"
+                              style={{ width: 46, margin: '0 auto', display: 'block', height: 24, padding: 2, background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' }}
+                            />
+                          </td>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#dc2626' }}>− Disc:</span>
-              <input
-                type="number"
-                value={discount}
-                onChange={e => setDiscount(e.target.value)}
-                className="form-input center-text"
-                placeholder="0"
-                style={{ width: 65, height: 26, padding: '2px 4px', fontSize: '0.85rem', borderColor: '#fca5a5' }}
-              />
-            </div>
+                          <td style={{ padding: '0 4px' }}>
+                            <input
+                              ref={el => rateRefs.current[row.id] = el}
+                              type="text"
+                              inputMode="decimal"
+                              value={row.preDiscPrice}
+                              onChange={e => updateRow(row.id, 'preDiscPrice', e.target.value.replace(/[^\d.]/g, ''))}
+                              onKeyDown={e => handleRateKD(e, row.id, idx)}
+                              onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
+                              placeholder="0"
+                              className="form-input center-text highlight-rate"
+                              style={{ height: 24, padding: 2 }}
+                            />
+                          </td>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#059669' }}>+ Misc:</span>
-              <input
-                type="number"
-                value={miscCharges}
-                onChange={e => setMiscCharges(e.target.value)}
-                className="form-input center-text"
-                placeholder="0"
-                style={{ width: 65, height: 26, padding: '2px 4px', fontSize: '0.85rem', borderColor: '#fca5a5' }}
-              />
-            </div>
+                          <td style={{ padding: '0 4px' }}>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={row.flatDiscount || ''}
+                              onChange={e => updateRow(row.id, 'flatDiscount', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
+                              onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
+                              placeholder="0"
+                              className="form-input center-text"
+                              style={{ height: 24, padding: 2 }}
+                            />
+                          </td>
 
-            <div style={{ fontSize: '0.85rem', color: '#991b1b', fontWeight: 600 }}>=</div>
+                          <td style={{ textAlign: 'right', fontSize: '0.85rem', fontWeight: 600, color: '#4b5563', padding: '0 4px' }}>
+                            {math.netRate > 0 ? Math.round(math.netRate).toLocaleString() : '—'}
+                          </td>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#991b1b' }}>Grand Total:</span>
-              <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#7f1d1d', background: '#fff', padding: '3px 12px', border: '2px solid #ef4444', borderRadius: 6 }}>
-                PKR {Math.round(totals.grand).toLocaleString()}
-              </span>
-            </div>
-          </div>
+                          <td style={{ padding: '0 4px' }}>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={row.discPct || ''}
+                              onChange={e => updateRow(row.id, 'discPct', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
+                              onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
+                              placeholder="0%"
+                              className="form-input center-text"
+                              style={{ height: 24, padding: 2 }}
+                            />
+                          </td>
 
-        </section>
+                          <td style={{ textAlign: 'right', fontSize: '0.85rem', fontWeight: 500, color: '#6b7280', padding: '0 4px' }}>
+                            {rDiscAmount > 0 ? Math.round(rDiscAmount).toLocaleString() : '—'}
+                          </td>
+
+                          <td className="amount-cell" style={{ textAlign: 'right', fontWeight: 700, color: '#991b1b', fontSize: '0.88rem', padding: '0 4px' }}>
+                            {math.rowTotal > 0 ? Math.round(math.rowTotal).toLocaleString() : '—'}
+                          </td>
+
+                          <td className="action-cell" style={{ padding: '0' }}>
+                            {(row.description || row.itemCode) && (
+                              <button type="button" onClick={() => removeRow(row.id)} className="btn-remove"
+                                disabled={items.length <= 1} tabIndex={-1} title="Remove (Ctrl+D)">✕</button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot style={{ position: 'sticky', bottom: 0, background: '#fff5f5', borderTop: '2px solid #fca5a5', zIndex: 10 }}>
+                    <tr style={{ height: 30, fontSize: '0.85rem' }}>
+                      <td colSpan={3} style={{ textAlign: 'right', fontWeight: 800, color: '#991b1b', padding: '0 6px' }}>Total Pcs:</td>
+                      <td style={{ textAlign: 'center', fontWeight: 900, color: '#991b1b', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 2px' }}>{totals.pkts}</td>
+                      <td colSpan={5} style={{ textAlign: 'right', fontWeight: 800, color: '#991b1b', padding: '0 6px' }}>Net Subtotal:</td>
+                      <td style={{ textAlign: 'right', fontWeight: 900, color: '#991b1b', padding: '0 4px' }}>
+                        {totals.netSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Bottom Summary Bar with all fields in ONE SINGLE ROW */}
+              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 10, padding: '8px 14px', background: '#fef2f2', borderTop: '1px solid #fecaca', alignItems: 'center', flexShrink: 0, overflowX: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', background: '#fff', borderRadius: 4, border: '1px solid #fca5a5', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#991b1b' }}>Gross Amount:</span>
+                  <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{totals.grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', background: '#fff', borderRadius: 4, border: '1px solid #fca5a5', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#dc2626' }}>Total Disc:</span>
+                  <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{(totals.totalItemDisc + totals.flatDisc).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', background: '#fff', borderRadius: 4, border: '1px solid #fca5a5', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#991b1b' }}>Net Subtotal:</span>
+                  <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{totals.netSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#dc2626' }}>− Disc:</span>
+                  <input
+                    type="number"
+                    value={discount}
+                    onChange={e => setDiscount(e.target.value)}
+                    className="form-input center-text"
+                    placeholder="0"
+                    style={{ width: 65, height: 26, padding: '2px 4px', fontSize: '0.85rem', borderColor: '#fca5a5' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#059669' }}>+ Misc:</span>
+                  <input
+                    type="number"
+                    value={miscCharges}
+                    onChange={e => setMiscCharges(e.target.value)}
+                    className="form-input center-text"
+                    placeholder="0"
+                    style={{ width: 65, height: 26, padding: '2px 4px', fontSize: '0.85rem', borderColor: '#fca5a5' }}
+                  />
+                </div>
+
+                <div style={{ fontSize: '0.85rem', color: '#991b1b', fontWeight: 600 }}>=</div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#991b1b' }}>Grand Total:</span>
+                  <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#7f1d1d', background: '#fff', padding: '3px 12px', border: '2px solid #ef4444', borderRadius: 6 }}>
+                    PKR {Math.round(totals.grand).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+            </section>
+          );
+        })()}
       </div>
     </div>
   );

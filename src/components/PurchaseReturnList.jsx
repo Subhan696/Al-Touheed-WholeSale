@@ -4,6 +4,30 @@ import { printPurchaseReturn, savePurchaseReturnPDF } from '../utils/printPurcha
 
 const { ipcRenderer } = window.require('electron');
 
+const formatDateDMY = (val) => {
+  if (!val) return '—';
+  let rawStr = '';
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${d}-${m}-${y}`;
+  }
+  if (typeof val === 'string') {
+    rawStr = val.split('T')[0].split(' ')[0];
+  } else {
+    rawStr = String(val).split('T')[0].split(' ')[0];
+  }
+  const parts = rawStr.split('-');
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+    }
+    return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
+  }
+  return rawStr;
+};
+
 function PurchaseReturnList({ currentUser, onEditReturn, isActive }) {
   const [returns, setReturns] = useState([]);
   const [search, setSearch] = useState('');
@@ -53,7 +77,7 @@ function PurchaseReturnList({ currentUser, onEditReturn, isActive }) {
               : filtered.map(r => (
                 <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><span style={{ fontWeight: 700, color: '#f64e60' }}>#{r.return_no ? r.return_no.toString().replace(/^PR-/, '') : ''}</span></td>
-                  <td style={td}>{r.return_date instanceof Date ? new Date(r.return_date.getTime() - r.return_date.getTimezoneOffset() * 60000).toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '')}</td>
+                  <td style={td}>{formatDateDMY(r.return_date || r.created_at)}</td>
                   <td style={td}>{r.supplier_name}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>PKR {parseFloat(r.total_amount).toLocaleString()}</td>
                   <td style={{ ...td, textAlign: 'center' }}>

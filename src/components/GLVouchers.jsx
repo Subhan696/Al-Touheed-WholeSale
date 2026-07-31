@@ -11,6 +11,30 @@ const VOUCHER_TYPE_NAMES = {
   JV: 'Journal Entry (JV)'
 };
 
+const formatDateDMY = (val) => {
+  if (!val) return '—';
+  let rawStr = '';
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${d}-${m}-${y}`;
+  }
+  if (typeof val === 'string') {
+    rawStr = val.split('T')[0].split(' ')[0];
+  } else {
+    rawStr = String(val).split('T')[0].split(' ')[0];
+  }
+  const parts = rawStr.split('-');
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+    }
+    return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
+  }
+  return rawStr;
+};
+
 export default function GLVouchers() {
   const [vouchers, setVouchers] = useState([]);
   const [showEntry, setShowEntry] = useState(false);
@@ -130,7 +154,7 @@ export default function GLVouchers() {
           <tbody>
             {vouchers.map(v => (
               <tr key={v.id} className="border-b hover:bg-slate-50">
-                <td className="py-2 px-4">{new Date(v.voucher_date).toLocaleDateString()}</td>
+                <td className="py-2 px-4">{formatDateDMY(v.voucher_date)}</td>
                 <td className="py-2 px-4 font-semibold text-blue-700">{v.voucher_no}</td>
                 <td className="py-2 px-4 font-medium">{VOUCHER_TYPE_NAMES[v.voucher_type] || v.voucher_type}</td>
                 <td className="py-2 px-4">{v.remarks || '-'}</td>
@@ -174,7 +198,7 @@ export default function GLVouchers() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 bg-slate-100 p-3 rounded text-sm">
                 <div>
                   <span className="text-slate-500 block text-xs">Date</span>
-                  <span className="font-semibold">{new Date(viewingVoucher.voucher_date).toLocaleDateString()}</span>
+                  <span className="font-semibold">{formatDateDMY(viewingVoucher.voucher_date)}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-xs">Type</span>

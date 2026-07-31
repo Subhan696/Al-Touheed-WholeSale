@@ -1781,7 +1781,32 @@ async function handleIPC(channel, ...args) {
       return { products: r.rows, total: parseInt(countRes.rows[0].total) };
     }
     case 'get-product-by-code': {
-      const r = await query('SELECT * FROM products WHERE item_code ILIKE $1', [data]);
+      const r = await query(`
+        SELECT p.*,
+          COALESCE(CAST((
+            COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
+          ) AS INTEGER), 0) AS stock_packets
+        FROM products p
+        LEFT JOIN (
+          SELECT pi.item_code, SUM(pi.packets) as qty 
+          FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
+          WHERE pu.is_posted = 1 
+          GROUP BY pi.item_code
+        ) purchases ON purchases.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sale_items GROUP BY item_code
+        ) sales ON sales.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM purchase_return_items GROUP BY item_code
+        ) returns_out ON returns_out.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sales_return_items GROUP BY item_code
+        ) returns_in ON returns_in.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
+        ) adjustments ON adjustments.item_code = p.item_code
+        WHERE p.item_code ILIKE $1
+      `, [data]);
       return r.rows[0] || null;
     }
     case 'get-product-photo': {
@@ -1846,12 +1871,34 @@ async function handleIPC(channel, ...args) {
       const exact = data;
       const prefix = `${data}%`;
       const r = await query(`
-        SELECT * FROM products 
-        WHERE item_code ILIKE $1 OR description ILIKE $1 
+        SELECT p.*,
+          COALESCE(CAST((
+            COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
+          ) AS INTEGER), 0) AS stock_packets
+        FROM products p
+        LEFT JOIN (
+          SELECT pi.item_code, SUM(pi.packets) as qty 
+          FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
+          WHERE pu.is_posted = 1 
+          GROUP BY pi.item_code
+        ) purchases ON purchases.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sale_items GROUP BY item_code
+        ) sales ON sales.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM purchase_return_items GROUP BY item_code
+        ) returns_out ON returns_out.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(packets) as qty FROM sales_return_items GROUP BY item_code
+        ) returns_in ON returns_in.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
+        ) adjustments ON adjustments.item_code = p.item_code
+        WHERE p.item_code ILIKE $1 OR p.description ILIKE $1 
         ORDER BY 
-          (item_code ILIKE $2) DESC,
-          (item_code ILIKE $3) DESC,
-          id DESC 
+          (p.item_code ILIKE $2) DESC,
+          (p.item_code ILIKE $3) DESC,
+          p.id DESC 
         LIMIT 50
       `, [q, exact, prefix]);
       return r.rows;
@@ -3441,7 +3488,9 @@ async function handleIPC(channel, ...args) {
       const res = await query(`
         SELECT 
           ('PE-' || pe.id)::text as id,
+          pe.id as item_id,
           COALESCE(p.created_at::date, p.purchase_date) as purchase_date,
+          COALESCE(p.created_at, p.purchase_date::timestamp) as sort_ts,
           pe.account_name,
           p.supplier_name,
           p.invoice_no,
@@ -3459,7 +3508,9 @@ async function handleIPC(channel, ...args) {
 
         SELECT
           ('VD-' || vd.id)::text as id,
+          vd.id as item_id,
           v.voucher_date as purchase_date,
+          COALESCE(v.created_at, v.voucher_date::timestamp) as sort_ts,
           g.account_name,
           '' as supplier_name,
           v.voucher_no as invoice_no,
@@ -3475,7 +3526,7 @@ async function handleIPC(channel, ...args) {
         WHERE vd.debit > 0
           AND v.voucher_date BETWEEN $1 AND $2
 
-        ORDER BY purchase_date DESC, id DESC
+        ORDER BY purchase_date DESC, sort_ts DESC, item_id DESC
       `, [startDate, endDate]);
       return res.rows;
     }
@@ -3497,9 +3548,11 @@ async function handleIPC(channel, ...args) {
             ELSE 'FREIGHT CTN EXP Payable'
           END as remarks,
           '' as cheque_no,
+          COALESCE(pe.cartons, 0) as ctns,
           0::numeric as debit,
           pe.amount as credit,
-          p.created_at as sort_ts,
+          COALESCE(p.created_at, p.purchase_date::timestamp + (pe.id || ' seconds')::interval) as sort_ts,
+          pe.id as item_id,
           ('PE-' || pe.id)::text as row_id
         FROM purchase_expenses pe
         JOIN purchases p ON p.id = pe.purchase_id
@@ -3516,9 +3569,11 @@ async function handleIPC(channel, ...args) {
           COALESCE(NULLIF(v.voucher_no, ''), ('V-' || v.id::text)) as ref_no,
           COALESCE(NULLIF(vd.description, ''), NULLIF(v.remarks, ''), '') as remarks,
           COALESCE(vd.reference_no, '') as cheque_no,
+          0 as ctns,
           vd.debit,
           vd.credit,
-          v.created_at as sort_ts,
+          COALESCE(v.created_at, v.voucher_date::timestamp + (vd.id || ' seconds')::interval) as sort_ts,
+          vd.id as item_id,
           ('VD-' || vd.id)::text as row_id
         FROM voucher_details vd
         JOIN vouchers v ON v.id = vd.voucher_id
@@ -3561,6 +3616,7 @@ async function handleIPC(channel, ...args) {
           t.ref_no,
           t.remarks,
           t.cheque_no,
+          t.ctns,
           t.debit,
           t.credit,
           t.sort_ts,
@@ -3569,7 +3625,7 @@ async function handleIPC(channel, ...args) {
         WHERE ($1::date IS NULL OR t.txn_date >= $1)
           AND ($2::date IS NULL OR t.txn_date <= $2)
           ${accountFilterTx}
-        ORDER BY t.account_name ASC, t.txn_date ASC, t.sort_ts ASC, t.row_id ASC
+        ORDER BY t.account_name ASC, t.txn_date ASC, t.sort_ts ASC, t.item_id ASC
       `, txParams);
 
       const openingByAccount = new Map();
@@ -3594,6 +3650,7 @@ async function handleIPC(channel, ...args) {
           ref_no: r.ref_no,
           remarks: r.remarks,
           cheque_no: r.cheque_no,
+          ctns: parseInt(r.ctns) || 0,
           debit: parseFloat(r.debit) || 0,
           credit: parseFloat(r.credit) || 0,
           balance: Math.abs(next),

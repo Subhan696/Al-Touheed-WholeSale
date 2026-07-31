@@ -190,11 +190,12 @@ export default function FreightReport() {
           <table className="fr-table">
             <thead>
               <tr>
-                <th style={{ width: '90px', textAlign: 'left' }}>Date</th>
-                <th style={{ width: '85px', textAlign: 'left' }}>Type</th>
-                <th style={{ width: '70px', textAlign: 'left' }}>V/Code</th>
+                <th style={{ width: '85px', textAlign: 'left' }}>Date</th>
+                <th style={{ width: '75px', textAlign: 'left' }}>Type</th>
+                <th style={{ width: '65px', textAlign: 'left' }}>V/Code</th>
                 <th style={{ textAlign: 'left' }}>Remarks</th>
-                <th style={{ width: '90px', textAlign: 'left' }}>Cheque #</th>
+                <th style={{ width: '50px', textAlign: 'center', backgroundColor: '#e0f2fe', color: '#0369a1' }}>Ctns</th>
+                <th style={{ width: '80px', textAlign: 'left' }}>Cheque #</th>
                 <th style={{ width: '100px', textAlign: 'right', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
                 <th style={{ width: '100px', textAlign: 'right', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
                 <th style={{ width: '110px', textAlign: 'right' }}>Balance</th>
@@ -208,7 +209,7 @@ export default function FreightReport() {
             <tbody>
               {/* Account Subheader */}
               <tr className="fr-account-header-row">
-                <td colSpan="5">
+                <td colSpan="6">
                   <span style={{ fontWeight: 'bold' }}>Alias Name:</span> {getAliasName(selectedAccount)}
                   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
                   <span style={{ fontWeight: 'bold' }}>{selectedAccount || 'PURCHASE EXPENSE PAYABLE A/C'}</span>
@@ -221,20 +222,21 @@ export default function FreightReport() {
               {/* Transactions */}
               {loading ? (
                 <tr>
-                  <td colSpan="8" style={{ padding: '30px', textAlign: 'center' }}>Loading statement...</td>
+                  <td colSpan="9" style={{ padding: '30px', textAlign: 'center' }}>Loading statement...</td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan="8" style={{ padding: '30px', textAlign: 'center' }}>No transactions found for this period.</td>
+                  <td colSpan="9" style={{ padding: '30px', textAlign: 'center' }}>No transactions found for this period.</td>
                 </tr>
               ) : (
                 transactions.map((t, idx) => (
                   <tr key={idx}>
-                    <td style={{ width: '90px' }}>{fmtDate(t.date)}</td>
-                    <td style={{ width: '85px' }}>{t.type}</td>
-                    <td style={{ width: '70px' }}>{t.vcode}</td>
+                    <td style={{ width: '85px' }}>{fmtDate(t.date)}</td>
+                    <td style={{ width: '75px' }}>{t.type}</td>
+                    <td style={{ width: '65px' }}>{t.vcode}</td>
                     <td>{t.remarks}</td>
-                    <td style={{ width: '90px' }}>{t.cheque_no || ''}</td>
+                    <td style={{ width: '50px', textAlign: 'center', fontWeight: 700, color: t.ctns > 0 ? '#0284c7' : '#94a3b8' }}>{t.ctns || 0}</td>
+                    <td style={{ width: '80px' }}>{t.cheque_no || ''}</td>
                     <td style={{ width: '100px', textAlign: 'right', fontWeight: 700, color: t.debit > 0 ? '#dc2626' : 'inherit' }}>{t.debit > 0 ? fmtAmt(t.debit) : ''}</td>
                     <td style={{ width: '100px', textAlign: 'right', fontWeight: 700, color: t.credit > 0 ? '#16a34a' : 'inherit' }}>{t.credit > 0 ? fmtAmt(t.credit) : ''}</td>
                     <td style={{ width: '110px', textAlign: 'right', fontWeight: 700 }}>{fmtAmt(t.balance)} <span style={{ color: (t.balance_type || '').includes('Dr') ? '#dc2626' : '#d97706' }}>{t.balance_type || 'Cr.'}</span></td>
@@ -246,11 +248,13 @@ export default function FreightReport() {
 
           {/* Totals Section */}
           <div className="fr-totals-container">
-            <div className="fr-dotted-line" style={{ width: '580px' }}></div>
-            <table className="fr-totals-table">
+            <div className="fr-dotted-line" style={{ width: '630px' }}></div>
+            <table className="fr-totals-table" style={{ width: '630px' }}>
               <tbody>
                 <tr>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold', width: '270px' }}>Account Total:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', width: '190px' }}>Account Total:</td>
+                  <td style={{ width: '50px', textAlign: 'center', fontWeight: 'bold', color: '#0284c7' }}>{transactions.reduce((s, t) => s + (t.ctns || 0), 0)}</td>
+                  <td style={{ width: '80px' }}></td>
                   <td style={{ width: '100px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{fmtAmt(ledgerData?.total_debit)}</td>
                   <td style={{ width: '100px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{fmtAmt(ledgerData?.total_credit)}</td>
                   <td style={{ width: '110px', textAlign: 'right', fontWeight: 'bold' }}>{fmtAmt(ledgerData?.closing_balance)} <span style={{ color: (ledgerData?.closing_type || '').includes('Dr') ? '#dc2626' : '#d97706' }}>{ledgerData?.closing_type || 'Cr.'}</span></td>
@@ -258,12 +262,14 @@ export default function FreightReport() {
               </tbody>
             </table>
 
-            <div className="fr-dotted-line" style={{ width: '580px' }}></div>
+            <div className="fr-dotted-line" style={{ width: '630px' }}></div>
 
-            <table className="fr-totals-table">
+            <table className="fr-totals-table" style={{ width: '630px' }}>
               <tbody>
                 <tr>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold', width: '270px' }}>Report Total:</td>
+                  <td style={{ textAlign: 'right', fontWeight: 'bold', width: '190px' }}>Report Total:</td>
+                  <td style={{ width: '50px', textAlign: 'center', fontWeight: 'bold', color: '#0284c7' }}>{transactions.reduce((s, t) => s + (t.ctns || 0), 0)}</td>
+                  <td style={{ width: '80px' }}></td>
                   <td style={{ width: '100px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{fmtAmt(ledgerData?.total_debit)}</td>
                   <td style={{ width: '100px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{fmtAmt(ledgerData?.total_credit)}</td>
                   <td style={{ width: '110px', textAlign: 'right', fontWeight: 'bold' }}>{fmtAmt(ledgerData?.closing_balance)} <span style={{ color: (ledgerData?.closing_type || '').includes('Dr') ? '#dc2626' : '#d97706' }}>{ledgerData?.closing_type || 'Cr.'}</span></td>
@@ -271,7 +277,7 @@ export default function FreightReport() {
               </tbody>
             </table>
 
-            <div className="fr-dotted-line" style={{ width: '580px' }}></div>
+            <div className="fr-dotted-line" style={{ width: '630px' }}></div>
           </div>
         </div>
       </div>

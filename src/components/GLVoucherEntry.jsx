@@ -13,18 +13,29 @@ const normalizeVType = (type) => {
 };
 
 const getSafeDateStr = (rawDate) => {
-  if (!rawDate) return new Date().toISOString().split('T')[0];
-  if (typeof rawDate === 'string') return rawDate.includes('T') ? rawDate.split('T')[0] : rawDate;
+  if (!rawDate) {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  }
+  if (rawDate instanceof Date) {
+    return `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, '0')}-${String(rawDate.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof rawDate === 'string') {
+    const str = rawDate.includes('T') ? rawDate.split('T')[0] : rawDate;
+    return str.split(' ')[0];
+  }
   try {
-    return new Date(rawDate).toISOString().split('T')[0];
+    const dt = new Date(rawDate);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   } catch (e) {
-    return new Date().toISOString().split('T')[0];
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
   }
 };
 
 export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, voucherToEdit }) {
   const [voucherType, setVoucherType] = useState(voucherToEdit ? normalizeVType(voucherToEdit.voucher_type) : (initialCustomer ? 'CR' : 'BP'));
-  const [voucherDate, setVoucherDate] = useState(voucherToEdit ? getSafeDateStr(voucherToEdit.voucher_date) : new Date().toISOString().split('T')[0]);
+  const [voucherDate, setVoucherDate] = useState(voucherToEdit ? getSafeDateStr(voucherToEdit.voucher_date) : getSafeDateStr());
   const [voucherNo, setVoucherNo] = useState(voucherToEdit ? (voucherToEdit.voucher_no || '') : '');
   const [headerAccount, setHeaderAccount] = useState('');
   const [remarks, setRemarks] = useState(voucherToEdit ? (voucherToEdit.remarks || '') : (initialCustomer ? `Payment received from ${initialCustomer.name}` : ''));

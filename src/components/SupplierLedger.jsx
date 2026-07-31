@@ -9,6 +9,7 @@ function SupplierLedger() {
 
   // Edit Balance Modal
   const [editSupplier, setEditSupplier] = useState(null);
+  const [editName, setEditName] = useState('');
   const [editBalance, setEditBalance] = useState('');
 
   // Payment Modal

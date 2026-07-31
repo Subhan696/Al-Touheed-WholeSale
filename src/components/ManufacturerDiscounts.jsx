@@ -100,7 +100,7 @@ function ManufacturerDiscounts({ openWindow }) {
       }
 
       const lastRow = newRows[newRows.length - 1];
-      if (lastRow.manufacturer || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
+      if (lastRow.manufacturer || lastRow.supplier_id || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
         newRows.push(makeRow());
       }
       return newRows;
@@ -129,7 +129,17 @@ function ManufacturerDiscounts({ openWindow }) {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const validRows = rows.filter(r => r.manufacturer.trim() && r.brand.trim());
+      const validRows = rows
+        .map(r => {
+          let mfg = r.manufacturer ? r.manufacturer.trim() : '';
+          if (!mfg && r.supplier_id) {
+            const sup = suppliersList.find(s => String(s.id) === String(r.supplier_id));
+            if (sup) mfg = sup.name;
+          }
+          return { ...r, manufacturer: mfg };
+        })
+        .filter(r => r.manufacturer && r.brand.trim());
+
       await ipcRenderer.invoke('save-manufacturer-discounts-bulk', validRows);
       setStatusMsg('Saved successfully!');
       setTimeout(() => setStatusMsg(''), 3000);
@@ -160,6 +170,12 @@ function ManufacturerDiscounts({ openWindow }) {
 
       newRows[idx] = { ...newRows[idx], [field]: value };
 
+      // If supplier changed, sync the manufacturer name
+      if (field === 'supplier_id') {
+        const match = suppliersList.find(s => String(s.id) === String(value));
+        if (match) newRows[idx].manufacturer = match.name;
+      }
+
       // If manufacturer changed and no supplier is picked yet, try to auto-match
       // a supplier account with the same name — user can still override it.
       if (field === 'manufacturer' && !newRows[idx].supplier_id) {
@@ -168,7 +184,7 @@ function ManufacturerDiscounts({ openWindow }) {
       }
 
       const lastRow = newRows[newRows.length - 1];
-      if (lastRow.manufacturer || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
+      if (lastRow.manufacturer || lastRow.supplier_id || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
         newRows.push(makeRow());
       }
       return newRows;
@@ -198,7 +214,7 @@ function ManufacturerDiscounts({ openWindow }) {
       if (prev.length === 1) return [makeRow()];
       const next = prev.filter(r => r.id !== id);
       const lastRow = next[next.length - 1];
-      if (lastRow.manufacturer || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
+      if (lastRow.manufacturer || lastRow.supplier_id || lastRow.brand || lastRow.discount_pct || lastRow.discount_amount) {
         next.push(makeRow());
       }
       return next;

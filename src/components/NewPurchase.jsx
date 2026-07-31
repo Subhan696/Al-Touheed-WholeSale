@@ -49,7 +49,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [isAdjOpen, setIsAdjOpen] = useState(false);
   const [activeDrop, setActiveDrop] = useState(null);
-  
+
   // Auto Mode
   const [autoMode, setAutoMode] = useState(true);
   const [autoImported, setAutoImported] = useState(false);
@@ -106,7 +106,15 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   useEffect(() => {
     if (isEditing) {
       const p = purchaseToEdit;
-      const raw = p.purchase_date instanceof Date ? p.purchase_date.toISOString().split('T')[0] : (typeof p.purchase_date === 'string' ? p.purchase_date.split('T')[0] : '');
+      let raw = '';
+      if (p.purchase_date instanceof Date) {
+        const d = String(p.purchase_date.getDate()).padStart(2, '0');
+        const m = String(p.purchase_date.getMonth() + 1).padStart(2, '0');
+        const y = p.purchase_date.getFullYear();
+        raw = `${y}-${m}-${d}`;
+      } else if (typeof p.purchase_date === 'string') {
+        raw = p.purchase_date.split('T')[0];
+      }
       if (raw) {
         const [y, m, d] = raw.split('-');
         setPurchaseDate(`${d}-${m}-${y}`);
@@ -169,7 +177,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           const total = mapped.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
           setPurchaseExpenseTotal(total > 0 ? String(total) : '');
         });
-      }).catch(() => {});
+      }).catch(() => { });
     } else {
       setTimeout(() => invoiceRef.current?.focus(), 80);
     }
@@ -189,7 +197,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             return [...prev, ...newAccs.map(a => ({ ...a, expense_account_id: a.id, cartons: '', amount: '' }))];
           });
         }
-      }).catch(() => {});
+      }).catch(() => { });
     };
 
     loadDropdowns();
@@ -207,7 +215,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
 
     // Auto-insert hyphen
     val = val.replace(/[^0-9-]/g, '');
-    
+
     // If 2 digits and no hyphen, add hyphen (after day)
     if (val.length === 2 && !val.includes('-')) val += '-';
     // Smart month formatting: if single digit (2-9) after hyphen, pad with 0 and add hyphen
@@ -219,7 +227,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     }
     // If 5 characters with 2 hyphens, add final hyphen for year
     if (val.length === 5 && val.split('-').length === 2) val += '-';
-    
+
     // Limit length to DD-MM-YYYY (10 chars)
     if (val.length <= 10) setSupplierDate(val);
   };
@@ -245,7 +253,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const autoImportLastSession = async () => {
     try {
       let fromId, toId, sessionMsg;
-      
+
       if (fromSession) {
         // User already selected a session range via the Import Session modal
         fromId = parseInt(fromSession);
@@ -529,22 +537,22 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     });
 
     return {
-      totals: { 
+      totals: {
         grossSub,
         netSub: sub,
-        pkts, 
-        misc, 
+        pkts,
+        misc,
         expTotal,
         totalItemDisc,
         flatDisc: disc,
-        grand: sub + misc - disc, 
-        count: items.filter(r => r.description && parseInt(r.packets) > 0).length 
+        grand: sub + misc - disc,
+        count: items.filter(r => r.description && parseInt(r.packets) > 0).length
       },
       rowMath: mathMap
     };
   }, [items, miscCharges, discount, purchaseExpenseTotal]);
 
-  const handleSubmit = async () => {
+  const executeSave = async () => {
     if (!supplierName.trim()) {
       setStatusMsg('Error: Supplier name required');
       setTimeout(() => setStatusMsg(''), 3000);
@@ -556,14 +564,9 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
       setTimeout(() => setStatusMsg(''), 3000);
       return;
     }
-    
-    if (!showAuth) {
-      setShowAuth(true);
-      return;
-    }
 
     setIsSubmitting(true);
-    
+
     const authCheck = await ipcRenderer.invoke('login', { username: currentUser.username, password: authPass });
     if (!authCheck.success) {
       setStatusMsg('Error: Incorrect password');
@@ -625,6 +628,8 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         : await ipcRenderer.invoke('save-purchase', payload);
       if (result.success) {
         setStatusMsg(isEditing ? '✓ Purchase updated!' : '✓ Purchase saved!');
+        setShowAuth(false);
+        setAuthPass('');
         setTimeout(() => { setStatusMsg(''); onSaveSuccess?.(); }, 1200);
       } else {
         setStatusMsg(`Error: ${result.error || 'Failed'}`);
@@ -636,14 +641,44 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     }
   };
 
+  const handleInitiateSave = () => {
+    if (!supplierName.trim()) {
+      setStatusMsg('Error: Supplier name required');
+      setTimeout(() => setStatusMsg(''), 3000);
+      return;
+    }
+    const valid = items.filter(r => r.description && parseInt(r.packets) > 0 && parseFloat(r.preDiscPrice) > 0);
+    if (!valid.length) {
+      setStatusMsg('Error: Add at least one valid item');
+      setTimeout(() => setStatusMsg(''), 3000);
+      return;
+    }
+
+    if (showAuth) {
+      executeSave();
+      return;
+    }
+
+    if (showExpensesModal) {
+      const modalTotal = purchaseExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+      setPurchaseExpenseTotal(String(modalTotal));
+      setShowExpensesModal(false);
+      setAuthPass('');
+      setShowAuth(true);
+      return;
+    }
+
+    setShowExpensesModal(true);
+  };
+
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); handleSubmit(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); handleInitiateSave(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, items, supplierName, purchaseDate, discount, miscCharges, notes, isEditing]);
+  }, [isActive, items, supplierName, purchaseDate, discount, miscCharges, notes, isEditing, showExpensesModal, showAuth, purchaseExpenseTotal, purchaseExpenses, authPass]);
 
   const loadSessions = async (showAll = showAllSessions) => {
     try {
@@ -668,7 +703,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
       const fromId = parseInt(fromSession);
       const toId = toSession ? parseInt(toSession) : fromId;
       const products = await ipcRenderer.invoke('get-products-by-session-range', { from: fromId, to: toId });
-      
+
       if (products && products.length > 0) {
         const newRows = products.map(p => {
           let flatD = 0, pctD = 0;
@@ -692,13 +727,13 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             locked: autoMode
           };
         });
-        
+
         setItems(prev => {
           const cleaned = prev.filter(r => r.itemCode || r.description || r.packets || r.preDiscPrice);
           return [...cleaned, ...newRows, makeRow()];
         });
         if (autoMode) setAutoImported(true);
-        
+
         const sessionMsg = fromId === toId ? `Session ${fromId}` : `Sessions ${fromId} to ${toId}`;
         setStatusMsg(`✓ Imported ${products.length} items from ${sessionMsg}`);
         setTimeout(() => setStatusMsg(''), 3000);
@@ -709,15 +744,15 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             packetsRefs.current[newRows[0].id].focus();
           }
         }, 150);
-        
+
       } else {
         const sessionMsg = fromId === toId ? `Session ${fromId}` : `Sessions ${fromId} to ${toId}`;
         setStatusMsg(`No items found for ${sessionMsg}`);
         setTimeout(() => setStatusMsg(''), 3000);
       }
       setShowSessionModal(false);
-      setFromSession(''); 
-      setToSession(''); 
+      setFromSession('');
+      setToSession('');
     } catch (err) {
       console.error(err);
       setStatusMsg('Error importing session');
@@ -756,7 +791,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           <button type="button" onClick={resetForm} className="btn btn-secondary sm" disabled={isSubmitting}>
             Reset
           </button>
-          <button type="button" onClick={handleSubmit} className="btn btn-primary sm" disabled={isSubmitting}>
+          <button type="button" onClick={handleInitiateSave} className="btn btn-primary sm" disabled={isSubmitting}>
             {isSubmitting ? 'Saving...' : isEditing ? 'Update (Ctrl+S)' : 'Save (Ctrl+S)'}
           </button>
         </div>
@@ -780,7 +815,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
               <select ref={supplierRef} value={supplierName} onChange={e => {
                 const newVal = e.target.value;
                 setSupplierName(newVal);
-                
+
                 // Recalculate discounts for existing rows
                 setItems(prev => {
                   let changed = false;
@@ -789,8 +824,8 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
                     let pctD = 0;
                     let flatD = 0;
                     if (newVal) {
-                      const rule = mfgDiscounts.find(d => 
-                        d.company_name.toLowerCase() === newVal.toLowerCase() && 
+                      const rule = mfgDiscounts.find(d =>
+                        d.company_name.toLowerCase() === newVal.toLowerCase() &&
                         d.brand_name.toLowerCase() === r.brand.toLowerCase()
                       );
                       if (rule) {
@@ -998,76 +1033,76 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             </div>
           </div>
 
-            {/* Bottom Summary Bar */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12, padding: '10px 16px', background: '#f1f5f9', borderRadius: 6, alignItems: 'center', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Gross Amount</span>
-                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{totals.grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#dc2626' }}>Total Disc.</span>
-                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{(totals.totalItemDisc + totals.flatDisc).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Net Subtotal</span>
-                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{totals.netSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#dc2626' }}>− Disc:</span>
-                <input
-                  type="number"
-                  value={discount}
-                  onChange={e => setDiscount(e.target.value)}
-                  className="form-input right-text"
-                  style={{ width: 70, height: 28, padding: '2px 6px', fontSize: '0.9rem' }}
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#059669' }}>+ Misc:</span>
-                <input
-                  type="number"
-                  value={miscCharges}
-                  onChange={e => setMiscCharges(e.target.value)}
-                  className="form-input right-text"
-                  style={{ width: 70, height: 28, padding: '2px 6px', fontSize: '0.9rem' }}
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#059669' }}>+ Freight:</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', background: '#e2e8f0', padding: '2px 8px', borderRadius: 3, minWidth: 50, textAlign: 'right', display: 'inline-block' }}>
-                  {purchaseExpenseTotal ? parseFloat(purchaseExpenseTotal).toLocaleString() : '0'}
-                </span>
-                <button type="button" onClick={() => setShowExpensesModal(true)} style={{ padding: '2px 8px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', height: 24 }}>
-                  Edit
-                </button>
-              </div>
-              <div style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>=</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-                <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#475569' }}>Grand Total:</span>
-                <span style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', background: '#fff', padding: '4px 14px', border: '2px solid #334155', borderRadius: 4 }}>
-                  {Math.round(totals.grand).toLocaleString()}
-                </span>
-              </div>
+          {/* Bottom Summary Bar */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12, padding: '10px 16px', background: '#f1f5f9', borderRadius: 6, alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Gross Amount</span>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{totals.grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#dc2626' }}>Total Disc.</span>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{(totals.totalItemDisc + totals.flatDisc).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Net Subtotal</span>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{totals.netSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#dc2626' }}>− Disc:</span>
+              <input
+                type="number"
+                value={discount}
+                onChange={e => setDiscount(e.target.value)}
+                className="form-input right-text"
+                style={{ width: 70, height: 28, padding: '2px 6px', fontSize: '0.9rem' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#059669' }}>+ Misc:</span>
+              <input
+                type="number"
+                value={miscCharges}
+                onChange={e => setMiscCharges(e.target.value)}
+                className="form-input right-text"
+                style={{ width: 70, height: 28, padding: '2px 6px', fontSize: '0.9rem' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#059669' }}>+ Freight:</span>
+              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', background: '#e2e8f0', padding: '2px 8px', borderRadius: 3, minWidth: 50, textAlign: 'right', display: 'inline-block' }}>
+                {purchaseExpenseTotal ? parseFloat(purchaseExpenseTotal).toLocaleString() : '0'}
+              </span>
+              <button type="button" onClick={() => setShowExpensesModal(true)} style={{ padding: '2px 8px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', height: 24 }}>
+                Edit
+              </button>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>=</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#475569' }}>Grand Total:</span>
+              <span style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', background: '#fff', padding: '4px 14px', border: '2px solid #334155', borderRadius: 4 }}>
+                {Math.round(totals.grand).toLocaleString()}
+              </span>
+            </div>
+          </div>
         </section>
       </div>
       {/* Purchase Expenses Modal */}
       {showExpensesModal && (() => {
         const expModalSelectRef = React.createRef();
         const expModalCartonsRef = React.createRef();
-        
+
         const handleAddExpense = () => {
           const selectEl = document.getElementById('exp-modal-select');
           const cartonsEl = document.getElementById('exp-modal-cartons');
           const accId = parseInt(selectEl?.value);
           const cartons = parseInt(cartonsEl?.value);
           if (!accId || !cartons) return;
-          
+
           const account = expenseAccounts.find(a => a.id === accId);
           if (!account) return;
-          
+
           const amount = (cartons * parseFloat(account.default_rate)).toFixed(2);
-          
+
           // Check if this account already exists, if so update it
           const existing = purchaseExpenses.findIndex(e => e.expense_account_id === accId);
           if (existing >= 0) {
@@ -1083,153 +1118,161 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
               amount
             }]);
           }
-          
+
           // Reset inputs and focus Done button
           if (cartonsEl) cartonsEl.value = '';
           setTimeout(() => document.getElementById('exp-modal-done')?.focus(), 50);
         };
-        
+
         const handleRemoveExpense = (accId) => {
           setPurchaseExpenses(prev => prev.filter(e => e.expense_account_id !== accId));
         };
-        
+
         const modalTotal = purchaseExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-        
+
         return (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 10, width: 520, padding: 0, boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)', overflow: 'hidden' }}>
-            
-            {/* Modal Header */}
-            <div style={{ background: '#1e293b', padding: '14px 20px', color: 'white' }}>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>Purchase Expenses</h3>
-            </div>
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: 'white', borderRadius: 10, width: 520, padding: 0, boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)', overflow: 'hidden' }}>
 
-            {/* Add Expense Row */}
-            <div style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-              <div style={{ flex: 2 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Freight Account</label>
-                <select
-                  id="exp-modal-select"
-                  autoFocus
-                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.95rem', borderRadius: 4, border: '1px solid #cbd5e1', background: 'white' }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      document.getElementById('exp-modal-cartons')?.focus();
-                    }
-                  }}
-                >
-                  <option value="">-- Select --</option>
-                  {expenseAccounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.account_name} (Rate: {parseFloat(a.default_rate).toLocaleString()})</option>
-                  ))}
-                </select>
+              {/* Modal Header */}
+              <div style={{ background: '#1e293b', padding: '14px 20px', color: 'white' }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>Purchase Expenses</h3>
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Cartons</label>
-                <input
-                  id="exp-modal-cartons"
-                  type="number"
-                  placeholder="Qty"
-                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.95rem', borderRadius: 4, border: '1px solid #cbd5e1', textAlign: 'center' }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddExpense();
-                    }
-                  }}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleAddExpense}
-                style={{ padding: '6px 14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', height: 32 }}
-              >
-                Add
-              </button>
-            </div>
 
-            {/* Added Expenses List */}
-            <div style={{ padding: '0 20px', maxHeight: 220, overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                    <th style={{ textAlign: 'left', padding: '10px 4px', fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Account</th>
-                    <th style={{ textAlign: 'center', padding: '10px 4px', width: 70, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Ctns</th>
-                    <th style={{ textAlign: 'right', padding: '10px 4px', width: 80, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Rate</th>
-                    <th style={{ textAlign: 'right', padding: '10px 4px', width: 100, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Amount</th>
-                    <th style={{ width: 36, padding: '10px 0' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchaseExpenses.filter(e => parseFloat(e.amount) > 0).map(exp => (
-                    <tr key={exp.expense_account_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '10px 4px', fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>{exp.account_name}</td>
-                      <td style={{ padding: '10px 4px', textAlign: 'center', color: '#475569' }}>{exp.cartons}</td>
-                      <td style={{ padding: '10px 4px', textAlign: 'right', color: '#64748b' }}>{parseFloat(exp.default_rate).toLocaleString()}</td>
-                      <td style={{ padding: '10px 4px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>{parseFloat(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                      <td style={{ padding: '10px 0', textAlign: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveExpense(exp.expense_account_id)}
-                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '1rem', fontWeight: 700, padding: 0, lineHeight: 1 }}
-                          title="Remove"
-                        >✕</button>
-                      </td>
-                    </tr>
-                  ))}
-                  {purchaseExpenses.filter(e => parseFloat(e.amount) > 0).length === 0 && (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: '0.9rem' }}>
-                        No expenses added yet. Select a freight account and enter cartons above.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Modal Footer */}
-            <div style={{ padding: '14px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>
-                Total: <span style={{ color: '#059669' }}>{modalTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 10 }}>
+              {/* Add Expense Row */}
+              <div style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <div style={{ flex: 2 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Freight Account</label>
+                  <select
+                    id="exp-modal-select"
+                    autoFocus
+                    style={{ width: '100%', padding: '6px 8px', fontSize: '0.95rem', borderRadius: 4, border: '1px solid #cbd5e1', background: 'white' }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!e.target.value) {
+                          document.getElementById('exp-modal-done')?.focus();
+                        } else {
+                          document.getElementById('exp-modal-cartons')?.focus();
+                        }
+                      }
+                    }}
+                  >
+                    <option value="">-- Select --</option>
+                    {expenseAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.account_name} (Rate: {parseFloat(a.default_rate).toLocaleString()})</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Cartons</label>
+                  <input
+                    id="exp-modal-cartons"
+                    type="number"
+                    placeholder="Qty"
+                    style={{ width: '100%', padding: '6px 8px', fontSize: '0.95rem', borderRadius: 4, border: '1px solid #cbd5e1', textAlign: 'center' }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddExpense();
+                      }
+                    }}
+                  />
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowExpensesModal(false)}
-                  style={{ padding: '8px 18px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}
+                  onClick={handleAddExpense}
+                  style={{ padding: '6px 14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', height: 32 }}
                 >
-                  Cancel
+                  Add
                 </button>
-                <button
-                  type="button"
-                  id="exp-modal-done"
-                  onClick={() => {
-                    setPurchaseExpenseTotal(String(modalTotal));
-                    setShowExpensesModal(false);
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
+              </div>
+
+              {/* Added Expenses List */}
+              <div style={{ padding: '0 20px', maxHeight: 220, overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                      <th style={{ textAlign: 'left', padding: '10px 4px', fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Account</th>
+                      <th style={{ textAlign: 'center', padding: '10px 4px', width: 70, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Ctns</th>
+                      <th style={{ textAlign: 'right', padding: '10px 4px', width: 80, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Rate</th>
+                      <th style={{ textAlign: 'right', padding: '10px 4px', width: 100, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Amount</th>
+                      <th style={{ width: 36, padding: '10px 0' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {purchaseExpenses.filter(e => parseFloat(e.amount) > 0).map(exp => (
+                      <tr key={exp.expense_account_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px 4px', fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>{exp.account_name}</td>
+                        <td style={{ padding: '10px 4px', textAlign: 'center', color: '#475569' }}>{exp.cartons}</td>
+                        <td style={{ padding: '10px 4px', textAlign: 'right', color: '#64748b' }}>{parseFloat(exp.default_rate).toLocaleString()}</td>
+                        <td style={{ padding: '10px 4px', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>{parseFloat(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td style={{ padding: '10px 0', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExpense(exp.expense_account_id)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '1rem', fontWeight: 700, padding: 0, lineHeight: 1 }}
+                            title="Remove"
+                          >✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {purchaseExpenses.filter(e => parseFloat(e.amount) > 0).length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: '0.9rem' }}>
+                          No expenses added yet. Select a freight account and enter cartons above.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{ padding: '14px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>
+                  Total: <span style={{ color: '#059669' }}>{modalTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowExpensesModal(false)}
+                    style={{ padding: '8px 18px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    id="exp-modal-done"
+                    onClick={() => {
                       setPurchaseExpenseTotal(String(modalTotal));
                       setShowExpensesModal(false);
-                    }
-                  }}
-                  style={{ padding: '8px 18px', background: '#22c55e', color: 'white', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}
-                >
-                  Done
-                </button>
+                      setAuthPass('');
+                      setShowAuth(true);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        setPurchaseExpenseTotal(String(modalTotal));
+                        setShowExpensesModal(false);
+                        setAuthPass('');
+                        setShowAuth(true);
+                      }
+                    }}
+                    style={{ padding: '8px 18px', background: '#22c55e', color: 'white', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
         );
       })()}
       {showSessionModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSessionModal(false)}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 12, width: 480, padding: 0, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.15)', overflow: 'visible' }}>
-            
+
             {/* Header */}
             <div style={{ background: '#1e293b', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
               <div>
@@ -1241,7 +1284,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
 
             {/* Body */}
             <div style={{ padding: '20px 24px' }}>
-              
+
               {/* Session picker */}
               <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
                 <div style={{ flex: 1, position: 'relative' }}>
@@ -1267,7 +1310,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
                       maxHeight: '200px', overflowY: 'auto', marginTop: '4px'
                     }}>
                       {recentSessions.filter(s => !fromSession || s.session_id.toString().includes(fromSession.toString())).map(s => (
-                        <div 
+                        <div
                           key={s.session_id}
                           onMouseDown={() => {
                             setFromSession(s.session_id);
@@ -1308,7 +1351,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
                       maxHeight: '200px', overflowY: 'auto', marginTop: '4px'
                     }}>
                       {recentSessions.filter(s => !toSession || s.session_id.toString().includes(toSession.toString())).map(s => (
-                        <div 
+                        <div
                           key={s.session_id}
                           onMouseDown={() => {
                             setToSession(s.session_id);
@@ -1326,22 +1369,22 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
                       ))}
                     </div>
                   )}
-                  </div>
                 </div>
+              </div>
 
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: '#475569', cursor: 'pointer' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={showAllSessions} 
-                      onChange={e => {
-                        setShowAllSessions(e.target.checked);
-                        loadSessions(e.target.checked);
-                      }} 
-                    />
-                    Show previously imported sessions
-                  </label>
-                </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: '#475569', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={showAllSessions}
+                    onChange={e => {
+                      setShowAllSessions(e.target.checked);
+                      loadSessions(e.target.checked);
+                    }}
+                  />
+                  Show previously imported sessions
+                </label>
+              </div>
 
               {/* Info hint */}
               {recentSessions.length === 0 && (
@@ -1383,13 +1426,13 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           <div style={{ background: '#fff', padding: 24, borderRadius: 8, width: 300, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
             <h3 style={{ marginTop: 0, marginBottom: 16 }}>Confirm Save</h3>
             <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: 12 }}>Please enter your password to save purchase.</p>
-            <input 
+            <input
               ref={authInputRef}
-              type="password" 
-              value={authPass} 
+              type="password"
+              value={authPass}
               onChange={e => setAuthPass(e.target.value)}
               onKeyDown={e => {
-                if (e.key === 'Enter') { e.preventDefault(); handleSubmit(); }
+                if (e.key === 'Enter') { e.preventDefault(); executeSave(); }
                 if (e.key === 'Escape') { e.preventDefault(); setShowAuth(false); setAuthPass(''); }
               }}
               style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: 4, marginBottom: 16 }}
@@ -1397,7 +1440,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={() => { setShowAuth(false); setAuthPass(''); }} style={{ padding: '6px 12px', background: '#f1f1f1', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleSubmit} style={{ padding: '6px 12px', background: '#3699ff', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }} disabled={isSubmitting}>Confirm</button>
+              <button onClick={executeSave} style={{ padding: '6px 12px', background: '#3699ff', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }} disabled={isSubmitting}>Confirm</button>
             </div>
           </div>
         </div>

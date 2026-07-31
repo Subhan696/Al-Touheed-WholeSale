@@ -56,7 +56,7 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
         </tr>
         {!isCollapsed && (
           <tr>
-            <th style={{ width: 100 }}>Item Code</th>
+            <th style={{ width: 160 }}>Item Code</th>
             <th>Description / Brand</th>
             <th className="ssr-val" style={{ width: 80 }}>Qty</th>
             <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
@@ -94,10 +94,19 @@ function SupplierStockReport() {
   const [priceMode, setPriceMode] = useState('actual'); // 'list' | 'actual'
   const [showSupplierBalance, setShowSupplierBalance] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedSuppliers, setSelectedSuppliers] = useState(new Set());
   const [selectedCategories, setSelectedCategories] = useState(new Set());
   const [selectedYears, setSelectedYears] = useState(new Set());
   const [collapsed, setCollapsed] = useState({});
+
+  // Debounce search input to avoid lagging UI while typing fast
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 150);
+    return () => clearTimeout(handler);
+  }, [search]);
 
   // Dropdown popover state (kept compact — no permanent full-width panel)
   const [openDropdown, setOpenDropdown] = useState(null); // 'suppliers' | 'categories' | 'years' | null
@@ -135,6 +144,7 @@ function SupplierStockReport() {
       setSelectedCategories(new Set(rows.map(r => r.category || 'Uncategorized')));
       setSelectedYears(new Set(rows.map(r => r.year ? String(r.year).trim() : 'Unspecified')));
       setSearch('');
+      setDebouncedSearch('');
 
       const balMap = {};
       (ledgerData || []).forEach(s => {
@@ -192,14 +202,32 @@ function SupplierStockReport() {
     setter(next);
   }, []);
 
+  // Helper to score match relevance when searching
+  const getMatchRank = (r, query) => {
+    if (!query) return 99;
+    const code = String(r.item_code || '').trim().toLowerCase();
+    if (code === query) return 1;              // Exact item code match
+    if (code.startsWith(query)) return 2;      // Item code starts with search query
+    if (code.includes(query)) return 3;        // Item code contains search query
+    const desc = String(r.description || '').toLowerCase();
+    const brand = String(r.brand || '').toLowerCase();
+    const yr = String(r.year || '').toLowerCase();
+    if (desc.includes(query) || brand.includes(query) || yr.includes(query)) return 4; // Description/brand/year match
+    return 99;
+  };
+
   // Filtered + grouped rows
   const { groups, grandQty, grandValue } = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     const filtered = reportData.filter(r => {
       const supplier = r.supplier_name || 'Unassigned';
       const category = r.category || 'Uncategorized';
       const itemYear = r.year ? String(r.year).trim() : 'Unspecified';
-      if (!selectedSuppliers.has(supplier)) return false;
+      if (selectedSuppliers.size > 0) {
+        if (!selectedSuppliers.has(supplier)) return false;
+      } else if (!q) {
+        return false;
+      }
       if (!selectedCategories.has(category)) return false;
       if (!selectedYears.has(itemYear)) return false;
       if (q) {
@@ -220,6 +248,7 @@ function SupplierStockReport() {
         ? (parseFloat(r.actual_rate) || 0)
         : (parseFloat(r.list_rate) || 0);
       const value = qty * rate;
+      const rank = getMatchRank(r, q);
 
       if (!bySupplier[supplier]) {
         bySupplier[supplier] = { name: supplier, totalQty: 0, totalValue: 0, categories: {} };
@@ -230,7 +259,7 @@ function SupplierStockReport() {
       }
       const cat = sup.categories[category];
 
-      cat.items.push({ ...r, qty, rate, value });
+      cat.items.push({ ...r, qty, rate, value, matchRank: rank });
       cat.totalQty += qty;
       cat.totalValue += value;
       sup.totalQty += qty;
@@ -239,17 +268,40 @@ function SupplierStockReport() {
       gVal += value;
     });
 
-    const defaultCollapse = selectedSuppliers.size > 1;
     const groupList = Object.values(bySupplier)
-      .map(sup => ({
-        ...sup,
-        _defaultCollapsed: defaultCollapse,
-        categories: Object.values(sup.categories).sort((a, b) => a.name.localeCompare(b.name))
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map(sup => {
+        const sortedCategories = Object.values(sup.categories).map(cat => ({
+          ...cat,
+          items: cat.items.sort((a, b) => {
+            if (q && a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
+            return String(a.item_code).localeCompare(String(b.item_code), undefined, { numeric: true });
+          })
+        })).sort((a, b) => {
+          if (q) {
+            const aMin = Math.min(...a.items.map(i => i.matchRank));
+            const bMin = Math.min(...b.items.map(i => i.matchRank));
+            if (aMin !== bMin) return aMin - bMin;
+          }
+          return a.name.localeCompare(b.name);
+        });
+
+        return {
+          ...sup,
+          _defaultCollapsed: false,
+          categories: sortedCategories
+        };
+      })
+      .sort((a, b) => {
+        if (q) {
+          const aMin = Math.min(...a.categories.flatMap(c => c.items.map(i => i.matchRank)));
+          const bMin = Math.min(...b.categories.flatMap(c => c.items.map(i => i.matchRank)));
+          if (aMin !== bMin) return aMin - bMin;
+        }
+        return a.name.localeCompare(b.name);
+      });
 
     return { groups: groupList, grandQty: gQty, grandValue: gVal };
-  }, [reportData, priceMode, search, selectedSuppliers, selectedCategories, selectedYears]);
+  }, [reportData, priceMode, debouncedSearch, selectedSuppliers, selectedCategories, selectedYears]);
 
   const toggleCollapsed = useCallback((name) => setCollapsed(prev => ({ ...prev, [name]: !prev[name] })), []);
 
@@ -258,16 +310,12 @@ function SupplierStockReport() {
     setSelectedCategories(new Set(allCategories));
     setSelectedYears(new Set(allYears));
     setSearch('');
+    setDebouncedSearch('');
     setSupplierSearch('');
     setCategorySearch('');
     setYearSearch('');
     setCollapsed({});
   }, [allCategories, allYears]);
-
-  const allAreCollapsed = useMemo(() => {
-    if (groups.length === 0) return false;
-    return groups.every(g => (collapsed[g.name] !== undefined ? collapsed[g.name] : g._defaultCollapsed));
-  }, [groups, collapsed]);
 
   const suppliersFilterActive = useMemo(() => selectedSuppliers.size > 0 && selectedSuppliers.size < allSuppliers.length, [selectedSuppliers, allSuppliers]);
   const categoriesFilterActive = useMemo(() => selectedCategories.size < allCategories.length, [selectedCategories, allCategories]);
@@ -514,23 +562,6 @@ function SupplierStockReport() {
           style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 7, fontSize: '0.82rem', width: 220 }}
         />
 
-        {groups.length > 0 && (
-          <button
-            onClick={() => {
-              const allCol = {};
-              const nextState = !allAreCollapsed;
-              groups.forEach(g => { allCol[g.name] = nextState; });
-              setCollapsed(allCol);
-            }}
-            style={{
-              padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
-              border: '1px solid #cbd5e1', background: '#f8fafc', color: '#334155'
-            }}
-          >
-            {allAreCollapsed ? '▶ Expand All' : '▼ Collapse All'}
-          </button>
-        )}
-
         {activeFilterCount > 0 && (
           <button onClick={clearFilters} style={{ ...linkBtnStyle, fontSize: '0.82rem', marginLeft: 'auto' }}>
             Clear filters ({activeFilterCount})
@@ -542,9 +573,9 @@ function SupplierStockReport() {
       <div style={{ background: '#fff', border: '1px solid #e4e6ef', borderRadius: 10, padding: 20, flex: 1, overflowY: 'auto' }}>
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading report data...</div>
-        ) : selectedSuppliers.size === 0 ? (
+        ) : selectedSuppliers.size === 0 && !search.trim() ? (
           <div style={{ padding: 60, textAlign: 'center', color: '#64748b', fontSize: '0.95rem' }}>
-            📦 <strong>No suppliers selected.</strong> Please select a supplier from the <strong>Suppliers</strong> dropdown above to view stock.
+            📦 <strong>No suppliers selected.</strong> Please select a supplier from the <strong>Suppliers</strong> dropdown above or type an item code in search to view stock.
           </div>
         ) : groups.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>No stock matches the current filters.</div>
