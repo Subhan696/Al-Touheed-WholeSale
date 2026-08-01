@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getLocalDateString, getFirstDayOfMonthString } from '../utils/dateUtils';
 import GLVoucherEntry from './GLVoucherEntry';
 import './GL.css';
 const { ipcRenderer } = window.require('electron');
@@ -43,10 +44,8 @@ export default function GLVouchers() {
   const [viewDetails, setViewDetails] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getFirstDayOfMonthString);
+  const [endDate, setEndDate] = useState(getLocalDateString);
 
   useEffect(() => {
     fetchVouchers();

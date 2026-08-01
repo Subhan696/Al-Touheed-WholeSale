@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getLocalDateString } from '../utils/dateUtils';
 import './FreightReport.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -15,12 +16,8 @@ export default function FreightReport() {
   });
   const [loading, setLoading] = useState(false);
   
-  const [startDate, setStartDate] = useState(
-    new Date().toISOString().split('T')[0]
-  );
-  const [endDate, setEndDate] = useState(
-    new Date().toISOString().split('T')[0]
-  );
+  const [startDate, setStartDate] = useState(getLocalDateString);
+  const [endDate, setEndDate] = useState(getLocalDateString);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [accounts, setAccounts] = useState([]);
   const [receiptSettings, setReceiptSettings] = useState(null);

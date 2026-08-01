@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 import { useDataVersion } from '../context/DataContext';
 
+import { getLocalDateString, parseLocalDate, getPrintedInvoiceNo } from '../utils/dateUtils';
+
 import './NewSale.css';
 
 import './StockList.css';
@@ -294,6 +296,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
   const rateRefs = useRef({});
 
+  const discountRefs = useRef({});
+
   const itemsRef = useRef([]);
 
   itemsRef.current = items;
@@ -354,7 +358,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
       const s = saleToEdit;
 
-      setSaleDate(new Date(s.created_at || s.sale_date));
+      setSaleDate(parseLocalDate(s.created_at || s.sale_date));
 
       setInvoiceNo(s.invoice_no || '');
 
@@ -1763,6 +1767,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
       }
 
+      if (field === 'discount') {
+
+        if (idx >= rows.length - 1) scanRef.current?.focus();
+
+        else discountRefs.current[idx + 1]?.focus();
+
+      }
+
       return;
 
     }
@@ -1771,7 +1783,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
       e.preventDefault();
 
-      // Stay in same column — packing stays packing, rate stays rate
+      // Stay in same column — packing stays packing, rate stays rate, discount stays discount
 
       if (field === 'packets') {
 
@@ -1779,9 +1791,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
         else scanRef.current?.focus();
 
-      } else {
+      } else if (field === 'rate') {
 
         if (idx < rows.length - 1) rateRefs.current[idx + 1]?.focus();
+
+        else scanRef.current?.focus();
+
+      } else if (field === 'discount') {
+
+        if (idx < rows.length - 1) discountRefs.current[idx + 1]?.focus();
 
         else scanRef.current?.focus();
 
@@ -1800,6 +1818,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
       if (field === 'packets' && idx > 0) packetsRefs.current[idx - 1]?.focus();
 
       if (field === 'rate' && idx > 0) rateRefs.current[idx - 1]?.focus();
+
+      if (field === 'discount' && idx > 0) discountRefs.current[idx - 1]?.focus();
 
     }
 
@@ -1865,7 +1885,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const payload = {
 
-      saleDate: `${saleDate.getFullYear()}-${String(saleDate.getMonth() + 1).padStart(2, '0')}-${String(saleDate.getDate()).padStart(2, '0')}`,
+      saleDate: getLocalDateString(saleDate),
 
       invoiceNo, customerId, customerName, customerPhone,
 
@@ -2503,7 +2523,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
         <div class="info-left">
 
-          <div class="info-row" style="margin-bottom: 6px;"><span class="lbl" style="font-size: 16px; font-weight: 900;">Invoice No:</span> <span class="val" style="font-weight: 900; font-size: 20px; padding-left: 5px;">${invoiceNo}</span></div>
+          <div class="info-row" style="margin-bottom: 6px;"><span class="lbl" style="font-size: 16px; font-weight: 900;">Invoice No:</span> <span class="val" style="font-weight: 900; font-size: 20px; padding-left: 5px;">${getPrintedInvoiceNo(invoiceNo)}</span></div>
 
           <div class="info-row"><span class="lbl">Customer:</span> <span class="val">${customerName || 'Walk-in Customer'}</span></div>
 
@@ -3650,6 +3670,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
                   <td className="right">
 
                     <input
+
+                      ref={el => discountRefs.current[idx] = el}
 
                       type="text"
 

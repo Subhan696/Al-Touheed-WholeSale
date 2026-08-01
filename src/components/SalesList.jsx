@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataVersion } from '../context/DataContext';
+import { getLocalDateString, parseLocalDate } from '../utils/dateUtils';
 import './SalesList.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -12,12 +13,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
   const selectedRowRef = useRef(null);
   const version = useDataVersion('sales');
 
-  const [filterDate, setFilterDate] = useState(() => {
-    const today = new Date();
-    const offset = today.getTimezoneOffset();
-    const localDate = new Date(today.getTime() - (offset * 60 * 1000));
-    return localDate.toISOString().split('T')[0];
-  });
+  const [filterDate, setFilterDate] = useState(() => getLocalDateString());
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
@@ -42,9 +38,7 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
         (r.invoice_no || '').toLowerCase().includes(s) ||
         (r.customer_name || '').toLowerCase().includes(s);
 
-      const dateStr = r.sale_date instanceof Date 
-        ? new Date(r.sale_date.getTime() - r.sale_date.getTimezoneOffset() * 60000).toISOString().split('T')[0] 
-        : (typeof r.sale_date === 'string' ? r.sale_date.split('T')[0] : '');
+      const dateStr = getLocalDateString(r.created_at || r.sale_date);
       const matchDate = showAll || dateStr === filterDate;
 
       return matchSearch && matchDate;
@@ -140,7 +134,8 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
               {filtered.map((s, idx) => {
                 const totalQty = s.total_packets || 0;
                 const displayDateTime = s.created_at || s.sale_date;
-                const saleDateTime = new Date(displayDateTime);
+                const saleDateTime = parseLocalDate(displayDateTime);
+                const isTimeAvailable = !!s.created_at || (typeof displayDateTime === 'string' && (displayDateTime.includes('T') || displayDateTime.includes(' ')));
                 return (
                   <tr
                     key={s.id}
@@ -150,7 +145,9 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
                   >
                     <td className="font-bold">{s.invoice_no || `INV-${s.id}`}</td>
                     <td>
-                      {`${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}, ${saleDateTime.toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
+                      {isTimeAvailable
+                        ? `${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}, ${saleDateTime.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`
+                        : `${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}`}
                     </td>
                     <td style={{ fontWeight: 600, color: '#1e40af' }}>{s.customer_name || 'Walk-in'}</td>
                     <td>{s.username || '-'}</td>

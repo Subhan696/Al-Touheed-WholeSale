@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
+import { getLocalDateString, getFirstDayOfMonthString } from '../utils/dateUtils';
 import './GL.css';
 const { ipcRenderer } = window.require('electron');
 
 export default function GLCashActivityReport() {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getFirstDayOfMonthString);
+  const [endDate, setEndDate] = useState(getLocalDateString);
   const [reportData, setReportData] = useState([]);
 
   const loadReport = async () => {

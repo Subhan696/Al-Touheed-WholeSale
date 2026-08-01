@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getLocalDateString } from '../utils/dateUtils';
 import './GL.css';
 const { ipcRenderer } = window.require('electron');
 
@@ -6,7 +7,7 @@ export default function GLLedgerReport() {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
   const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(getLocalDateString);
   const [statement, setStatement] = useState(null);
   const [loading, setLoading] = useState(false);
   const printRef = useRef(null);

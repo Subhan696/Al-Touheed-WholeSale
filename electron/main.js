@@ -4,7 +4,9 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const PDFDocument = require('pdfkit');
 const Store = require('electron-store');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+// Keep DATE fields (OID 1082) as YYYY-MM-DD strings without converting to UTC Date objects
+types.setTypeParser(1082, (val) => val);
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
@@ -830,6 +832,66 @@ function startExpressServer() {
     console.log(`[API] Express server running on port ${API_PORT}`);
   });
 }
+function getLocalDateString(d = new Date()) {
+  if (!d) return '';
+  if (typeof d === 'string') {
+    const trimmed = d.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return trimmed.slice(0, 10);
+  }
+  if (d instanceof Date) {
+    if (isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return String(d).slice(0, 10);
+}
+
+function getLocalTimestampString(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function isBankOrDigitalPayment(fullMethodName, bankNames = []) {
+  if (!fullMethodName) return false;
+  const m = fullMethodName.trim().toLowerCase();
+  if (!m || m.startsWith('credit') || m.startsWith('unpaid') || m.startsWith('return')) return false;
+
+  const keywords = ['jazzcash', 'easypais', 'nayapay', 'sadapay', 'upaisa', 'sadaqat', 'raast', 'transfer', 'bank', 'cheque', 'online', 'card', 'visa', 'mastercard'];
+  if (keywords.some(kw => m.includes(kw))) return true;
+
+  const baseMethod = m.split(' (')[0].trim();
+
+  for (const b of bankNames) {
+    const cleanB = b.split(' (')[0].trim();
+    if (!cleanB) continue;
+    if (m === cleanB || baseMethod === cleanB || m.includes(cleanB) || cleanB.includes(baseMethod)) return true;
+    const bNoBank = cleanB.replace(/\s+bank$/i, '').trim();
+    const baseNoBank = baseMethod.replace(/\s+bank$/i, '').trim();
+    if (bNoBank && baseNoBank && (bNoBank === baseNoBank || m.includes(bNoBank) || bNoBank.includes(baseMethod))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // ── Central IPC handler (called both locally and via Express proxy) ───────────
 async function getBankStatementData({ accountId, accountName, startDate, endDate }) {
   let accountRow;
@@ -878,10 +940,17 @@ async function getBankStatementData({ accountId, accountName, startDate, endDate
   // Fetch Bank / Cash payments recorded directly in Sales
   let salesDateFilter = '';
   const isCashAccount = account.account_type === 'Cash' || (accountName.toLowerCase().includes('cash') && !accountName.toLowerCase().includes('jazz'));
-  // For cash accounts: match 'cash' but NOT 'jazz' (jazzcash is a bank method)
-  const searchPattern = isCashAccount
-    ? "payment_method ILIKE '%cash%' AND payment_method NOT ILIKE '%jazz%'"
-    : `payment_method ILIKE '%${accountName.replace(/'/g, "''")}%'`;
+  const cleanAccName = accountName.replace(/'/g, "''").trim();
+  const shortAccName = cleanAccName.replace(/\s+bank$/i, '').trim();
+
+  let searchPattern = '';
+  if (isCashAccount) {
+    searchPattern = "payment_method ILIKE '%cash%' AND payment_method NOT ILIKE '%jazz%'";
+  } else if (shortAccName && shortAccName.toLowerCase() !== cleanAccName.toLowerCase() && shortAccName.length >= 2) {
+    searchPattern = `(payment_method ILIKE '%${cleanAccName}%' OR payment_method ILIKE '%${shortAccName}:%' OR payment_method ILIKE '%${shortAccName} (%')`;
+  } else {
+    searchPattern = `payment_method ILIKE '%${cleanAccName}%'`;
+  }
   const salesParams = [];
   if (startDate) {
     salesParams.push(startDate);
@@ -1041,11 +1110,26 @@ async function getCustomerStatementData({ customerName, customerId, startDate, e
 
   const cleanDateStr = (raw) => {
     if (!raw) return '';
-    if (typeof raw === 'string') return raw.slice(0, 10);
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      if (trimmed.includes('T') || trimmed.includes(' ')) {
+        const d = new Date(trimmed);
+        if (!isNaN(d.getTime())) {
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+      }
+      return trimmed.slice(0, 10);
+    }
     if (raw instanceof Date) {
-      const offset = raw.getTimezoneOffset();
-      const local = new Date(raw.getTime() - offset * 60 * 1000);
-      return local.toISOString().slice(0, 10);
+      if (isNaN(raw.getTime())) return '';
+      const year = raw.getFullYear();
+      const month = String(raw.getMonth() + 1).padStart(2, '0');
+      const day = String(raw.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     }
     return String(raw).slice(0, 10);
   };
@@ -2103,10 +2187,12 @@ async function handleIPC(channel, ...args) {
     case 'save-purchase': {
       const { purchaseDate, invoiceNo, supplierName, items, expenses, discount, miscCharges, purchaseExpenseTotal, notes, supplierInvNo, supplierDate, vehicleNo, godown, bltNumber } = data;
       const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
-      console.log('[SAVE-PURCHASE] supplierDate from frontend:', supplierDate);
+      const cleanPurchaseDate = getLocalDateString(purchaseDate || new Date());
+      const cleanSupplierDate = supplierDate ? getLocalDateString(supplierDate) : null;
+      console.log('[SAVE-PURCHASE] cleanPurchaseDate:', cleanPurchaseDate, 'cleanSupplierDate:', cleanSupplierDate);
       const pr = await query(
         'INSERT INTO purchases (purchase_date, invoice_no, supplier_name, total_amount, discount, misc_charges, notes, is_posted, supplier_inv_no, supplier_date, vehicle_no, godown, blt_number) VALUES ($1::DATE,$2,$3,$4,$5,$6,$7,0,$8,$9::DATE,$10,$11,$12) RETURNING id',
-        [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', bltNumber || null]
+        [cleanPurchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, cleanSupplierDate, vehicleNo || null, godown || '1-SHOP', bltNumber || null]
       );
       const purchaseId = pr.rows[0].id;
       for (const item of items) {
@@ -2135,10 +2221,12 @@ async function handleIPC(channel, ...args) {
     case 'update-purchase': {
       const { id, purchaseDate, invoiceNo, supplierName, items, expenses, discount, miscCharges, purchaseExpenseTotal, notes, supplierInvNo, supplierDate, vehicleNo, godown, bltNumber } = data;
       const total = items.reduce((s, i) => s + i.amount, 0) - (discount || 0) + (miscCharges || 0);
-      console.log('[UPDATE-PURCHASE] supplierDate from frontend:', supplierDate);
+      const cleanPurchaseDate = getLocalDateString(purchaseDate || new Date());
+      const cleanSupplierDate = supplierDate ? getLocalDateString(supplierDate) : null;
+      console.log('[UPDATE-PURCHASE] cleanPurchaseDate:', cleanPurchaseDate, 'cleanSupplierDate:', cleanSupplierDate);
       await query(
         'UPDATE purchases SET purchase_date=$1::DATE, invoice_no=$2, supplier_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7, supplier_inv_no=$8, supplier_date=CASE WHEN $9::DATE IS NOT NULL THEN $9::DATE ELSE supplier_date END, vehicle_no=$10, godown=$11, is_posted=0, blt_number=$12 WHERE id=$13',
-        [purchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, supplierDate || null, vehicleNo || null, godown || '1-SHOP', bltNumber || null, id]
+        [cleanPurchaseDate, invoiceNo || null, supplierName, total, discount || 0, miscCharges || 0, notes || null, supplierInvNo || null, cleanSupplierDate, vehicleNo || null, godown || '1-SHOP', bltNumber || null, id]
       );
       await query('DELETE FROM purchase_items WHERE purchase_id=$1', [id]);
       for (const item of items) {
@@ -2821,7 +2909,7 @@ async function handleIPC(channel, ...args) {
         const vType = isCashMode ? 'Cash Receipt' : 'Bank Receipt';
 
         // 4. Create Voucher Header
-        const vr = await query(`INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [vCode, paymentDate || new Date().toISOString().slice(0, 10), vType, remarks || 'CASH PAY', userId || null]);
+        const vr = await query(`INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [vCode, paymentDate || cleanDateStr(new Date()), vType, remarks || 'CASH PAY', userId || null]);
         const voucherId = vr.rows[0].id;
 
         // 5. Create Voucher Details
@@ -2881,7 +2969,7 @@ async function handleIPC(channel, ...args) {
         const vType = isCashMode ? 'Cash Receipt' : 'Bank Receipt';
 
         // 4. Create Voucher Header
-        const vr = await query(`INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [vCode, paymentDate || new Date().toISOString().slice(0, 10), vType, remarks || 'CASH PAY', userId || null]);
+        const vr = await query(`INSERT INTO vouchers (voucher_no, voucher_date, voucher_type, remarks, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [vCode, paymentDate || cleanDateStr(new Date()), vType, remarks || 'CASH PAY', userId || null]);
         const voucherId = vr.rows[0].id;
 
         // 5. Create Voucher Details
@@ -2946,9 +3034,10 @@ async function handleIPC(channel, ...args) {
         }
       }
 
+      const nowLocal = getLocalTimestampString();
       const sr = await query(
-        'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, misc_charges, payment_method, notes, user_id, customer_prev_balance) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id',
-        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null, customerPrevBalance || 0]
+        'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, misc_charges, payment_method, notes, user_id, customer_prev_balance, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id',
+        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null, customerPrevBalance || 0, nowLocal, nowLocal]
       );
       const saleId = sr.rows[0].id;
       for (const item of items) {
@@ -2981,8 +3070,9 @@ async function handleIPC(channel, ...args) {
         await query(`INSERT INTO gl_accounts (account_name, account_type, reference_id, balance_type) VALUES ($1, 'Customer', $2, 'Dr') ON CONFLICT (account_name) DO NOTHING`, ['Customer - ' + customerName, cId]);
       }
 
-      await query('UPDATE sales SET sale_date=$1, invoice_no=$2, customer_name=$3, customer_phone=$4, total_amount=$5, total_packets=$6, discount=$7, misc_charges=$8, payment_method=$9, notes=$10, customer_prev_balance=$11, updated_at=NOW() WHERE id=$12',
-        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, customerPrevBalance || 0, id]);
+      const nowLocal = getLocalTimestampString();
+      await query('UPDATE sales SET sale_date=$1, invoice_no=$2, customer_name=$3, customer_phone=$4, total_amount=$5, total_packets=$6, discount=$7, misc_charges=$8, payment_method=$9, notes=$10, customer_prev_balance=$11, updated_at=$12 WHERE id=$13',
+        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, customerPrevBalance || 0, nowLocal, id]);
       await query('DELETE FROM sale_items WHERE sale_id=$1', [id]);
       for (const item of items) {
         const profit = (item.saleRate - item.purchaseRate) * item.packets;
@@ -3489,7 +3579,7 @@ async function handleIPC(channel, ...args) {
         SELECT 
           ('PE-' || pe.id)::text as id,
           pe.id as item_id,
-          COALESCE(p.created_at::date, p.purchase_date) as purchase_date,
+          COALESCE(p.purchase_date, p.created_at::date) as purchase_date,
           COALESCE(p.created_at, p.purchase_date::timestamp) as sort_ts,
           pe.account_name,
           p.supplier_name,
@@ -3502,7 +3592,7 @@ async function handleIPC(channel, ...args) {
         FROM purchase_expenses pe
         JOIN purchases p ON p.id = pe.purchase_id
         WHERE pe.amount > 0
-          AND COALESCE(p.created_at::date, p.purchase_date) BETWEEN $1 AND $2
+          AND COALESCE(p.purchase_date, p.created_at::date) BETWEEN $1 AND $2
 
         UNION ALL
 
@@ -3536,7 +3626,7 @@ async function handleIPC(channel, ...args) {
 
       const baseTxSql = `
         SELECT
-          COALESCE(p.created_at::date, p.purchase_date) as txn_date,
+          COALESCE(p.purchase_date, p.created_at::date) as txn_date,
           pe.account_name,
           'PURCHASE' as source,
           ('PV-' || COALESCE(NULLIF(p.invoice_no, ''), p.id::text)) as type_code,
@@ -3551,7 +3641,7 @@ async function handleIPC(channel, ...args) {
           COALESCE(pe.cartons, 0) as ctns,
           0::numeric as debit,
           pe.amount as credit,
-          COALESCE(p.created_at, p.purchase_date::timestamp + (pe.id || ' seconds')::interval) as sort_ts,
+          COALESCE(p.created_at, p.purchase_date::timestamp) as sort_ts,
           pe.id as item_id,
           ('PE-' || pe.id)::text as row_id
         FROM purchase_expenses pe
@@ -3572,7 +3662,7 @@ async function handleIPC(channel, ...args) {
           0 as ctns,
           vd.debit,
           vd.credit,
-          COALESCE(v.created_at, v.voucher_date::timestamp + (vd.id || ' seconds')::interval) as sort_ts,
+          COALESCE(v.created_at, v.voucher_date::timestamp) as sort_ts,
           vd.id as item_id,
           ('VD-' || vd.id)::text as row_id
         FROM voucher_details vd
@@ -3625,7 +3715,7 @@ async function handleIPC(channel, ...args) {
         WHERE ($1::date IS NULL OR t.txn_date >= $1)
           AND ($2::date IS NULL OR t.txn_date <= $2)
           ${accountFilterTx}
-        ORDER BY t.account_name ASC, t.txn_date ASC, t.sort_ts ASC, t.item_id ASC
+        ORDER BY t.txn_date ASC, t.sort_ts ASC, t.row_id ASC
       `, txParams);
 
       const openingByAccount = new Map();
@@ -3633,13 +3723,16 @@ async function handleIPC(channel, ...args) {
         openingByAccount.set(r.account_name, parseFloat(r.opening_balance) || 0);
       }
 
-      const runningByAccount = new Map();
+      const openingBalance = accountName
+        ? (openingByAccount.get(accountName) || 0)
+        : Array.from(openingByAccount.values()).reduce((s, v) => s + v, 0);
+
+      let runningBalance = openingBalance;
       const transactions = txRes.rows.map((r) => {
         const acc = r.account_name || '';
-        const opening = openingByAccount.get(acc) || 0;
-        const prev = runningByAccount.has(acc) ? runningByAccount.get(acc) : opening;
-        const next = prev + (parseFloat(r.credit) || 0) - (parseFloat(r.debit) || 0);
-        runningByAccount.set(acc, next);
+        const debit = parseFloat(r.debit) || 0;
+        const credit = parseFloat(r.credit) || 0;
+        runningBalance = runningBalance + credit - debit;
 
         return {
           date: r.txn_date,
@@ -3651,16 +3744,13 @@ async function handleIPC(channel, ...args) {
           remarks: r.remarks,
           cheque_no: r.cheque_no,
           ctns: parseInt(r.ctns) || 0,
-          debit: parseFloat(r.debit) || 0,
-          credit: parseFloat(r.credit) || 0,
-          balance: Math.abs(next),
-          balance_type: next >= 0 ? 'Cr.' : 'Dr.'
+          debit,
+          credit,
+          balance: Math.abs(runningBalance),
+          balance_type: runningBalance >= 0 ? 'Cr.' : 'Dr.'
         };
       });
 
-      const openingBalance = accountName
-        ? (openingByAccount.get(accountName) || 0)
-        : Array.from(openingByAccount.values()).reduce((s, v) => s + v, 0);
       const totalDebit = transactions.reduce((s, t) => s + t.debit, 0);
       const totalCredit = transactions.reduce((s, t) => s + t.credit, 0);
       const closingSigned = openingBalance + totalCredit - totalDebit;
@@ -3683,12 +3773,17 @@ async function handleIPC(channel, ...args) {
         const end = endDate;
 
         const hasTimeFilter = !!(startTime || endTime);
-        let timeClause = '';
-        if (hasTimeFilter) {
-          const tStart = startTime ? `${startTime}:00` : '00:00:00';
-          const tEnd = endTime ? `${endTime}:59` : '23:59:59';
-          timeClause = ` AND sales.created_at::time >= '${tStart}' AND sales.created_at::time <= '${tEnd}'`;
-        }
+        const matchesTimeWindow = (createdAt) => {
+          if (!hasTimeFilter || !createdAt) return true;
+          const dt = new Date(createdAt);
+          if (isNaN(dt.getTime())) return true;
+          const h = String(dt.getHours()).padStart(2, '0');
+          const m = String(dt.getMinutes()).padStart(2, '0');
+          const timeStr = `${h}:${m}`;
+          if (startTime && timeStr < startTime) return false;
+          if (endTime && timeStr > endTime) return false;
+          return true;
+        };
 
         let userClause = '';
         const params = [start, end];
@@ -3701,18 +3796,19 @@ async function handleIPC(channel, ...args) {
           SELECT sales.id, sales.invoice_no, sales.sale_date, sales.created_at, sales.customer_name, sales.total_amount, sales.total_packets as total_quantity, sales.payment_method, sales.discount, sales.misc_charges, users.username as sold_by
           FROM sales
           LEFT JOIN users ON sales.user_id = users.id
-          WHERE sales.sale_date::date BETWEEN $1 AND $2${timeClause}${userClause}
+          WHERE sales.sale_date::date BETWEEN $1 AND $2${userClause}
           ORDER BY sales.sale_date ASC, sales.created_at ASC
         `, params);
         const sales = salesRes.rows;
 
-        // Fetch Bank Accounts for strict matching in Master Cashier Window
+        // Fetch Bank Accounts for strict matching in Master Cashier Window & Daily Report
         const glRes = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
-        const bankAccountNames = glRes.rows.map(r => r.account_name.toLowerCase());
+        const bankAccountNames = glRes.rows.map(r => (r.account_name || '').toLowerCase().trim());
 
         const enrichedSales = [];
         const returnInvoices = [];
         for (const sale of sales) {
+          if (!matchesTimeWindow(sale.created_at)) continue;
           const itemsRes = await query(`
             SELECT item_code, item_description, packets as quantity, sale_rate, purchase_rate, amount, profit
             FROM sale_items
@@ -3733,14 +3829,12 @@ async function handleIPC(channel, ...args) {
               const colonIdx = part.lastIndexOf(':');
               if (colonIdx === -1) continue;
               const fullMethod = part.slice(0, colonIdx).trim();
-              const methodName = fullMethod.toLowerCase();
-              const baseMethodName = fullMethod.split(' (')[0].toLowerCase();
               const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
 
-              if (methodName.includes('jazzcash') || methodName.includes('easypais') || methodName.includes('raast') || methodName.includes('transfer') || methodName.includes('bank') || bankAccountNames.includes(baseMethodName)) {
+              if (isBankOrDigitalPayment(fullMethod, bankAccountNames)) {
                 digital += amt;
                 breakdown[fullMethod] = (breakdown[fullMethod] || 0) + amt;
-              } else if (methodName.includes('cash') || (methodName !== '' && !methodName.includes('credit') && !methodName.includes('unpaid'))) {
+              } else if (fullMethod.toLowerCase().includes('cash') || (!fullMethod.toLowerCase().includes('credit') && !fullMethod.toLowerCase().includes('unpaid') && !fullMethod.toLowerCase().includes('return'))) {
                 cash += amt;
               }
             }
@@ -3789,13 +3883,14 @@ async function handleIPC(channel, ...args) {
         const returnsRes = await query(`
           SELECT id, return_no, invoice_no, return_date, created_at, customer_name, total_amount
           FROM sales_returns
-          WHERE return_date::date BETWEEN $1 AND $2${timeClause}
+          WHERE return_date::date BETWEEN $1 AND $2
           ORDER BY return_date ASC, created_at ASC
         `, [start, end]);
         const returns = returnsRes.rows;
 
         const enrichedReturns = [];
         for (const ret of returns) {
+          if (!matchesTimeWindow(ret.created_at)) continue;
           const itemsRes = await query(`
             SELECT 
               sri.item_code, sri.item_description, sri.packets as quantity, sri.price as sale_rate, sri.amount,
@@ -3889,7 +3984,11 @@ async function handleIPC(channel, ...args) {
             ORDER BY created_at DESC
           `, [user.id, startDate, endDate]);
 
+          const glResUser = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
+          const userBankNames = glResUser.rows.map(r => (r.account_name || '').toLowerCase().trim());
+
           let userCash = 0, userDigital = 0;
+          const userDigitalBreakdown = {};
           iRes.rows.forEach(row => {
             let digital = 0;
             if (row.payment_method) {
@@ -3897,23 +3996,17 @@ async function handleIPC(channel, ...args) {
               for (const part of parts) {
                 const colonIdx = part.lastIndexOf(':');
                 if (colonIdx === -1) continue;
-                const methodName = part.slice(0, colonIdx).trim().toLowerCase();
+                const fullMethod = part.slice(0, colonIdx).trim();
                 const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
-                if (methodName.includes('jazzcash') || methodName.includes('easypais') || methodName.includes('raast') || methodName.includes('transfer') || methodName.includes('bank')) {
+                if (isBankOrDigitalPayment(fullMethod, userBankNames)) {
                   digital += amt;
+                  userDigitalBreakdown[fullMethod] = (userDigitalBreakdown[fullMethod] || 0) + amt;
                 }
-              }
-            }
-            if (digital === 0 && row.payment_method) {
-              const pm = row.payment_method.toLowerCase();
-              const netAmt = (parseFloat(row.total_amount) || 0) + (parseFloat(row.misc_charges) || 0) - (parseFloat(row.discount) || 0);
-              if (pm.includes('jazzcash') || pm.includes('easypais') || pm.includes('raast') || pm.includes('transfer') || pm.includes('bank')) {
-                digital = netAmt;
               }
             }
             userDigital += digital;
             const billAmt = (parseFloat(row.total_amount) || 0) + (parseFloat(row.misc_charges) || 0) - (parseFloat(row.discount) || 0);
-            userCash += (billAmt - digital);
+            userCash += Math.max(0, billAmt - digital);
           });
 
           if (parseInt(salesStats.invoice_count) > 0 || parseInt(returnStats.return_count) > 0) {
@@ -3926,6 +4019,7 @@ async function handleIPC(channel, ...args) {
               totalReturned: parseFloat(returnStats.total_returned) || 0,
               cashSales: userCash,
               digitalSales: userDigital,
+              digital_breakdown: userDigitalBreakdown,
               invoices: iRes.rows
             });
           }
@@ -3940,6 +4034,9 @@ async function handleIPC(channel, ...args) {
     case 'get-date-summary': {
       try {
         const { startDate, endDate } = data;
+        const glResSummary = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
+        const summaryBankNames = glResSummary.rows.map(r => (r.account_name || '').toLowerCase().trim());
+
         const res = await query(`
           SELECT sale_date::date as day,
                  SUM(total_amount) as total_sales,
@@ -3957,10 +4054,13 @@ async function handleIPC(channel, ...args) {
             row.payment_breakdown.split(',').forEach(part => {
               const colonIdx = part.lastIndexOf(':');
               if (colonIdx > -1) {
-                const p = part.slice(0, colonIdx).toLowerCase();
+                const fullMethod = part.slice(0, colonIdx).trim();
                 const amt = parseFloat(part.slice(colonIdx + 1)) || 0;
-                if (p.includes('jazzcash') || p.includes('easypais') || p.includes('raast') || p.includes('bank') || p.includes('transfer')) digital += amt;
-                else if (p.includes('cash')) cash += amt;
+                if (isBankOrDigitalPayment(fullMethod, summaryBankNames)) {
+                  digital += amt;
+                } else if (fullMethod.toLowerCase().includes('cash') || (!fullMethod.toLowerCase().includes('credit') && !fullMethod.toLowerCase().includes('unpaid') && !fullMethod.toLowerCase().includes('return'))) {
+                  cash += amt;
+                }
               }
             });
           }

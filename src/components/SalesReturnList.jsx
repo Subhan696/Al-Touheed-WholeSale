@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useDataVersion } from '../context/DataContext';
+import { getLocalDateString, parseLocalDate } from '../utils/dateUtils';
 import './SalesList.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -34,10 +35,7 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [expandedItems, setExpandedItems] = useState([]);
-  const [filterDate, setFilterDate] = useState(() => {
-    const today = new Date();
-    return new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().split('T')[0];
-  });
+  const [filterDate, setFilterDate] = useState(() => getLocalDateString());
   const [showAll, setShowAll] = useState(false);
   const version = useDataVersion('sales-returns');
 
@@ -59,7 +57,7 @@ function SalesReturnList({ currentUser, onEditReturn, isActive }) {
     const s = search.toLowerCase();
     return rows.filter(r => {
       const matchSearch = !search || (r.return_no || '').toLowerCase().includes(s) || (r.customer_name || '').toLowerCase().includes(s) || (r.invoice_no || '').toLowerCase().includes(s);
-      const dateStr = r.return_date instanceof Date ? new Date(r.return_date.getTime() - r.return_date.getTimezoneOffset() * 60000).toISOString().split('T')[0] : (typeof r.return_date === 'string' ? r.return_date.split('T')[0] : '');
+      const dateStr = getLocalDateString(r.created_at || r.return_date);
       const matchDate = showAll || dateStr === filterDate;
       return matchSearch && matchDate;
     });

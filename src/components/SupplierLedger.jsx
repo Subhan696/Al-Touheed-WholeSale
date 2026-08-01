@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getLocalDateString } from '../utils/dateUtils';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -14,7 +15,7 @@ function SupplierLedger() {
 
   // Payment Modal
   const [paySupplier, setPaySupplier] = useState(null);
-  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payDate, setPayDate] = useState(getLocalDateString);
   const [payAmount, setPayAmount] = useState('');
   const [payMode, setPayMode] = useState('Cash');
   const [payNotes, setPayNotes] = useState('');
