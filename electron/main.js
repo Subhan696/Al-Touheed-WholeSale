@@ -660,6 +660,24 @@ async function initDatabase() {
     WHERE g.id IS NULL
   `);
 
+  // Sync past purchase_expenses records with updated expense account names and ensure expense_account_id is linked
+  await query(`
+    UPDATE purchase_expenses pe
+    SET account_name = ea.account_name,
+        expense_account_id = COALESCE(pe.expense_account_id, ea.id)
+    FROM expense_accounts ea
+    WHERE (pe.expense_account_id = ea.id OR (pe.expense_account_id IS NULL AND LOWER(TRIM(pe.account_name)) = LOWER(TRIM(ea.account_name))))
+      AND pe.account_name != ea.account_name
+  `);
+
+  // Link any unlinked purchase_expenses that match current expense_accounts by ID
+  await query(`
+    UPDATE purchase_expenses pe
+    SET expense_account_id = ea.id
+    FROM expense_accounts ea
+    WHERE pe.expense_account_id IS NULL AND LOWER(TRIM(pe.account_name)) = LOWER(TRIM(ea.account_name))
+  `);
+
   // Indexes
   await query('CREATE INDEX IF NOT EXISTS idx_purchase_items_item_code ON purchase_items(item_code)');
   await query('CREATE INDEX IF NOT EXISTS idx_sale_items_item_code ON sale_items(item_code)');
@@ -780,7 +798,7 @@ async function initDatabase() {
 async function getStock(itemCode) {
   const r = await query(`
     SELECT
-      COALESCE((SELECT SUM(pi.packets) FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE pi.item_code=$1 AND p.is_posted = 1),0) -
+      COALESCE((SELECT SUM(pi.packets) FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE pi.item_code=$1),0) -
       COALESCE((SELECT SUM(packets) FROM sale_items WHERE item_code=$1),0) +
       COALESCE((SELECT SUM(packets) FROM purchase_return_items WHERE item_code=$1),0) * -1 +
       COALESCE((SELECT SUM(packets) FROM sales_return_items WHERE item_code=$1),0) +
@@ -1839,10 +1857,15 @@ async function handleIPC(channel, ...args) {
       const oldAcc = await query('SELECT account_name FROM expense_accounts WHERE id=$1', [data.id]);
       const oldName = oldAcc.rows[0]?.account_name || '';
 
+      console.log('[UPDATE-EXPENSE-ACCOUNT] Old name:', oldName, 'New name:', data.account_name, 'ID:', data.id);
+
       await query('UPDATE expense_accounts SET account_name=$1, default_rate=$2 WHERE id=$3', [data.account_name, data.default_rate, data.id]);
 
       if (oldName) {
         await query('UPDATE gl_accounts SET account_name=$1 WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($2)) AND account_type = $3', [data.account_name, oldName, 'Expense']);
+        // Update historical purchase_expenses records by expense_account_id and by old account name
+        const peResult = await query('UPDATE purchase_expenses SET account_name=$1 WHERE expense_account_id=$2 OR LOWER(TRIM(account_name)) = LOWER(TRIM($3))', [data.account_name, data.id, oldName]);
+        console.log('[UPDATE-EXPENSE-ACCOUNT] Updated purchase_expenses rows:', peResult.rowCount);
       }
 
       const glCheck = await query('SELECT id FROM gl_accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM($1)) LIMIT 1', [data.account_name]);
@@ -1962,7 +1985,6 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT pi.item_code, SUM(pi.packets) as qty 
           FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
-          WHERE pu.is_posted = 1 
           GROUP BY pi.item_code
         ) purchases ON purchases.item_code = p.item_code
         LEFT JOIN (
@@ -2051,7 +2073,6 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT pi.item_code, SUM(pi.packets) as qty 
           FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
-          WHERE pu.is_posted = 1 
           GROUP BY pi.item_code
         ) purchases ON purchases.item_code = p.item_code
         LEFT JOIN (
@@ -2210,7 +2231,6 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT pi.item_code, SUM(pi.packets) as qty 
           FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
-          WHERE pu.is_posted = 1 
           GROUP BY pi.item_code
         ) purchases ON purchases.item_code = p.item_code
         LEFT JOIN (
@@ -2241,7 +2261,6 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT pi.item_code, SUM(pi.packets) as qty 
           FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id 
-          WHERE pu.is_posted = 1 
           GROUP BY pi.item_code
         ) purchases ON purchases.item_code = p.item_code
         LEFT JOIN (
@@ -3760,36 +3779,21 @@ async function handleIPC(channel, ...args) {
         WHERE vd.debit > 0 OR vd.credit > 0
       `;
 
-      const openParams = [startDate || null];
-      let accountFilterOpen = '';
-      if (accountName) {
-        openParams.push(accountName);
-        accountFilterOpen = ` AND LOWER(TRIM(t.account_name)) = LOWER(TRIM($${openParams.length}))`;
-      }
-
-      const openingRes = await query(`
-        WITH tx AS (${baseTxSql})
-        SELECT t.account_name, COALESCE(SUM(t.credit - t.debit), 0) as past_tx_balance
-        FROM tx t
-        WHERE ($1::date IS NULL OR t.txn_date < $1)
-        ${accountFilterOpen}
-        GROUP BY t.account_name
-      `, openParams);
-
       const glAccRes = await query(`
         SELECT g.account_name, g.opening_balance, g.balance_type
         FROM gl_accounts g
         JOIN expense_accounts ea ON LOWER(TRIM(ea.account_name)) = LOWER(TRIM(g.account_name))
       `);
 
-      const txParams = [startDate || null, endDate || null];
-      let accountFilterTx = '';
+      // Get all transactions for running balance calculation (no date filter for closing balance)
+      const allTxParams = [];
+      let accountFilterAllTx = '';
       if (accountName) {
-        txParams.push(accountName);
-        accountFilterTx = ` AND LOWER(TRIM(t.account_name)) = LOWER(TRIM($${txParams.length}))`;
+        allTxParams.push(accountName);
+        accountFilterAllTx = ` AND LOWER(TRIM(t.account_name)) = LOWER(TRIM($${allTxParams.length}))`;
       }
 
-      const txRes = await query(`
+      const allTxRes = await query(`
         WITH tx AS (${baseTxSql})
         SELECT
           t.txn_date,
@@ -3806,14 +3810,13 @@ async function handleIPC(channel, ...args) {
           t.sort_ts,
           t.row_id
         FROM tx t
-        WHERE ($1::date IS NULL OR t.txn_date >= $1)
-          AND ($2::date IS NULL OR t.txn_date <= $2)
-          ${accountFilterTx}
+        WHERE 1=1
+          ${accountFilterAllTx}
         ORDER BY t.txn_date ASC, t.sort_ts ASC, t.row_id ASC
-      `, txParams);
+      `, allTxParams);
 
+      // Calculate initial balance from GL accounts (signed: Cr-positive, Dr-negative in credit-normal ledger)
       const openingByAccount = new Map();
-      // Add base opening balances (signed: Cr-positive, Dr-negative in credit-normal ledger)
       for (const row of glAccRes.rows) {
         if (accountName && row.account_name.toLowerCase().trim() !== accountName.toLowerCase().trim()) continue;
         openingByAccount.set(
@@ -3821,49 +3824,56 @@ async function handleIPC(channel, ...args) {
           signedOpeningBalance(row.opening_balance, row.balance_type || 'Cr')
         );
       }
-      
-      // Add past transactions sum
-      for (const r of openingRes.rows) {
-        const accLower = r.account_name.toLowerCase().trim();
-        const base = openingByAccount.get(accLower) || 0;
-        openingByAccount.set(accLower, base + (parseFloat(r.past_tx_balance) || 0));
-      }
 
-      const openingBalance = accountName
+      const initialBalance = accountName
         ? (openingByAccount.get(accountName.toLowerCase().trim()) || 0)
         : Array.from(openingByAccount.values()).reduce((s, v) => s + v, 0);
 
-      let runningBalance = openingBalance;
-      const transactions = txRes.rows.map((r) => {
-        const acc = r.account_name || '';
+      // Process all transactions chronologically to calculate opening and closing balances
+      // Following the same pattern as customer statement (lines 1433-1451)
+      let currentBal = initialBalance;
+      let startBal = initialBalance;
+      const filteredTransactions = [];
+
+      allTxRes.rows.forEach((r) => {
         const debit = parseFloat(r.debit) || 0;
         const credit = parseFloat(r.credit) || 0;
-        runningBalance = runningBalance + credit - debit;
+        const dStr = r.txn_date;
 
-        return {
-          date: r.txn_date,
-          account_name: acc,
-          source: r.source,
-          type: r.type_code,
-          vcode: r.vcode,
-          ref_no: r.ref_no,
-          remarks: r.remarks,
-          cheque_no: r.cheque_no,
-          ctns: parseInt(r.ctns) || 0,
-          debit,
-          credit,
-          balance: Math.abs(runningBalance),
-          balance_type: runningBalance >= 0 ? 'Cr.' : 'Dr.'
-        };
+        if (startDate && dStr < startDate) {
+          // Transaction is before start date - update both startBal and currentBal
+          startBal = startBal + credit - debit;
+          currentBal = currentBal + credit - debit;
+        } else if (!endDate || dStr <= endDate) {
+          // Transaction is within date range - update currentBal and add to filtered list
+          currentBal = currentBal + credit - debit;
+          filteredTransactions.push({
+            date: r.txn_date,
+            account_name: r.account_name || '',
+            source: r.source,
+            type: r.type_code,
+            vcode: r.vcode,
+            ref_no: r.ref_no,
+            remarks: r.remarks,
+            cheque_no: r.cheque_no,
+            ctns: parseInt(r.ctns) || 0,
+            debit,
+            credit,
+            balance: Math.abs(currentBal),
+            balance_type: currentBal >= 0 ? 'Cr.' : 'Dr.'
+          });
+        }
+        // If transaction is after end date, skip it entirely
       });
 
+      const transactions = filteredTransactions;
       const totalDebit = transactions.reduce((s, t) => s + t.debit, 0);
       const totalCredit = transactions.reduce((s, t) => s + t.credit, 0);
-      const closingSigned = openingBalance + totalCredit - totalDebit;
+      const closingSigned = currentBal;
 
       return {
-        opening_balance: Math.abs(openingBalance),
-        opening_type: openingBalance >= 0 ? 'Cr.' : 'Dr.',
+        opening_balance: Math.abs(startBal),
+        opening_type: startBal >= 0 ? 'Cr.' : 'Dr.',
         total_debit: totalDebit,
         total_credit: totalCredit,
         closing_balance: Math.abs(closingSigned),

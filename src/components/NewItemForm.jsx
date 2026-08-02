@@ -64,6 +64,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [overallEnabled, setOverallEnabled] = useState(false);
   const [brandSearchQuery, setBrandSearchQuery] = useState('');
   const [profitSavedMsg, setProfitSavedMsg] = useState('');
+  
+  // Special mode for fast data entry
+  const [specialMode, setSpecialMode] = useState(false);
+  const [previousCategory, setPreviousCategory] = useState('');
+  const [previousGender, setPreviousGender] = useState('');
 
   const refs = useRef({});
   const fileInputRef = useRef(null);
@@ -282,9 +287,42 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
 
   useEffect(() => {
     if (!editItemData && !showCompanyModal && isActive) {
-      setTimeout(() => refs.current.brand?.focus(), 200);
+      if (specialMode) {
+        // In special mode, set description with brand + 'D-' and focus on description
+        if (brand && !description) {
+          setDescription(brand + ' D-');
+        }
+        setTimeout(() => refs.current.description?.focus(), 200);
+      } else {
+        setTimeout(() => refs.current.brand?.focus(), 200);
+      }
     }
-  }, [editItemData, companies, showCompanyModal, isActive]);
+  }, [editItemData, companies, showCompanyModal, isActive, specialMode, brand]);
+
+  // Store previous category and gender when special mode is enabled
+  useEffect(() => {
+    if (specialMode && !previousCategory && category) {
+      setPreviousCategory(category);
+    }
+    if (specialMode && !previousGender && gender) {
+      setPreviousGender(gender);
+    }
+  }, [specialMode, category, gender, previousCategory, previousGender]);
+
+  // Ensure category and gender are set to previous values when in special mode
+  useEffect(() => {
+    if (specialMode) {
+      if (previousCategory) setCategory(previousCategory);
+      if (previousGender) setGender(previousGender);
+    }
+  }, [specialMode, previousCategory, previousGender]);
+
+  // Update description when brand changes in special mode
+  useEffect(() => {
+    if (specialMode && brand) {
+      setDescription(brand + ' D-');
+    }
+  }, [specialMode, brand]);
 
   useEffect(() => {
     if (editItemData) {
@@ -339,8 +377,13 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
       refs.current.itemCode?.focus();
       return;
     }
-    if (!purchaseRate || !saleRate) {
-      setStatusMsg('❌ Fill in Purchase Rate and Sale Rate');
+    if (!purchaseRate) {
+      setStatusMsg('❌ Fill in Purchase Rate');
+      setTimeout(() => setStatusMsg(''), 3000);
+      return;
+    }
+    if (!specialMode && !saleRate) {
+      setStatusMsg('❌ Fill in Sale Rate');
       setTimeout(() => setStatusMsg(''), 3000);
       return;
     }
@@ -348,8 +391,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     const payload = {
       itemCode: itemCode.trim().toUpperCase(),
       description: description.trim(),
-      gender: gender,
-      category: category,
+      gender: specialMode ? previousGender : gender,
+      category: specialMode ? previousCategory : category,
       brand: brand,
       sizeRange: sizeRange.trim(),
       purchaseRate: parseFloat(purchaseRate),
@@ -413,7 +456,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
             setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
             setPhotoFile(null); setPhotoPreview(null);
             setNote('');
-            setTimeout(() => refs.current.brand?.focus(), 50);
+            if (specialMode) {
+              setDescription(brand + ' D-');
+              setTimeout(() => refs.current.description?.focus(), 50);
+            } else {
+              setTimeout(() => refs.current.brand?.focus(), 50);
+            }
           }, 500);
         } else {
           setStatusMsg(`❌ ${result.error || 'Failed to save'}`);
@@ -486,7 +534,18 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     setPackingQty(packingsList.length > 0 ? parseInt(packingsList[0].value) : 6);
     setPhotoFile(null); setPhotoPreview(null);
     setYear(currentYear); setNote('');
-    setTimeout(() => refs.current.brand?.focus(), 100);
+    // Reset previous values when in normal mode
+    if (!specialMode) {
+      setPreviousCategory('');
+      setPreviousGender('');
+    }
+    if (specialMode) {
+      // In special mode, preserve category and gender but reset description
+      setDescription(brand + ' D-');
+      setTimeout(() => refs.current.description?.focus(), 100);
+    } else {
+      setTimeout(() => refs.current.brand?.focus(), 100);
+    }
   };
 
   useEffect(() => {
@@ -580,6 +639,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
           }}>{statusMsg}</span>
         )}
         <div className="header-actions">
+          <button type="button" onClick={() => setSpecialMode(!specialMode)} className={`btn ${specialMode ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
+            {specialMode ? '⚡ Fast ON' : '⚡ Fast'}
+          </button>
           <button type="button" onClick={() => setShowProfitModal(true)} className="btn btn-secondary">📊 Profit Sheet</button>
           <select value="" onChange={e => { if (e.target.value) openListManager(e.target.value); }} className="btn btn-secondary" style={{ appearance: 'none', paddingRight: '12px' }}>
             <option value="" disabled>⚙️ Manage Lists...</option>
@@ -624,125 +686,212 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
                 <label>Description</label>
                 <input ref={el => refs.current.description = el} type="text" value={description}
                   onChange={e => setDescription(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'category')}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (specialMode) {
+                        refs.current.sizeRange?.focus();
+                      } else {
+                        refs.current.category?.focus();
+                      }
+                    }
+                  }}
                   placeholder="e.g. Cotton Suit, Jeans, Shirt..." className="form-input" />
               </div>
 
               {/* Row 3: Category + Size Range + Gender */}
-              <div className="form-group span-third">
-                <label>Category</label>
-                <select ref={el => refs.current.category = el} value={category}
-                  onChange={e => setCategory(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'sizeRange')} className="form-input">
-                  {categoriesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="form-group span-third">
-                <label>Size Range</label>
-                <select ref={el => refs.current.sizeRange = el} value={sizeRange}
-                  onChange={e => setSizeRange(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'gender')} className="form-input">
-                  {sizeRangesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="form-group span-third">
-                <label>Gender</label>
-                <select ref={el => refs.current.gender = el} value={gender}
-                  onChange={e => setGender(e.target.value)}
-                  onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
-                  {gendersList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              </div>
+              {!specialMode && (
+                <>
+                  <div className="form-group span-third">
+                    <label>Category</label>
+                    <select ref={el => refs.current.category = el} value={category}
+                      onChange={e => { setCategory(e.target.value); setPreviousCategory(e.target.value); }}
+                      onKeyDown={e => handleEnter(e, 'sizeRange')} className="form-input">
+                      {categoriesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group span-third">
+                    <label>Size Range</label>
+                    <select ref={el => refs.current.sizeRange = el} value={sizeRange}
+                      onChange={e => setSizeRange(e.target.value)}
+                      onKeyDown={e => handleEnter(e, 'gender')} className="form-input">
+                      {sizeRangesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group span-third">
+                    <label>Gender</label>
+                    <select ref={el => refs.current.gender = el} value={gender}
+                      onChange={e => { setGender(e.target.value); setPreviousGender(e.target.value); }}
+                      onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
+                      {gendersList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+              {specialMode && (
+                <>
+                  <div className="form-group span-full">
+                    <label>Size Range</label>
+                    <select ref={el => refs.current.sizeRange = el} value={sizeRange}
+                      onChange={e => setSizeRange(e.target.value)}
+                      onKeyDown={e => handleEnter(e, 'purchaseRate')} className="form-input">
+                      {sizeRangesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
 
-              {/* Row 4: Rates (Left Column) + Packing (Middle Column) */}
-              <div className="span-third" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div className="form-group">
-                  <label>Purchase Rate (PKR)</label>
-                  <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
-                    onChange={e => setPurchaseRate(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); }
-                      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.packing?.focus(); }
-                    }}
-                    placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: purchaseRate ? '#000' : '#9ca3af', backgroundColor: '#9c9cfe', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
-                </div>
+              {/* Row 4: Rates & Packing */}
+              {!specialMode ? (
+                <>
+                  <div className="span-third" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="form-group">
+                      <label>Purchase Rate (PKR)</label>
+                      <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
+                        onChange={e => setPurchaseRate(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            refs.current.saleRate?.focus();
+                          }
+                          if (e.key === 'Tab' && !e.shiftKey) { 
+                            e.preventDefault(); 
+                            refs.current.packing?.focus();
+                          }
+                        }}
+                        placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: purchaseRate ? '#000' : '#9ca3af', backgroundColor: '#9c9cfe', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
+                    </div>
 
-                <div className="form-group">
-                  <label>Sale Rate (PKR)</label>
-                  <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
-                    onChange={e => setSaleRate(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
-                      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.discount?.focus(); }
-                    }}
-                    placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: saleRate ? '#fff' : '#6b7280', backgroundColor: '#000', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
-                </div>
-              </div>
+                    <div className="form-group">
+                      <label>Sale Rate (PKR)</label>
+                      <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
+                        onChange={e => setSaleRate(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                          if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.discount?.focus(); }
+                        }}
+                        placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: saleRate ? '#fff' : '#6b7280', backgroundColor: '#000', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
+                    </div>
+                  </div>
 
-              <div className="form-group span-third">
-                <label>Packing Qty</label>
-                <select ref={el => refs.current.packing = el} value={packingQty}
-                  onChange={e => setPackingQty(parseInt(e.target.value))}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); } }}
-                  className="form-input">
-                  {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
-                </select>
-              </div>
+                  <div className="form-group span-third">
+                    <label>Packing Qty</label>
+                    <select ref={el => refs.current.packing = el} value={packingQty}
+                      onChange={e => setPackingQty(parseInt(e.target.value))}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); } }}
+                      className="form-input">
+                      {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="span-third" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="form-group">
+                      <label>Purchase Rate (PKR)</label>
+                      <input ref={el => refs.current.purchaseRate = el} type="number" value={purchaseRate}
+                        onChange={e => setPurchaseRate(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSubmit(e);
+                          }
+                          if (e.key === 'Tab' && !e.shiftKey) { 
+                            e.preventDefault(); 
+                            refs.current.packing?.focus();
+                          }
+                        }}
+                        placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: purchaseRate ? '#000' : '#9ca3af', backgroundColor: '#9c9cfe', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Sale Rate (PKR)</label>
+                      <input ref={el => refs.current.saleRate = el} type="number" value={saleRate}
+                        onChange={e => setSaleRate(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                          if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.discount?.focus(); }
+                        }}
+                        placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 800, color: saleRate ? '#fff' : '#6b7280', backgroundColor: '#000', borderRadius: '8px', padding: '0 10px', height: '70px', lineHeight: '70px', margin: 0, border: 'none' }} />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Discount (PKR)</label>
+                      <input ref={el => refs.current.discount = el} type="number" value={discount}
+                        onChange={e => setDiscount(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
+                        placeholder="0" className="form-input highlight-on-focus" style={{ textAlign: 'center', fontSize: '1.25rem', fontWeight: 800, color: discount ? '#be123c' : '#6b7280', backgroundColor: '#fff1f2', borderRadius: '6px', padding: '8px 6px', border: '1px solid #fecdd3', height: '50px' }} />
+                    </div>
+                  </div>
+
+                  <div className="form-group span-third">
+                    <label>Packing Qty</label>
+                    <select ref={el => refs.current.packing = el} value={packingQty}
+                      onChange={e => setPackingQty(parseInt(e.target.value))}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); } }}
+                      className="form-input">
+                      {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Row 6: Discount + Year + Note */}
-            <div className="form-grid" style={{ marginTop: '16px', alignItems: 'flex-end' }}>
-              <div className="form-group span-third" style={{ position: 'relative' }}>
-                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Discount Amount</span>
-                  {(() => {
-                    const dPct = findDiscountPct(brand, gender, sizeRange);
-                    return dPct > 0
-                      ? <span style={{ fontSize: '0.75rem', color: '#e53935', fontWeight: 700, background: '#fff0f0', padding: '2px 8px', borderRadius: 5 }}>{dPct}% of sale</span>
-                      : <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>set in Profit Sheet</span>;
-                  })()}
-                </label>
-                <input
-                  ref={el => refs.current.discount = el}
-                  type="number"
-                  value={discount}
-                  onChange={e => setDiscount(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
-                    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.year?.focus(); }
-                  }}
-                  placeholder="0"
-                  className="form-input"
-                  style={{
-                    backgroundColor: '#fff1f2', border: '1px solid #fecdd3', color: '#be123c',
-                    fontWeight: '800', fontSize: '1.25rem'
-                  }}
-                />
-                {saleRate && discount && parseFloat(discount) > 0 && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, fontSize: '0.78rem', color: '#9ca3af', marginTop: 4, whiteSpace: 'nowrap' }}>
-                    Price after discount: <strong style={{ color: '#15803d' }}>PKR {Math.round((parseFloat(saleRate) || 0) - (parseFloat(discount) || 0))}</strong>
-                  </div>
-                )}
+            {!specialMode && (
+              <div className="form-grid" style={{ marginTop: '16px', alignItems: 'flex-end' }}>
+                <div className="form-group span-third" style={{ position: 'relative' }}>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Discount Amount</span>
+                    {(() => {
+                      const dPct = findDiscountPct(brand, gender, sizeRange);
+                      return dPct > 0
+                        ? <span style={{ fontSize: '0.75rem', color: '#e53935', fontWeight: 700, background: '#fff0f0', padding: '2px 8px', borderRadius: 5 }}>{dPct}% of sale</span>
+                        : <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>set in Profit Sheet</span>;
+                    })()}
+                  </label>
+                  <input
+                    ref={el => refs.current.discount = el}
+                    type="number"
+                    value={discount}
+                    onChange={e => setDiscount(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.year?.focus(); }
+                    }}
+                    placeholder="0"
+                    className="form-input"
+                    style={{
+                      backgroundColor: '#fff1f2', border: '1px solid #fecdd3', color: '#be123c',
+                      fontWeight: '800', fontSize: '1.25rem'
+                    }}
+                  />
+                  {saleRate && discount && parseFloat(discount) > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, fontSize: '0.78rem', color: '#9ca3af', marginTop: 4, whiteSpace: 'nowrap' }}>
+                      Price after discount: <strong style={{ color: '#15803d' }}>PKR {Math.round((parseFloat(saleRate) || 0) - (parseFloat(discount) || 0))}</strong>
+                    </div>
+                  )}
+                </div>
+                <div className="form-group span-third">
+                  <label>Year</label>
+                  <input ref={el => refs.current.year = el} type="text" value={year}
+                    onChange={e => setYear(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
+                      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.note?.focus(); }
+                    }}
+                    className="form-input" />
+                </div>
+                <div className="form-group span-third">
+                  <label>Note</label>
+                  <input ref={el => refs.current.note = el} type="text" value={note}
+                    onChange={e => setNote(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
+                    placeholder="Optional note..."
+                    className="form-input" />
+                </div>
               </div>
-              <div className="form-group span-third">
-                <label>Year</label>
-                <input ref={el => refs.current.year = el} type="text" value={year}
-                  onChange={e => setYear(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); }
-                    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); refs.current.note?.focus(); }
-                  }}
-                  className="form-input" />
-              </div>
-              <div className="form-group span-third">
-                <label>Note</label>
-                <input ref={el => refs.current.note = el} type="text" value={note}
-                  onChange={e => setNote(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmit(e); } }}
-                  placeholder="Optional note..."
-                  className="form-input" />
-              </div>
-            </div>
+            )}
           </div>
         </div>
 

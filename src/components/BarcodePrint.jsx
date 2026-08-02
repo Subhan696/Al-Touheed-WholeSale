@@ -21,10 +21,23 @@ function BarcodePrint({ isActive }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    if (isActive && mode === 'purchase') {
+    if (isActive) {
       loadPurchases();
+      
+      // Check if there are fast purchase barcode items
+      const fastPurchaseItems = sessionStorage.getItem('fastPurchaseBarcodeItems');
+      if (fastPurchaseItems) {
+        sessionStorage.removeItem('fastPurchaseBarcodeItems');
+        try {
+          const items = JSON.parse(fastPurchaseItems);
+          setItems(items);
+          setMode('manual'); // Use manual mode since we're loading items directly
+        } catch (err) {
+          console.error('Error parsing fast purchase items:', err);
+        }
+      }
     }
-  }, [mode, isActive]);
+  }, [isActive]);
 
   // Keep focus on scanner input like NewSale
   useEffect(() => {
@@ -50,7 +63,6 @@ function BarcodePrint({ isActive }) {
   };
 
   const handleSelectPurchase = async (purchase) => {
-    if (!purchase.is_posted) return;
     setSelectedPurchase(purchase);
     setIsLoading(true);
     try {
@@ -301,8 +313,8 @@ function BarcodePrint({ isActive }) {
                           border: `2px solid ${selectedPurchase?.id === p.id ? '#4f46e5' : '#e5e7eb'}`,
                           borderRadius: '8px',
                           background: selectedPurchase?.id === p.id ? '#f5f3ff' : '#fff',
-                          cursor: p.is_posted ? 'pointer' : 'not-allowed',
-                          opacity: p.is_posted ? 1 : 0.6
+                          cursor: 'pointer',
+                          opacity: 1
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -312,12 +324,12 @@ function BarcodePrint({ isActive }) {
                               fontSize: '0.6rem', 
                               padding: '2px 6px', 
                               borderRadius: '4px', 
-                              background: p.is_posted ? '#e1ffeb' : '#f3f6f9',
-                              color: p.is_posted ? '#1bc5bd' : '#7e8299',
+                              background: '#e1ffeb',
+                              color: '#1bc5bd',
                               fontWeight: 'bold',
                               textTransform: 'uppercase'
                             }}>
-                              {p.is_posted ? 'Posted' : 'Draft'}
+                              {p.is_posted ? 'Posted' : 'Saved'}
                             </span>
                           </div>
                           <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{formatDate(p.purchase_date)}</span>

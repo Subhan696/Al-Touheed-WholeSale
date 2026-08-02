@@ -5,6 +5,7 @@ import NewItemForm from './components/NewItemForm';
 import ProductList from './components/ProductList';
 import StockList from './components/StockList';
 import NewPurchase from './components/NewPurchase';
+import FastPurchase from './components/FastPurchase';
 import OpenPurchase from './components/OpenPurchase';
 import PurchaseList from './components/PurchaseList';
 import PurchaseReturn from './components/PurchaseReturn';
@@ -42,6 +43,7 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
       onSaveSuccess={() => { closeTopWindow(); openWindow('purchases'); }}
       onCancelEdit={closeTopWindow} isActive={isActive} />
   );
+  if (tabKey === 'fast-purchase') return <FastPurchase currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'purchases') return <PurchaseList currentUser={currentUser} onEditPurchase={hasPermission('manage_purchases') ? handleEditPurchase : undefined} isActive={isActive} />;
   if (tabKey === 'open-purchase') return (
     <OpenPurchase currentUser={currentUser} purchaseToEdit={win.purchaseToEdit}
@@ -69,7 +71,7 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
       onNewReturn={() => openWindow('sales-return', { forceNewInstance: true })} />
   );
   if (tabKey === 'sales-return-list') return <SalesReturnList onEditReturn={handleEditSalesReturn} currentUser={currentUser} isActive={isActive} />;
-  
+
   if (tabKey === 'barcode-print') return <BarcodePrint isActive={isActive} />;
 
   if (tabKey === 'reports') return <Reports currentUser={currentUser} isActive={isActive} />;
@@ -110,7 +112,7 @@ function App() {
     const { ipcRenderer } = window.require('electron');
     ipcRenderer.invoke('get-network-settings').then(s => {
       if (s && s.networkMode) setNetworkMode(s.networkMode);
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const hasPermission = (perm) => {
@@ -124,23 +126,24 @@ function App() {
 
   const salesMenuOptions = [
     { label: 'New Sale', tab: 'sale', icon: '🧾', perm: 'create_sale', forceNewInstance: true },
-    { label: 'Sales History', tab: 'sales-list', icon: '📈', perm: 'view_sales' },
+    { label: 'Sales List', tab: 'sales-list', icon: '📈', perm: 'view_sales' },
     { label: 'Sales Return', tab: 'sales-return', icon: '↩️', perm: 'manage_sales_returns', forceNewInstance: true },
     { label: 'Returns List', tab: 'sales-return-list', icon: '📋', perm: 'manage_sales_returns' },
   ].filter(opt => hasPermission(opt.perm));
 
   const purchaseMenuOptions = [
     { label: 'New Purchase', tab: 'new-purchase', icon: '🛒', perm: 'manage_purchases' },
-    { label: 'Open Purchase', tab: 'open-purchase', icon: '📦', perm: 'manage_purchases' },
+    { label: 'Fast Purchase', tab: 'fast-purchase', icon: '⚡', perm: 'manage_purchases' },
     { label: 'Purchase List', tab: 'purchases', icon: '📋', perm: 'view_purchases' },
     { label: 'Purchase Return', tab: 'purchase-return', icon: '🔙', perm: 'manage_purchase_returns' },
     { label: 'Returns List', tab: 'purchase-return-list', icon: '📋', perm: 'manage_purchase_returns' },
     { label: 'Barcode Print', tab: 'barcode-print', icon: '🏷️', perm: 'view_purchases' },
+    { label: 'Open Purchase', tab: 'open-purchase', icon: '📦', perm: 'manage_purchases' },
   ].filter(opt => hasPermission(opt.perm));
 
   const productMenuOptions = [
     { label: 'New Item', tab: 'new-item', icon: '📝', perm: 'manage_products' },
-    { label: 'Product List', tab: 'products', icon: '📦', perm: 'view_products' },
+    { label: 'Item List', tab: 'products', icon: '📦', perm: 'view_products' },
     { label: 'Stock Inventory', tab: 'stock', icon: '📊', perm: 'view_stock' },
     { label: 'Mfg/Brand Stock', tab: 'manufacturer-stock', icon: '🏭', perm: 'view_reports' },
   ].filter(opt => hasPermission(opt.perm));
@@ -258,7 +261,7 @@ function App() {
 
   const activeBaseKey = windowStack[windowStack.length - 1]?.rootKey || activeTab;
   const isFullScreenMode = ['sale', 'sales-return'].includes(activeBaseKey);
-  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'open-purchase' || activeBaseKey === 'purchase-return';
+  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'fast-purchase' || activeBaseKey === 'open-purchase' || activeBaseKey === 'purchase-return';
 
   return (
     <div className="app-container">
@@ -338,7 +341,7 @@ function App() {
                 className={`nav-item ${productMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
                 onClick={() => setOpenMenu(openMenu === 'products' ? null : 'products')}
               >
-                <span className="icon">📦</span> Products & Stock {openMenu === 'products' ? '▲' : '▼'}
+                <span className="icon">📦</span> Items & Stock {openMenu === 'products' ? '▲' : '▼'}
               </button>
               {openMenu === 'products' && (
                 <div className="dropdown-menu">
@@ -432,7 +435,7 @@ function App() {
                     handleEditReturn={handleEditReturn}
                     handleEditSale={handleEditSale}
                     handleEditSalesReturn={handleEditSalesReturn}
-                    setShowLayoutTabs={() => {}}
+                    setShowLayoutTabs={() => { }}
                   />
                 </div>
               </div>

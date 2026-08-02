@@ -85,6 +85,17 @@ function SupplierLedger() {
     return s.name.toLowerCase().includes(supplierSearch.trim().toLowerCase());
   });
 
+  const getBalanceStatus = (balance) => {
+    if (!balance || balance === 0) return { text: 'NIL', color: '#94a3b8', bgColor: '#f1f5f9' };
+    
+    // For Supplier Ledger: Cr balance means we owe supplier (TO PAY), Dr balance means supplier owes us (TO RECEIVE)
+    if (balance > 0) {
+      return { text: 'TO PAY', color: '#dc2626', bgColor: '#fee2e2' };
+    } else {
+      return { text: 'TO RECEIVE', color: '#16a34a', bgColor: '#d1fae5' };
+    }
+  };
+
   return (
     <div style={{ padding: '20px', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
@@ -128,14 +139,15 @@ function SupplierLedger() {
               <th style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Total Returns</th>
               <th style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Total Paid</th>
               <th style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Net Balance</th>
+              <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>Status</th>
               <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="8" style={{ padding: 40, textAlign: 'center' }}>Loading ledger...</td></tr>
+              <tr><td colSpan="9" style={{ padding: 40, textAlign: 'center' }}>Loading ledger...</td></tr>
             ) : filteredSuppliers.length === 0 ? (
-              <tr><td colSpan="8" style={{ padding: 40, textAlign: 'center' }}>{supplierSearch ? 'No suppliers match your search.' : 'No suppliers found.'}</td></tr>
+              <tr><td colSpan="9" style={{ padding: 40, textAlign: 'center' }}>{supplierSearch ? 'No suppliers match your search.' : 'No suppliers found.'}</td></tr>
             ) : filteredSuppliers.map(s => {
               const initBal = parseFloat(s.initial_balance) || 0;
               const purch = parseFloat(s.total_purchases) || 0;
@@ -159,6 +171,12 @@ function SupplierLedger() {
                   <td style={{ padding: '12px', textAlign: 'right' }}>{paid.toLocaleString()}</td>
                   <td style={{ padding: '12px', textAlign: 'right', fontWeight: 700, color: net > 0 ? '#ef4444' : (net < 0 ? '#10b981' : 'inherit') }}>
                     {Math.abs(net).toLocaleString()} {net > 0 ? '(Payable)' : (net < 0 ? '(Receivable)' : '')}
+                  </td>
+                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                    {(() => {
+                      const status = getBalanceStatus(net);
+                      return <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>{status.text}</span>;
+                    })()}
                   </td>
                   <td style={{ padding: '12px', textAlign: 'center' }}>
                     <button onClick={(e) => { e.stopPropagation(); setPaySupplier(s); }} style={{ background: '#10b981', color: 'white', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>Pay</button>
@@ -273,6 +291,7 @@ function SupplierLedger() {
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Balance</th>
+                      <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Status</th>
                     </tr>
                     
                     {/* Supplier Meta Header Row */}
@@ -284,11 +303,17 @@ function SupplierLedger() {
                       <td colSpan="8" style={{ border: '1px solid black', padding: '4px', textAlign: 'right', fontWeight: 'bold', verticalAlign: 'bottom' }}>
                         Opening Balance: &nbsp;&nbsp;&nbsp;&nbsp; {parseFloat(statementData.initial_balance).toLocaleString(undefined, {minimumFractionDigits: 2})} Cr
                       </td>
+                      <td style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>
+                        {(() => {
+                          const status = getBalanceStatus(parseFloat(statementData.initial_balance));
+                          return <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>{status.text}</span>;
+                        })()}
+                      </td>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td colSpan="15" style={{ padding: '4px', fontWeight: 'bold', borderLeft: '1px solid black', borderRight: '1px solid black' }}>
+                      <td colSpan="16" style={{ padding: '4px', fontWeight: 'bold', borderLeft: '1px solid black', borderRight: '1px solid black' }}>
                         Posted Transactions
                       </td>
                     </tr>
@@ -344,6 +369,7 @@ function SupplierLedger() {
                         // Determine Dr/Cr tag for Balance
                         const balTag = runningBal >= 0 ? 'Cr' : 'Dr';
                         const displayBal = Math.abs(runningBal).toLocaleString(undefined, {minimumFractionDigits: 2});
+                        const status = getBalanceStatus(runningBal);
 
                         return (
                           <tr key={idx} style={{ borderLeft: '1px solid black', borderRight: '1px solid black' }}>
@@ -361,7 +387,10 @@ function SupplierLedger() {
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px' }}>{t.cheque_no || ''}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right', fontWeight: 700, color: debit > 0 ? '#dc2626' : 'inherit' }}>{debit > 0 ? debit.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
                             <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right', fontWeight: 700, color: credit > 0 ? '#16a34a' : 'inherit' }}>{credit > 0 ? credit.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
-                            <td style={{ padding: '2px 4px', textAlign: 'right', fontWeight: 700 }}>{displayBal} <span style={{ color: balTag === 'Dr' ? '#dc2626' : '#d97706' }}>{balTag}</span></td>
+                            <td style={{ borderRight: '1px solid black', padding: '2px 4px', textAlign: 'right', fontWeight: 700 }}>{displayBal} <span style={{ color: balTag === 'Dr' ? '#dc2626' : '#d97706' }}>{balTag}</span></td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center', fontWeight: 700 }}>
+                              <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem' }}>{status.text}</span>
+                            </td>
                           </tr>
                         );
                       });
@@ -381,6 +410,12 @@ function SupplierLedger() {
                             <td style={{ border: '2px solid black', padding: '4px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{totalDebit > 0 ? totalDebit.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
                             <td style={{ border: '2px solid black', padding: '4px', textAlign: 'right', fontWeight: 'bold', color: '#16a34a' }}>{totalCredit > 0 ? totalCredit.toLocaleString(undefined, {minimumFractionDigits: 2}) : ''}</td>
                             <td style={{ border: '2px solid black', padding: '4px', textAlign: 'right', fontWeight: 'bold' }}>{Math.abs(runningBal).toLocaleString(undefined, {minimumFractionDigits: 2})} <span style={{ color: runningBal >= 0 ? '#d97706' : '#dc2626' }}>{runningBal >= 0 ? 'Cr' : 'Dr'}</span></td>
+                            <td style={{ border: '2px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>
+                              {(() => {
+                                const status = getBalanceStatus(runningBal);
+                                return <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>{status.text}</span>;
+                              })()}
+                            </td>
                           </tr>
                         </React.Fragment>
                       );

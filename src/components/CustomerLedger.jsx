@@ -80,6 +80,17 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
     return (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
+  const getBalanceStatus = (balance, balanceType) => {
+    if (!balance || balance === 0) return { text: 'NIL', color: '#94a3b8', bgColor: '#f1f5f9' };
+    
+    // For Customer Ledger: Dr balance means we owe customer (TO PAY), Cr balance means customer owes us (TO RECEIVE)
+    if (balanceType === 'Dr') {
+      return { text: 'TO PAY', color: '#dc2626', bgColor: '#fee2e2' };
+    } else {
+      return { text: 'TO RECEIVE', color: '#16a34a', bgColor: '#d1fae5' };
+    }
+  };
+
   const fmtDate = (dStr) => {
     if (!dStr) return '';
     if (dStr.includes('-')) {
@@ -115,6 +126,7 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
           .cl-table td { padding: 4px 6px; font-size: 12px; border-bottom: 1px dotted #ccc; }
           .cl-table th.right, .cl-table td.right { text-align: right; }
           .cl-table th.center, .cl-table td.center { text-align: center; }
+          .cl-table td.status-cell { text-align: center; font-weight: bold; }
           .cl-opening-row td { font-weight: bold; padding: 6px; }
           .cl-total-row td { font-weight: bold; border-top: 1px solid #000; border-bottom: 2px double #000; padding: 6px; }
         </style>
@@ -253,6 +265,7 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
                   <th className="right" style={{ width: '120px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
                   <th className="right" style={{ width: '120px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
                   <th className="right" style={{ width: '140px' }}>Balance</th>
+                  <th style={{ width: '100px', textAlign: 'center' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -262,30 +275,42 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
                   <td className="right" style={{ fontWeight: 'bold' }}>
                     {fmtBal(statement.initial_balance)} {statement.initial_balance_type}
                   </td>
+                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                    {(() => {
+                      const status = getBalanceStatus(statement.initial_balance, statement.initial_balance_type);
+                      return <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px' }}>{status.text}</span>;
+                    })()}
+                  </td>
                 </tr>
 
                 {/* Transaction Rows */}
                 {statement.transactions.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '16px', color: '#64748b', fontStyle: 'italic' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '16px', color: '#64748b', fontStyle: 'italic' }}>
                       No transactions recorded in this date range.
                     </td>
                   </tr>
                 ) : (
-                  statement.transactions.map((t) => (
-                    <tr key={t.id}>
-                      <td>{fmtDate(t.date)}</td>
-                      <td style={{ fontWeight: 700 }}>{t.type}</td>
-                      <td>{t.v_code}</td>
-                      <td>{t.remarks}</td>
-                      <td>{t.cheque_no}</td>
-                      <td className="right" style={{ fontWeight: 700, color: t.debit > 0 ? '#dc2626' : '#94a3b8' }}>{fmt(t.debit)}</td>
-                      <td className="right" style={{ fontWeight: 700, color: t.credit > 0 ? '#16a34a' : '#94a3b8' }}>{fmt(t.credit)}</td>
-                      <td className="right" style={{ fontWeight: 700 }}>
-                        {fmtBal(t.balance)} <span style={{ color: t.balance_type === 'Dr' ? '#dc2626' : '#d97706' }}>{t.balance_type}</span>
-                      </td>
-                    </tr>
-                  ))
+                  statement.transactions.map((t) => {
+                    const status = getBalanceStatus(t.balance, t.balance_type);
+                    return (
+                      <tr key={t.id}>
+                        <td>{fmtDate(t.date)}</td>
+                        <td style={{ fontWeight: 700 }}>{t.type}</td>
+                        <td>{t.v_code}</td>
+                        <td>{t.remarks}</td>
+                        <td>{t.cheque_no}</td>
+                        <td className="right" style={{ fontWeight: 700, color: t.debit > 0 ? '#dc2626' : '#94a3b8' }}>{fmt(t.debit)}</td>
+                        <td className="right" style={{ fontWeight: 700, color: t.credit > 0 ? '#16a34a' : '#94a3b8' }}>{fmt(t.credit)}</td>
+                        <td className="right" style={{ fontWeight: 700 }}>
+                          {fmtBal(t.balance)} <span style={{ color: t.balance_type === 'Dr' ? '#dc2626' : '#d97706' }}>{t.balance_type}</span>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                          <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px' }}>{status.text}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
 
                 {/* Footer Totals */}
@@ -295,6 +320,12 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
                   <td className="right" style={{ fontWeight: 'bold', color: '#16a34a' }}>{fmtBal(statement.total_credit)}</td>
                   <td className="right" style={{ fontWeight: 'bold' }}>
                     {fmtBal(statement.final_balance)} <span style={{ color: statement.final_balance_type === 'Dr' ? '#dc2626' : '#d97706' }}>{statement.final_balance_type}</span>
+                  </td>
+                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                    {(() => {
+                      const status = getBalanceStatus(statement.final_balance, statement.final_balance_type);
+                      return <span style={{ color: status.color, backgroundColor: status.bgColor, padding: '4px 8px', borderRadius: '4px' }}>{status.text}</span>;
+                    })()}
                   </td>
                 </tr>
               </tbody>
