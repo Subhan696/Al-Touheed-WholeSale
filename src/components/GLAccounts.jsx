@@ -43,8 +43,19 @@ export default function GLAccounts() {
     }
   };
 
+  const normalizeBalanceType = (bt) => {
+    const s = String(bt || 'Dr').replace(/\./g, '').trim().toUpperCase();
+    return s.startsWith('C') ? 'Cr' : 'Dr';
+  };
+
   const handleEdit = (acc) => {
-    setFormData(acc);
+    setFormData({
+      id: acc.id,
+      account_name: acc.account_name || '',
+      account_type: acc.account_type || 'Expense',
+      opening_balance: acc.opening_balance ?? 0,
+      balance_type: normalizeBalanceType(acc.balance_type),
+    });
     setShowForm(true);
   };
 

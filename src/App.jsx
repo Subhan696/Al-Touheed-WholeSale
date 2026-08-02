@@ -81,6 +81,8 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
   if (tabKey === 'bank-ledger') return <Ledgers currentUser={currentUser} initialTab="bank" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'supplier-ledger') return <Ledgers currentUser={currentUser} initialTab="supplier" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'freight-report') return <Ledgers currentUser={currentUser} initialTab="freight" isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'expense-ledger') return <GLLedgerReport initialTab="expense" />;
+  if (tabKey === 'equity-ledger') return <GLLedgerReport initialTab="equity" />;
   if (tabKey === 'network-settings') return <NetworkSettings />;
   if (tabKey === 'receipt-settings') return <ReceiptSettings />;
   if (tabKey === 'backup') return <BackupSettings />;
@@ -90,7 +92,7 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
 
   if (tabKey === 'gl-accounts') return <GLAccounts />;
   if (tabKey === 'gl-vouchers') return <GLVouchers />;
-  if (tabKey === 'gl-ledger') return <GLLedgerReport />;
+  if (tabKey === 'gl-ledger') return <GLLedgerReport initialTab="all" />;
   if (tabKey === 'gl-cash-activity') return <GLCashActivityReport />;
 
   return <div style={{ padding: 20 }}>Unknown view</div>;
@@ -187,7 +189,7 @@ function App() {
     if (salesMenuOptions.some(o => o.tab === activeTab || (activeTab.startsWith('sale') && o.tab === 'sale'))) setOpenMenu('sales');
     else if (purchaseMenuOptions.some(o => o.tab === activeTab)) setOpenMenu('purchases');
     else if (productMenuOptions.some(o => o.tab === activeTab)) setOpenMenu('products');
-    else if (accountsMenuOptions.some(o => o.tab === activeTab || ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab))) setOpenMenu('accounts');
+    else if (accountsMenuOptions.some(o => o.tab === activeTab || ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report', 'expense-ledger', 'equity-ledger'].includes(activeTab))) setOpenMenu('accounts');
     else if (settingsMenuOptions.some(o => o.tab === activeTab)) setOpenMenu('settings');
   }, [activeTab]);
 
@@ -357,7 +359,7 @@ function App() {
           {accountsMenuOptions.length > 0 && (
             <div className="nav-item-with-dropdown">
               <button
-                className={`nav-item ${accountsMenuOptions.some(o => o.tab === activeTab || ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab)) ? 'active' : ''}`}
+                className={`nav-item ${accountsMenuOptions.some(o => o.tab === activeTab || ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report', 'expense-ledger', 'equity-ledger'].includes(activeTab)) ? 'active' : ''}`}
                 onClick={() => setOpenMenu(openMenu === 'accounts' ? null : 'accounts')}
               >
                 <span className="icon">🏛️</span> Accounts & Ledgers {openMenu === 'accounts' ? '▲' : '▼'}
@@ -365,7 +367,7 @@ function App() {
               {openMenu === 'accounts' && (
                 <div className="dropdown-menu">
                   {accountsMenuOptions.map(opt => (
-                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab || (opt.tab === 'ledgers' && ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report'].includes(activeTab)) ? 'current' : ''}`}
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab || (opt.tab === 'ledgers' && ['customer-ledger', 'cash-ledger', 'bank-ledger', 'supplier-ledger', 'freight-report', 'expense-ledger', 'equity-ledger'].includes(activeTab)) ? 'current' : ''}`}
                       onClick={() => openWindow(opt.tab)}>
                       <span className="icon">{opt.icon}</span> {opt.label}
                     </button>

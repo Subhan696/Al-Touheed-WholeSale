@@ -4,8 +4,16 @@ import './CashLedger.css';
 const { ipcRenderer } = window.require('electron');
 
 function CashLedger({ currentUser, isActive }) {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [startDate, setStartDate] = useState(getTodayDate());
+  const [endDate, setEndDate] = useState(getTodayDate());
   const [cashSearch, setCashSearch] = useState('');
   const [cashList, setCashList] = useState([]);
   const [showCashDrop, setShowCashDrop] = useState(false);

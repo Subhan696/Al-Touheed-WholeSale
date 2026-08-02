@@ -44,7 +44,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [isEditing, setIsEditing] = useState(false);
   const [duplicateItem, setDuplicateItem] = useState(null);
   const [pendingPayload, setPendingPayload] = useState(null);
-  
+
   // Session tracking
   const [sessionId, setSessionId] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
@@ -87,7 +87,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
       interval = setInterval(() => {
         setCurrentTime(new Date().toLocaleTimeString());
       }, 1000);
-      
+
       // Start a new session only if not editing and we don't have one
       if (!isEditing && !sessionId) {
         ipcRenderer.invoke('start-new-item-session').then(id => {
@@ -1267,7 +1267,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
       {duplicateItem && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: 12, width: 520, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
-            
+
             {/* Header */}
             <div style={{ background: '#f59e0b', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: '1.6rem' }}>⚠️</span>

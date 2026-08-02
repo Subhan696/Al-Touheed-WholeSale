@@ -17,8 +17,8 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
     return getLocalDateStr(d);
   };
 
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(getLocalDateStr());
+  const [endDate, setEndDate] = useState(getLocalDateStr());
 
   const [customerSearch, setCustomerSearch] = useState(initialCustomer ? initialCustomer.name : '');
   const [customerList, setCustomerList] = useState([]);
