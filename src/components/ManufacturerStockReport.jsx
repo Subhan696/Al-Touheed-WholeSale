@@ -35,33 +35,40 @@ const CategorySection = memo(({ cat, priceMode, fmt, fmt2 }) => (
 const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplierBalances, showSupplierBalance, fmt, fmt2 }) => {
   const isCollapsed = collapsed[sup.name] !== undefined ? !!collapsed[sup.name] : (sup._defaultCollapsed ?? false);
   const balKey = sup.name.trim().toLowerCase();
-  const balance = supplierBalances[balKey];
+  const rawBalance = supplierBalances[balKey];
+  const hasBal = showSupplierBalance && rawBalance !== undefined;
+  const netBalance = (rawBalance !== undefined ? rawBalance : 0) - (sup.totalValue || 0);
 
   return (
     <table className="ssr-table" key={sup.name}>
       <thead>
         <tr className="ssr-supplier-row" onClick={() => toggleCollapsed(sup.name)}>
           <th colSpan={2}>{isCollapsed ? '▶' : '▼'} {sup.name}</th>
-          <th className="ssr-val">Qty: {fmt(sup.totalQty)}</th>
-          <th className="ssr-val"></th>
-          <th className="ssr-val"></th>
-          <th className="ssr-val">
-            Value: {fmt(sup.totalValue)}
-            {showSupplierBalance && balance !== undefined && (
-              <span style={{ marginLeft: 16, fontWeight: 400 }}>
-                | Balance: {fmt2(Math.abs(balance))} {balance >= 0 ? 'Cr' : 'Dr'}
+          <th className="ssr-val" style={{ width: 80 }}>Qty: {fmt(sup.totalQty)}</th>
+          <th className="ssr-val" style={{ width: 140 }}>
+            {hasBal ? (
+              <span style={{ color: rawBalance > 0 ? '#15803d' : rawBalance < 0 ? '#dc2626' : '#e2e8f0', fontWeight: 800 }}>
+                Sup Bal: {fmt2(Math.abs(rawBalance))} {rawBalance >= 0 ? 'Cr' : 'Dr'}
               </span>
-            )}
+            ) : ''}
+          </th>
+          <th className="ssr-val" style={{ width: 110 }}>Value: {fmt(sup.totalValue)}</th>
+          <th className="ssr-val" style={{ width: 140 }}>
+            {hasBal ? (
+              <span style={{ color: netBalance > 0 ? '#15803d' : netBalance < 0 ? '#dc2626' : '#e2e8f0', fontWeight: 800 }}>
+                Net Bal: {fmt2(Math.abs(netBalance))} {netBalance >= 0 ? 'Cr' : 'Dr'}
+              </span>
+            ) : ''}
           </th>
         </tr>
         {!isCollapsed && (
           <tr>
-            <th style={{ width: 160 }}>Item Code</th>
+            <th style={{ width: 140 }}>Item Code</th>
             <th>Description / Brand</th>
             <th className="ssr-val" style={{ width: 80 }}>Qty</th>
-            <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
-            <th className="ssr-val" style={{ width: 100 }}>Sale Price</th>
-            <th className="ssr-val" style={{ width: 120 }}>Value</th>
+            <th className="ssr-val" style={{ width: 140 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
+            <th className="ssr-val" style={{ width: 110 }}>Sale Price</th>
+            <th className="ssr-val" style={{ width: 140 }}>Value</th>
           </tr>
         )}
       </thead>
@@ -72,10 +79,22 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           ))}
           <tr className="ssr-subtotal-row">
             <td colSpan={2} style={{ textAlign: 'right' }}>Supplier Total:</td>
-            <td className="ssr-val">{fmt(sup.totalQty)}</td>
-            <td className="ssr-val"></td>
-            <td className="ssr-val"></td>
-            <td className="ssr-val">{fmt(sup.totalValue)}</td>
+            <td className="ssr-val" style={{ width: 80 }}>{fmt(sup.totalQty)}</td>
+            <td className="ssr-val" style={{ width: 140 }}>
+              {hasBal ? (
+                <span style={{ color: rawBalance > 0 ? '#15803d' : rawBalance < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
+                  Sup Bal: {fmt2(Math.abs(rawBalance))} {rawBalance >= 0 ? 'Cr' : 'Dr'}
+                </span>
+              ) : ''}
+            </td>
+            <td className="ssr-val" style={{ width: 110 }}>{fmt(sup.totalValue)}</td>
+            <td className="ssr-val" style={{ width: 140 }}>
+              {hasBal ? (
+                <span style={{ color: netBalance > 0 ? '#15803d' : netBalance < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
+                  Net Bal: {fmt2(Math.abs(netBalance))} {netBalance >= 0 ? 'Cr' : 'Dr'}
+                </span>
+              ) : ''}
+            </td>
           </tr>
         </tbody>
       )}
@@ -92,13 +111,15 @@ function SupplierStockReport() {
   // to "everything" whenever fresh data loads, so "select all" is a real,
   // visible state rather than an implicit null.
   const [priceMode, setPriceMode] = useState('actual'); // 'list' | 'actual'
-  const [showSupplierBalance, setShowSupplierBalance] = useState(false);
+  const [showSupplierBalance, setShowSupplierBalance] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedSuppliers, setSelectedSuppliers] = useState(new Set());
   const [selectedCategories, setSelectedCategories] = useState(new Set());
   const [selectedYears, setSelectedYears] = useState(new Set());
   const [collapsed, setCollapsed] = useState({});
+  const [sortField, setSortField] = useState(null); // 'qty' | 'purchasePrice' | 'salePrice' | 'itemCode' | 'description'
+  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
 
   // Debounce search input to avoid lagging UI while typing fast
   useEffect(() => {
@@ -274,6 +295,30 @@ function SupplierStockReport() {
           ...cat,
           items: cat.items.sort((a, b) => {
             if (q && a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
+
+            // Apply sorting based on selected field
+            if (sortField) {
+              const multiplier = sortDirection === 'asc' ? 1 : -1;
+              switch (sortField) {
+                case 'qty':
+                  return (a.qty - b.qty) * multiplier;
+                case 'purchasePrice':
+                  const aPurchase = priceMode === 'actual' ? (a.latest_net_rate || a.actual_rate || 0) : (a.list_rate || 0);
+                  const bPurchase = priceMode === 'actual' ? (b.latest_net_rate || b.actual_rate || 0) : (b.list_rate || 0);
+                  return (aPurchase - bPurchase) * multiplier;
+                case 'salePrice':
+                  return ((a.sale_rate || 0) - (b.sale_rate || 0)) * multiplier;
+                case 'itemCode':
+                  return String(a.item_code).localeCompare(String(b.item_code), undefined, { numeric: true }) * multiplier;
+                case 'description':
+                  const aDesc = `${a.description || ''} ${a.category || ''} ${a.size_range || ''} ${a.gender || ''}`.replace(/\s+/g, ' ').trim();
+                  const bDesc = `${b.description || ''} ${b.category || ''} ${b.size_range || ''} ${b.gender || ''}`.replace(/\s+/g, ' ').trim();
+                  return aDesc.localeCompare(bDesc) * multiplier;
+                default:
+                  break;
+              }
+            }
+
             return String(a.item_code).localeCompare(String(b.item_code), undefined, { numeric: true });
           })
         })).sort((a, b) => {
@@ -301,9 +346,29 @@ function SupplierStockReport() {
       });
 
     return { groups: groupList, grandQty: gQty, grandValue: gVal };
-  }, [reportData, priceMode, debouncedSearch, selectedSuppliers, selectedCategories, selectedYears]);
+  }, [reportData, priceMode, debouncedSearch, selectedSuppliers, selectedCategories, selectedYears, sortField, sortDirection]);
 
   const toggleCollapsed = useCallback((name) => setCollapsed(prev => ({ ...prev, [name]: !prev[name] })), []);
+
+  const handleSort = useCallback((field) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  }, [sortField]);
+
+  const getSortLabel = (field) => {
+    const labels = {
+      itemCode: 'Item Code',
+      description: 'Description',
+      qty: 'Qty',
+      purchasePrice: priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price',
+      salePrice: 'Sale Price'
+    };
+    return labels[field] || field;
+  };
 
   const clearFilters = useCallback(() => {
     setSelectedSuppliers(new Set());
@@ -552,6 +617,58 @@ function SupplierStockReport() {
           )}
         </div>
 
+        {/* Sort dropdown */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setOpenDropdown(d => d === 'sort' ? null : 'sort')}
+            style={{
+              padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+              border: `1px solid ${sortField ? '#0369a1' : '#cbd5e1'}`,
+              background: sortField ? '#e0f2fe' : '#fff', color: sortField ? '#0369a1' : '#334155'
+            }}
+          >
+            Sort: {sortField ? `${getSortLabel(sortField)} ${sortDirection === 'asc' ? '↑' : '↓'}` : 'Default'} ▾
+          </button>
+          {openDropdown === 'sort' && (
+            <div style={dropdownPanelStyle}>
+              <div style={{ padding: '4px 10px 6px', fontWeight: 600, fontSize: '0.82rem', color: '#64748b' }}>Sort by:</div>
+              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                {[
+                  { field: 'itemCode', label: 'Item Code' },
+                  { field: 'description', label: 'Description' },
+                  { field: 'qty', label: 'Qty' },
+                  { field: 'purchasePrice', label: priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price' },
+                  { field: 'salePrice', label: 'Sale Price' }
+                ].map(({ field, label }) => (
+                  <label key={field} style={dropdownItemStyle}>
+                    <input
+                      type="radio"
+                      name="sortField"
+                      checked={sortField === field}
+                      onChange={() => { setSortField(field); setSortDirection('asc'); setOpenDropdown(null); }}
+                    />
+                    {label}
+                    {sortField === field && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSortDirection(d => d === 'asc' ? 'desc' : 'asc'); }}
+                        style={{ marginLeft: 'auto', padding: '2px 6px', fontSize: '0.75rem', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer' }}
+                      >
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      </button>
+                    )}
+                  </label>
+                ))}
+                <button
+                  onClick={() => { setSortField(null); setSortDirection('asc'); setOpenDropdown(null); }}
+                  style={{ ...linkBtnStyle, width: '100%', textAlign: 'center', padding: '6px', marginTop: '4px', borderTop: '1px solid #e2e8f0' }}
+                >
+                  Clear Sort
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div style={{ width: 1, alignSelf: 'stretch', background: '#e2e8f0', margin: '0 2px' }} />
 
         {/* Search */}
@@ -622,22 +739,23 @@ function SupplierStockReport() {
               <tbody>
                 <tr className="ssr-grand-row">
                   <td colSpan={2} style={{ textAlign: 'right' }}>GRAND TOTAL:</td>
-                  <td className="ssr-val">{fmt(grandQty)}</td>
-                  <td className="ssr-val"></td>
-                  <td className="ssr-val"></td>
-                  <td className="ssr-val">{fmt(grandValue)}</td>
+                  <td className="ssr-val" style={{ width: 80 }}>{fmt(grandQty)}</td>
+                  <td className="ssr-val" style={{ width: 140 }}>
+                    {showSupplierBalance && filteredSupplierBalances.length > 0 ? (
+                      <span style={{ color: totalSupplierBalance > 0 ? '#86efac' : totalSupplierBalance < 0 ? '#fca5a5' : '#e2e8f0', fontWeight: 800 }}>
+                        Sup Bal: {fmt2(Math.abs(totalSupplierBalance))} {totalSupplierBalance >= 0 ? 'Cr' : 'Dr'}
+                      </span>
+                    ) : ''}
+                  </td>
+                  <td className="ssr-val" style={{ width: 110 }}>{fmt(grandValue)}</td>
+                  <td className="ssr-val" style={{ width: 140 }}>
+                    {showSupplierBalance && filteredSupplierBalances.length > 0 ? (
+                      <span style={{ color: (totalSupplierBalance - grandValue) > 0 ? '#86efac' : (totalSupplierBalance - grandValue) < 0 ? '#fca5a5' : '#e2e8f0', fontWeight: 800 }}>
+                        Net Bal: {fmt2(Math.abs(totalSupplierBalance - grandValue))} ${(totalSupplierBalance - grandValue) >= 0 ? 'Cr' : 'Dr'}
+                      </span>
+                    ) : ''}
+                  </td>
                 </tr>
-                {showSupplierBalance && filteredSupplierBalances.length > 0 && (
-                  <tr className="ssr-subtotal-row">
-                    <td colSpan={2} style={{ textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}>
-                      Supp. Balance:
-                    </td>
-                    <td colSpan={4} className="ssr-val" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                      {fmt2(Math.abs(totalSupplierBalance))}{' '}
-                      {totalSupplierBalance >= 0 ? 'Cr' : 'Dr'}
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
 
@@ -659,9 +777,19 @@ function SupplierStockReport() {
                 <tbody>
                   {filteredSupplierBalances.map(([name, balance]) => (
                     <tr key={name}>
-                      <td>{name}</td>
-                      <td>{balance >= 0 ? 'Cr' : 'Dr'}</td>
-                      <td className="ssr-val" colSpan={4}>{fmt2(Math.abs(balance))}</td>
+                      <td style={{ fontWeight: 600 }}>{name}</td>
+                      <td>
+                        <span style={{
+                          padding: '3px 8px', borderRadius: 5, fontWeight: 700, fontSize: '0.8rem',
+                          background: balance > 0 ? '#dcfce7' : balance < 0 ? '#fee2e2' : '#f1f5f9',
+                          color: balance > 0 ? '#15803d' : balance < 0 ? '#b91c1c' : '#475569'
+                        }}>
+                          {balance > 0 ? 'Cr (Payable)' : balance < 0 ? 'Dr (Advance)' : 'Nil'}
+                        </span>
+                      </td>
+                      <td className="ssr-val" colSpan={4} style={{ fontWeight: 800, color: balance > 0 ? '#15803d' : balance < 0 ? '#dc2626' : '#475569' }}>
+                        {fmt2(Math.abs(balance))} {balance >= 0 ? 'Cr' : 'Dr'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

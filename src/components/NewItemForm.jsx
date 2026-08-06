@@ -3,11 +3,18 @@ import './NewItemForm.css';
 
 const { ipcRenderer } = window.require('electron');
 
-function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
+function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWindow }) {
   const [itemCode, setItemCode] = useState('');
   const [description, setDescription] = useState('');
   const [gender, setGender] = useState('');
   const [category, setCategory] = useState('');
+  const [defaultCategory, setDefaultCategoryState] = useState(() => localStorage.getItem('default_category') || '');
+
+  const handleSetDefaultCategory = (catName) => {
+    localStorage.setItem('default_category', catName);
+    setDefaultCategoryState(catName);
+    setCategory(catName);
+  };
   const [sizeRange, setSizeRange] = useState('');
   const [purchaseRate, setPurchaseRate] = useState('');
   const [saleRate, setSaleRate] = useState('');
@@ -28,6 +35,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [manageListType, setManageListType] = useState('');
   const [showManageModal, setShowManageModal] = useState(false);
   const [manageListItems, setManageListItems] = useState([]);
+  const [manageListSearchQuery, setManageListSearchQuery] = useState('');
   const [newItemName, setNewItemName] = useState('');
   const [editingListItemId, setEditingListItemId] = useState(null);
   const [editingListItemVal, setEditingListItemVal] = useState('');
@@ -48,6 +56,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   // Session tracking
   const [sessionId, setSessionId] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  const [sessionItems, setSessionItems] = useState([]);
 
   // Profit sheet state
   const [profitRules, setProfitRules] = useState([]);
@@ -64,7 +73,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const [overallEnabled, setOverallEnabled] = useState(false);
   const [brandSearchQuery, setBrandSearchQuery] = useState('');
   const [profitSavedMsg, setProfitSavedMsg] = useState('');
-  
+
   // Special mode for fast data entry
   const [specialMode, setSpecialMode] = useState(false);
   const [previousCategory, setPreviousCategory] = useState('');
@@ -97,6 +106,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
       if (!isEditing && !sessionId) {
         ipcRenderer.invoke('start-new-item-session').then(id => {
           setSessionId(id);
+          loadSessionItems(id);
         }).catch(err => console.error('Failed to get session ID:', err));
       }
     }
@@ -142,10 +152,15 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     setBrandsList(brands);
     setManufacturersList(manufacturers);
 
+    const savedDefaultCat = localStorage.getItem('default_category') || '';
     if (!editItemData) {
       setBrand(prev => prev || (brands.length > 0 ? brands[0].name : ''));
       setGender(prev => prev || (genders.length > 0 ? genders[0].name : ''));
-      setCategory(prev => prev || (categories.length > 0 ? categories[0].name : ''));
+      setCategory(prev => {
+        if (prev) return prev;
+        if (savedDefaultCat && categories.some(c => c.name === savedDefaultCat)) return savedDefaultCat;
+        return categories.length > 0 ? categories[0].name : '';
+      });
       setSizeRange(prev => prev || (sizeRanges.length > 0 ? sizeRanges[0].name : ''));
     }
   };
@@ -153,6 +168,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const openListManager = (type) => {
     setManageListType(type); setNewItemName('');
     setEditingListItemId(null); setEditingListItemVal('');
+    setManageListSearchQuery('');
     if (type === 'genders') setManageListItems(gendersList);
     if (type === 'categories') setManageListItems(categoriesList);
     if (type === 'size_ranges') setManageListItems(sizeRangesList);
@@ -185,6 +201,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   const handleSaveEditListItem = async (id) => {
     if (!editingListItemVal.trim()) return;
     const val = manageListType === 'packings' ? parseInt(editingListItemVal) : editingListItemVal.trim();
+    if (manageListType === 'categories') {
+      const oldItem = manageListItems.find(i => i.id === id);
+      if (oldItem && oldItem.name === defaultCategory) {
+        handleSetDefaultCategory(val);
+      }
+    }
     if (manageListType === 'genders') await ipcRenderer.invoke('update-gender', { id, name: val });
     if (manageListType === 'categories') await ipcRenderer.invoke('update-category', { id, name: val });
     if (manageListType === 'size_ranges') await ipcRenderer.invoke('update-size-range', { id, name: val });
@@ -203,6 +225,13 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   };
 
   const handleDeleteListItem = async (id) => {
+    if (manageListType === 'categories') {
+      const itemToDelete = manageListItems.find(i => i.id === id);
+      if (itemToDelete && itemToDelete.name === defaultCategory) {
+        localStorage.removeItem('default_category');
+        setDefaultCategoryState('');
+      }
+    }
     if (manageListType === 'genders') await ipcRenderer.invoke('delete-gender', id);
     if (manageListType === 'categories') await ipcRenderer.invoke('delete-category', id);
     if (manageListType === 'size_ranges') await ipcRenderer.invoke('delete-size-range', id);
@@ -366,6 +395,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     } catch { }
   };
 
+  const loadSessionItems = async (sid) => {
+    if (!sid) return;
+    try {
+      const items = await ipcRenderer.invoke('get-products-by-session', sid) || [];
+      setSessionItems(items);
+    } catch { }
+  };
+
 
 
   const handleSubmit = async (e) => {
@@ -453,6 +490,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
           setTimeout(() => {
             setStatusMsg('');
             loadNextCode();
+            loadSessionItems(sessionId);
             setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
             setPhotoFile(null); setPhotoPreview(null);
             setNote('');
@@ -529,7 +567,11 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
     setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
     setBrand(brandsList.length > 0 ? brandsList[0].name : '');
     setGender(gendersList.length > 0 ? gendersList[0].name : '');
-    setCategory(categoriesList.length > 0 ? categoriesList[0].name : '');
+    const savedDefaultCat = localStorage.getItem('default_category') || '';
+    const initialCategory = (savedDefaultCat && categoriesList.some(c => c.name === savedDefaultCat))
+      ? savedDefaultCat
+      : (categoriesList.length > 0 ? categoriesList[0].name : '');
+    setCategory(initialCategory);
     setSizeRange(sizeRangesList.length > 0 ? sizeRangesList[0].name : '');
     setPackingQty(packingsList.length > 0 ? parseInt(packingsList[0].value) : 6);
     setPhotoFile(null); setPhotoPreview(null);
@@ -551,9 +593,18 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
-      // Ctrl+X closes profit sheet
+      // Ctrl+X: close profit sheet if open, otherwise open Fast Purchase window
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
         if (showProfitModal) { e.preventDefault(); setShowProfitModal(false); return; }
+        e.preventDefault();
+        openWindow('fast-purchase');
+        return;
+      }
+      // Ctrl+F: toggle Fast mode
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setSpecialMode(prev => !prev);
+        return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -639,7 +690,10 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
           }}>{statusMsg}</span>
         )}
         <div className="header-actions">
-          <button type="button" onClick={() => setSpecialMode(!specialMode)} className={`btn ${specialMode ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
+          <button type="button" onClick={() => openWindow('fast-purchase')} className="btn" style={{ fontSize: '0.9rem', padding: '4px 8px', minWidth: '40px', background: '#73cbfb', color: '#000', border: '1px solid #2d9efb', fontWeight: 700 }}>
+            FP
+          </button>
+          <button type="button" onClick={() => setSpecialMode(!specialMode)} className="btn" style={{ fontSize: '1rem', padding: '6px 12px', background: specialMode ? '#6df166' : '#49f843ff', color: '#000', border: '1px solid #2af31f', fontWeight: 700 }}>
             {specialMode ? '⚡ Fast ON' : '⚡ Fast'}
           </button>
           <button type="button" onClick={() => setShowProfitModal(true)} className="btn btn-secondary">📊 Profit Sheet</button>
@@ -684,19 +738,32 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
               {/* Row 2: Description */}
               <div className="form-group span-full">
                 <label>Description</label>
-                <input ref={el => refs.current.description = el} type="text" value={description}
-                  onChange={e => setDescription(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (specialMode) {
-                        refs.current.sizeRange?.focus();
-                      } else {
-                        refs.current.category?.focus();
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {!isEditing && sessionId && (
+                    <div style={{
+                      width: 28, height: 28, borderRadius: '50%',
+                      background: '#e353f7',
+                      color: 'black', fontWeight: 800, fontSize: '1.2rem',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0, boxShadow: '0 2px 6px rgba(227,83,247,0.45)'
+                    }}>
+                      {sessionItems.length + 1}
+                    </div>
+                  )}
+                  <input ref={el => refs.current.description = el} type="text" value={description}
+                    onChange={e => setDescription(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (specialMode) {
+                          refs.current.sizeRange?.focus();
+                        } else {
+                          refs.current.category?.focus();
+                        }
                       }
-                    }
-                  }}
-                  placeholder="e.g. Cotton Suit, Jeans, Shirt..." className="form-input" />
+                    }}
+                    placeholder="e.g. Cotton Suit, Jeans, Shirt..." className="form-input" style={{ flex: 1 }} />
+                </div>
               </div>
 
               {/* Row 3: Category + Size Range + Gender */}
@@ -707,7 +774,9 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
                     <select ref={el => refs.current.category = el} value={category}
                       onChange={e => { setCategory(e.target.value); setPreviousCategory(e.target.value); }}
                       onKeyDown={e => handleEnter(e, 'sizeRange')} className="form-input">
-                      {categoriesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                      {categoriesList.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="form-group span-third">
@@ -754,8 +823,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
                             e.preventDefault();
                             refs.current.saleRate?.focus();
                           }
-                          if (e.key === 'Tab' && !e.shiftKey) { 
-                            e.preventDefault(); 
+                          if (e.key === 'Tab' && !e.shiftKey) {
+                            e.preventDefault();
                             refs.current.packing?.focus();
                           }
                         }}
@@ -796,8 +865,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
                             e.preventDefault();
                             handleSubmit(e);
                           }
-                          if (e.key === 'Tab' && !e.shiftKey) { 
-                            e.preventDefault(); 
+                          if (e.key === 'Tab' && !e.shiftKey) {
+                            e.preventDefault();
                             refs.current.packing?.focus();
                           }
                         }}
@@ -925,9 +994,22 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
                 background: '#fff', border: '1px solid #e4e6ef', borderTop: 'none',
                 borderRadius: '0 0 10px 10px', padding: '14px 18px', gap: 12
               }}>
-                <span style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e1e2d', flex: 1, minWidth: 0, whiteSpace: 'normal', wordWrap: 'break-word', lineHeight: '1.4' }}>
-                  {`${description || ''} ${category || ''} ${sizeRange || ''} ${gender || ''}`.trim() || '\u2014'}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                  {!isEditing && sessionId && (
+                    <div style={{
+                      width: 28, height: 28, borderRadius: '50%',
+                      background: '#e353f7',
+                      color: 'black', fontWeight: 800, fontSize: '0.85rem',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0, boxShadow: '0 2px 6px rgba(227,83,247,0.45)'
+                    }}>
+                      {sessionItems.length + 1}
+                    </div>
+                  )}
+                  <span style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e1e2d', minWidth: 0, whiteSpace: 'normal', wordWrap: 'break-word', lineHeight: '1.4' }}>
+                    {`${description || ''} ${category || ''} ${sizeRange || ''} ${gender || ''}`.trim() || '\u2014'}
+                  </span>
+                </div>
                 {saleRate && (
                   <span style={{
                     background: '#000', color: '#fff', fontWeight: 800, fontSize: '2.2rem',
@@ -1305,54 +1387,109 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser }) {
 
       {/* Manage Lists Modal */}
       {showManageModal && (
-        <div className="modal-overlay" onClick={() => { setShowManageModal(false); setEditingListItemId(null); }}>
+        <div className="modal-overlay" onClick={() => { setShowManageModal(false); setEditingListItemId(null); setManageListSearchQuery(''); }}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => { setShowManageModal(false); setEditingListItemId(null); }}>✕</button>
+            <button className="modal-close" onClick={() => { setShowManageModal(false); setEditingListItemId(null); setManageListSearchQuery(''); }}>✕</button>
             <h3 style={{ margin: "0 0 16px", fontSize: "1.1rem", fontWeight: 700, textTransform: "capitalize" }}>⚙️ Manage {manageListType.replace("_", " ")}</h3>
-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <input ref={el => refs.current.manageListInput = el} type={manageListType === "packings" ? "number" : "text"} value={newItemName}
                 onChange={e => setNewItemName(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") handleAddListItem(); }}
                 placeholder={"New " + manageListType.replace("_", " ") + "..."} style={{ flex: 1, padding: "8px 10px", border: "1px solid #e4e6ef", borderRadius: 5, fontSize: "0.9rem", fontFamily: "inherit" }} />
               <button className="btn btn-primary" onClick={handleAddListItem}>Add</button>
             </div>
-            <div style={{ maxHeight: 300, overflowY: "auto" }}>
-              <table className="data-table">
-                <tbody>
-                  {manageListItems.map(item => (
-                    <tr key={item.id}>
-                      {editingListItemId === item.id ? (
-                        <>
-                          <td style={{ padding: '6px 10px' }}>
-                            <input
-                              type={manageListType === 'packings' ? 'number' : 'text'}
-                              value={editingListItemVal}
-                              onChange={e => setEditingListItemVal(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') handleSaveEditListItem(item.id); else if (e.key === 'Escape') setEditingListItemId(null); }}
-                              autoFocus
-                              style={{ width: '100%', padding: '4px 8px', border: '1px solid #3b82f6', borderRadius: 4, fontSize: '0.88rem' }}
-                            />
-                          </td>
-                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap', padding: '6px 10px' }}>
-                            <button onClick={() => handleSaveEditListItem(item.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', marginRight: 4 }}>Save</button>
-                            <button onClick={() => setEditingListItemId(null)} style={{ background: '#94a3b8', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td style={{ padding: '6px 10px' }}>{manageListType === "packings" ? item.value : item.name}</td>
-                          <td style={{ textAlign: "right", whiteSpace: 'nowrap', padding: '6px 10px' }}>
-                            <button onClick={() => { setEditingListItemId(item.id); setEditingListItemVal(manageListType === "packings" ? String(item.value) : item.name); }} style={{ background: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem", marginRight: 4 }}>Edit</button>
-                            <button onClick={() => handleDeleteListItem(item.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Delete</button>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {manageListItems.length === 0 && <div style={{ padding: 16, textAlign: "center", color: "#9ca3af", fontSize: "0.9rem" }}>No items yet. Add one above!</div>}
+            <div style={{ marginBottom: 12 }}>
+              <input
+                type="text"
+                value={manageListSearchQuery}
+                onChange={e => setManageListSearchQuery(e.target.value)}
+                placeholder={`🔍 Search ${manageListType.replace("_", " ")}...`}
+                style={{ width: "100%", padding: "7px 10px", border: "1px solid #e4e6ef", borderRadius: 5, fontSize: "0.88rem", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+              />
             </div>
+            {(() => {
+              const filteredList = manageListItems.filter(item => {
+                if (!manageListSearchQuery.trim()) return true;
+                const q = manageListSearchQuery.toLowerCase().trim();
+                const val = manageListType === "packings" ? String(item.value || '') : (item.name || '');
+                return val.toLowerCase().includes(q);
+              });
+              return (
+                <div style={{ maxHeight: 300, overflowY: "auto" }}>
+                  <table className="data-table">
+                    <tbody>
+                      {filteredList.map(item => (
+                        <tr key={item.id}>
+                          {editingListItemId === item.id ? (
+                            <>
+                              <td style={{ padding: '6px 10px' }}>
+                                <input
+                                  type={manageListType === 'packings' ? 'number' : 'text'}
+                                  value={editingListItemVal}
+                                  onChange={e => setEditingListItemVal(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') handleSaveEditListItem(item.id); else if (e.key === 'Escape') setEditingListItemId(null); }}
+                                  autoFocus
+                                  style={{ width: '100%', padding: '4px 8px', border: '1px solid #3b82f6', borderRadius: 4, fontSize: '0.88rem' }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', padding: '6px 10px' }}>
+                                <button onClick={() => handleSaveEditListItem(item.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', marginRight: 4 }}>Save</button>
+                                <button onClick={() => setEditingListItemId(null)} style={{ background: '#94a3b8', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td style={{ padding: '6px 10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  {manageListType === 'categories' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetDefaultCategory(item.name === defaultCategory ? '' : item.name)}
+                                      title={item.name === defaultCategory ? 'Default category (click to unset)' : 'Click to set as default category'}
+                                      style={{
+                                        background: item.name === defaultCategory ? '#10b981' : '#f1f5f9',
+                                        color: item.name === defaultCategory ? '#ffffff' : '#94a3b8',
+                                        border: item.name === defaultCategory ? '1px solid #059669' : '1px solid #cbd5e1',
+                                        borderRadius: '50%',
+                                        width: 24,
+                                        height: 24,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        fontSize: '0.85rem',
+                                        fontWeight: 800,
+                                        flexShrink: 0,
+                                        transition: 'all 0.15s ease',
+                                        boxShadow: item.name === defaultCategory ? '0 2px 4px rgba(16,185,129,0.3)' : 'none'
+                                      }}
+                                    >
+                                      ✓
+                                    </button>
+                                  )}
+                                  <span style={{ fontWeight: item.name === defaultCategory ? 700 : 400, color: item.name === defaultCategory ? '#047857' : 'inherit' }}>
+                                    {manageListType === "packings" ? item.value : item.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td style={{ textAlign: "right", whiteSpace: 'nowrap', padding: '6px 10px' }}>
+                                <button onClick={() => { setEditingListItemId(item.id); setEditingListItemVal(manageListType === "packings" ? String(item.value) : item.name); }} style={{ background: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem", marginRight: 4 }}>Edit</button>
+                                <button onClick={() => handleDeleteListItem(item.id)} style={{ background: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: "0.8rem" }}>Delete</button>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {filteredList.length === 0 && (
+                    <div style={{ padding: 16, textAlign: "center", color: "#9ca3af", fontSize: "0.9rem" }}>
+                      {manageListSearchQuery ? `No matching ${manageListType.replace("_", " ")} found` : "No items yet. Add one above!"}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

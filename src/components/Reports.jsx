@@ -48,20 +48,22 @@ function Reports({ currentUser, isActive }) {
         // (which caused the page to bounce while adjusting the time spinner).
         if (!silent) setLoading(true);
         try {
+            const cleanStartDate = startDate && startDate.trim() ? startDate.trim() : '2000-01-01';
+            const cleanEndDate = endDate && endDate.trim() ? endDate.trim() : '2099-12-31';
             if (activeTab === 'daily' || activeTab === 'invoices') {
-                const data = await ipcRenderer.invoke('get-daily-report', { startDate, endDate, startTime, endTime, userId: selectedUser });
+                const data = await ipcRenderer.invoke('get-daily-report', { startDate: cleanStartDate, endDate: cleanEndDate, startTime, endTime, userId: selectedUser });
                 setDailyReport(data);
             } else if (activeTab === 'sales') {
-                const data = await ipcRenderer.invoke('get-sales-report', { startDate, endDate });
+                const data = await ipcRenderer.invoke('get-sales-report', { startDate: cleanStartDate, endDate: cleanEndDate });
                 setSalesReport(data);
             } else if (activeTab === 'stock') {
                 const data = await ipcRenderer.invoke('get-stock-report');
                 setStockReport(data);
             } else if (activeTab === 'users') {
-                const data = await ipcRenderer.invoke('get-user-report', { startDate, endDate });
+                const data = await ipcRenderer.invoke('get-user-report', { startDate: cleanStartDate, endDate: cleanEndDate });
                 setUserReport(data);
             } else if (activeTab === 'summary') {
-                const data = await ipcRenderer.invoke('get-date-summary', { startDate, endDate });
+                const data = await ipcRenderer.invoke('get-date-summary', { startDate: cleanStartDate, endDate: cleanEndDate });
                 setDateSummary(data);
             }
         } catch (error) {
@@ -667,6 +669,7 @@ function Reports({ currentUser, isActive }) {
                                                 <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Description</th>
                                                 <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Qty</th>
                                                 <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Rate</th>
+                                                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Disc</th>
                                                 <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Amount</th>
                                                 <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Profit</th>
                                             </tr>
@@ -678,6 +681,7 @@ function Reports({ currentUser, isActive }) {
                                                     <td style={{ padding: '5px 10px', color: '#374151' }}>{item.item_description}</td>
                                                     <td style={{ padding: '5px 10px', textAlign: 'right' }}>{item.quantity}</td>
                                                     <td style={{ padding: '5px 10px', textAlign: 'right' }}>{fmt(item.sale_rate)}</td>
+                                                    <td style={{ padding: '5px 10px', textAlign: 'right', color: item.discount > 0 ? '#ef4444' : '#9ca3af' }}>{item.discount > 0 ? fmt(item.discount) : '—'}</td>
                                                     <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: 'bold' }}>{fmt(item.amount)}</td>
                                                     <td style={{ padding: '5px 10px', textAlign: 'right', color: '#10b981' }}>{fmt(item.profit)}</td>
                                                 </tr>
@@ -688,6 +692,7 @@ function Reports({ currentUser, isActive }) {
                                                     {sale.misc_charges > 0 && <span style={{ color: '#059669', marginLeft: '8px' }}> — Misc: {fmt(sale.misc_charges)}</span>}
                                                     {sale.discount > 0 && <span style={{ color: '#ef4444', marginLeft: '8px' }}> — Discount: {fmt(sale.discount)}</span>}
                                                 </td>
+                                                <td></td>
                                                 <td></td>
                                                 <td></td>
                                                 <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#1e40af' }}>{fmt(sale.total_amount + (sale.misc_charges || 0) - (sale.discount || 0))}</td>
@@ -790,6 +795,8 @@ function Reports({ currentUser, isActive }) {
                                     <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>#No</th>
                                     <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>Time</th>
                                     <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>Bill (Items)</th>
+                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'right' }}>Discount</th>
+                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'right' }}>Total Amount</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -803,7 +810,7 @@ function Reports({ currentUser, isActive }) {
                                         <React.Fragment key={sale.id}>
                                             {showDate && (
                                                 <tr className="inv-date-row">
-                                                    <td colSpan="3" style={{ padding: '7px 6px 2px', borderTop: '2px solid #d1d5db' }}>
+                                                    <td colSpan="5" style={{ padding: '7px 6px 2px', borderTop: '2px solid #d1d5db' }}>
                                                         <span style={{ fontWeight: 'bold', fontSize: '17px', color: '#111827' }}>{reformatDateDisplay(sale.sale_date)}</span>
                                                         <span style={{ marginLeft: '40px', fontWeight: 'bold', fontSize: '17px', color: '#991b1b' }}>Returns: {invoiceReturnsByDate[sale.sale_date] || 0}</span>
                                                     </td>
@@ -813,13 +820,15 @@ function Reports({ currentUser, isActive }) {
                                                 <td style={{ padding: '3px 6px', fontWeight: 'bold' }}>{sale.invoice_no || sale.id}</td>
                                                 <td style={{ padding: '3px 6px' }}>{fmtTime(sale.created_at)}</td>
                                                 <td style={{ padding: '3px 6px' }}>{sale.total_quantity || 0} item{(sale.total_quantity || 0) !== 1 ? 's' : ''}</td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right', color: sale.discount > 0 ? '#ef4444' : '#9ca3af' }}>{sale.discount > 0 ? fmt(sale.discount) : '—'}</td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 'bold' }}>{fmt(sale.total_amount + (sale.misc_charges || 0) - (sale.discount || 0))}</td>
                                             </tr>
                                         </React.Fragment>
                                     );
                                 })}
                                 {dailyReport.sales.length === 0 && (
                                     <tr>
-                                        <td colSpan="3" style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No invoices found.</td>
+                                        <td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No invoices found.</td>
                                     </tr>
                                 )}
                             </tbody>

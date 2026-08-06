@@ -105,7 +105,10 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
   };
 
   const filtered = purchases.filter(p =>
-    !search || p.supplier_name?.toLowerCase().includes(search.toLowerCase()) || p.invoice_no?.toLowerCase().includes(search.toLowerCase())
+    !search || 
+    p.supplier_name?.toLowerCase().includes(search.toLowerCase()) || 
+    p.invoice_no?.toLowerCase().includes(search.toLowerCase()) ||
+    p.blt_number?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -113,7 +116,7 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '2px solid #e4e6ef', marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>Purchase List <span style={{ fontSize: '0.85rem', color: '#aaa', fontWeight: 400 }}>({filtered.length})</span></h2>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <input placeholder="Search supplier or invoice..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', width: 260, fontFamily: 'inherit' }} />
+          <input placeholder="Search supplier, invoice or BLT #..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', width: 280, fontFamily: 'inherit' }} />
           <button onClick={() => setShowBulkPost(true)} style={{ background: '#50cd89', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', marginLeft: 12 }}>Post Multiple (Ctrl+E)</button>
         </div>
       </div>
@@ -125,6 +128,8 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
               <th style={th}>Date</th>
               <th style={th}>Invoice</th>
               <th style={th}>Supplier</th>
+              <th style={{ ...th, textAlign: 'center' }}>Blt No.</th>
+              <th style={{ ...th, textAlign: 'center' }}>Ctn Qty</th>
               <th style={{ ...th, textAlign: 'center' }}>Total Qty (Pcs)</th>
               <th style={{ ...th, textAlign: 'right' }}>Total</th>
               <th style={{ ...th, textAlign: 'center' }}>Status</th>
@@ -133,13 +138,15 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: 60, textAlign: 'center', color: '#aaa' }}>No purchases</td></tr>
+              <tr><td colSpan={10} style={{ padding: 60, textAlign: 'center', color: '#aaa' }}>No purchases</td></tr>
             ) : filtered.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ ...td, fontWeight: 'bold', color: '#3699ff' }}>#{p.id}</td>
                 <td style={td}>{formatDateDMY(p.purchase_date || p.created_at)}</td>
                 <td style={td}>{p.invoice_no || '—'}</td>
                 <td style={td}>{p.supplier_name}</td>
+                <td style={{ ...td, textAlign: 'center', color: '#555' }}>{p.blt_number || p.blt_no || p.bilty_no || '—'}</td>
+                <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#555' }}>{p.ctn_qty || p.ctn_bag || 0}</td>
                 <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#555' }}>{p.total_qty || 0}</td>
                 <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>PKR {parseFloat(p.total_amount).toLocaleString()}</td>
                 <td style={{ ...td, textAlign: 'center' }}>

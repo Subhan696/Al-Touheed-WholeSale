@@ -359,6 +359,7 @@ async function initDatabase() {
     ALTER TABLE purchases ADD COLUMN IF NOT EXISTS vehicle_no TEXT;
     ALTER TABLE purchases ADD COLUMN IF NOT EXISTS godown TEXT;
     ALTER TABLE purchases ADD COLUMN IF NOT EXISTS blt_number TEXT;
+    ALTER TABLE purchases ADD COLUMN IF NOT EXISTS ctn_qty INTEGER DEFAULT 0;
   `);
 
   await query(`
@@ -723,6 +724,22 @@ async function initDatabase() {
     await query("ALTER TABLE products ALTER COLUMN year TYPE TEXT USING year::text");
     await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''");
     await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''");
+
+    // Restore products.purchase_rate to pre_disc_price for products that were previously overwritten by net_rate
+    await query(`
+      UPDATE products p
+      SET purchase_rate = pi.pre_disc_price
+      FROM (
+        SELECT item_code, pre_disc_price FROM (
+          SELECT pi.item_code, pi.pre_disc_price,
+            ROW_NUMBER() OVER (PARTITION BY pi.item_code ORDER BY pu.id DESC, pi.id DESC) as rn
+          FROM purchase_items pi
+          JOIN purchases pu ON pi.purchase_id = pu.id
+          WHERE pi.pre_disc_price > 0
+        ) ranked WHERE rn = 1
+      ) pi
+      WHERE p.item_code = pi.item_code
+    `);
   } catch (e) {
     console.error('Migration products column error:', e);
   }
@@ -966,7 +983,7 @@ async function getBankStatementData({ accountId, accountName, startDate, endDate
 
   let searchPattern = '';
   if (isCashAccount) {
-    searchPattern = "payment_method ILIKE '%cash%' AND payment_method NOT ILIKE '%jazz%'";
+    searchPattern = "payment_method ILIKE '%cash%'";
   } else if (shortAccName && shortAccName.toLowerCase() !== cleanAccName.toLowerCase() && shortAccName.length >= 2) {
     searchPattern = `(payment_method ILIKE '%${cleanAccName}%' OR payment_method ILIKE '%${shortAccName}:%' OR payment_method ILIKE '%${shortAccName} (%')`;
   } else {
@@ -1658,7 +1675,7 @@ async function getAccountClosingBalance({ accountId }) {
 
       let searchPattern = '';
       if (isCashAccount) {
-        searchPattern = "payment_method ILIKE '%cash%' AND payment_method NOT ILIKE '%jazz%'";
+        searchPattern = "payment_method ILIKE '%cash%'";
       } else if (shortAccName && shortAccName.toLowerCase() !== cleanAccName.toLowerCase() && shortAccName.length >= 2) {
         searchPattern = `(payment_method ILIKE '%${cleanAccName}%' OR payment_method ILIKE '%${shortAccName}:%' OR payment_method ILIKE '%${shortAccName} (%')`;
       } else {
@@ -1980,7 +1997,12 @@ async function handleIPC(channel, ...args) {
         SELECT p.*,
           COALESCE(CAST((
             COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
-          ) AS INTEGER), 0) AS stock_packets
+          ) AS INTEGER), 0) AS stock_packets,
+          CASE
+            WHEN COALESCE(latest_purchase.net_rate, 0) > 0 THEN latest_purchase.net_rate
+            WHEN COALESCE(net_cost.total_packets, 0) > 0 THEN net_cost.total_net_amount / net_cost.total_packets
+            ELSE p.purchase_rate
+          END AS actual_cost
         FROM products p
         LEFT JOIN (
           SELECT pi.item_code, SUM(pi.packets) as qty 
@@ -1999,6 +2021,21 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
         ) adjustments ON adjustments.item_code = p.item_code
+        LEFT JOIN (
+          SELECT pi.item_code, SUM(pi.packets) as total_packets, SUM(pi.net_rate * pi.packets) as total_net_amount
+          FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
+          WHERE pu.is_posted = 1 AND pi.net_rate > 0
+          GROUP BY pi.item_code
+        ) net_cost ON net_cost.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, net_rate FROM (
+            SELECT pi.item_code, pi.net_rate,
+              ROW_NUMBER() OVER (PARTITION BY pi.item_code ORDER BY pu.id DESC, pi.id DESC) as rn
+            FROM purchase_items pi
+            JOIN purchases pu ON pi.purchase_id = pu.id
+            WHERE pu.is_posted = 1 AND pi.net_rate > 0
+          ) ranked WHERE rn = 1
+        ) latest_purchase ON latest_purchase.item_code = p.item_code
         WHERE p.item_code ILIKE $1
       `, [data]);
       return r.rows[0] || null;
@@ -2068,7 +2105,12 @@ async function handleIPC(channel, ...args) {
         SELECT p.*,
           COALESCE(CAST((
             COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
-          ) AS INTEGER), 0) AS stock_packets
+          ) AS INTEGER), 0) AS stock_packets,
+          CASE
+            WHEN COALESCE(latest_purchase.net_rate, 0) > 0 THEN latest_purchase.net_rate
+            WHEN COALESCE(net_cost.total_packets, 0) > 0 THEN net_cost.total_net_amount / net_cost.total_packets
+            ELSE p.purchase_rate
+          END AS actual_cost
         FROM products p
         LEFT JOIN (
           SELECT pi.item_code, SUM(pi.packets) as qty 
@@ -2087,6 +2129,21 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
         ) adjustments ON adjustments.item_code = p.item_code
+        LEFT JOIN (
+          SELECT pi.item_code, SUM(pi.packets) as total_packets, SUM(pi.net_rate * pi.packets) as total_net_amount
+          FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
+          WHERE pu.is_posted = 1 AND pi.net_rate > 0
+          GROUP BY pi.item_code
+        ) net_cost ON net_cost.item_code = p.item_code
+        LEFT JOIN (
+          SELECT item_code, net_rate FROM (
+            SELECT pi.item_code, pi.net_rate,
+              ROW_NUMBER() OVER (PARTITION BY pi.item_code ORDER BY pu.id DESC, pi.id DESC) as rn
+            FROM purchase_items pi
+            JOIN purchases pu ON pi.purchase_id = pu.id
+            WHERE pu.is_posted = 1 AND pi.net_rate > 0
+          ) ranked WHERE rn = 1
+        ) latest_purchase ON latest_purchase.item_code = p.item_code
         WHERE p.item_code ILIKE $1 OR p.description ILIKE $1 
         ORDER BY 
           (p.item_code ILIKE $2) DESC,
@@ -2304,9 +2361,10 @@ async function handleIPC(channel, ...args) {
       const purchaseId = pr.rows[0].id;
       for (const item of items) {
         if (item.itemCode) {
+          const grossRate = parseFloat(item.preDiscPrice) || parseFloat(item.rate) || 0;
           await query(
-            'INSERT INTO products (item_code, description, purchase_rate, sale_rate) VALUES ($1, $2, $3, $4) ON CONFLICT (item_code) DO NOTHING',
-            [item.itemCode, item.itemDescription || 'Unknown', parseFloat(item.rate) || 0, (parseFloat(item.rate) || 0) * 1.2]
+            "INSERT INTO products (item_code, description, purchase_rate, sale_rate, gender) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (item_code) DO UPDATE SET gender = CASE WHEN EXCLUDED.gender != '' THEN EXCLUDED.gender ELSE products.gender END",
+            [item.itemCode, item.itemDescription || 'Unknown', grossRate, grossRate * 1.2, item.gender || '']
           );
         }
         await query(
@@ -2338,9 +2396,10 @@ async function handleIPC(channel, ...args) {
       await query('DELETE FROM purchase_items WHERE purchase_id=$1', [id]);
       for (const item of items) {
         if (item.itemCode) {
+          const grossRate = parseFloat(item.preDiscPrice) || parseFloat(item.rate) || 0;
           await query(
-            'INSERT INTO products (item_code, description, purchase_rate, sale_rate) VALUES ($1, $2, $3, $4) ON CONFLICT (item_code) DO NOTHING',
-            [item.itemCode, item.itemDescription || 'Unknown', parseFloat(item.rate) || 0, (parseFloat(item.rate) || 0) * 1.2]
+            "INSERT INTO products (item_code, description, purchase_rate, sale_rate, gender) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (item_code) DO UPDATE SET gender = CASE WHEN EXCLUDED.gender != '' THEN EXCLUDED.gender ELSE products.gender END",
+            [item.itemCode, item.itemDescription || 'Unknown', grossRate, grossRate * 1.2, item.gender || '']
           );
         }
         await query(
@@ -2363,13 +2422,20 @@ async function handleIPC(channel, ...args) {
     case 'get-purchases': {
       const res = await query(`
         SELECT p.*, 
-               (SELECT SUM(pi.packets) FROM purchase_items pi WHERE pi.purchase_id = p.id) as total_qty
+               (SELECT SUM(pi.packets) FROM purchase_items pi WHERE pi.purchase_id = p.id) as total_qty,
+               CASE WHEN COALESCE(p.ctn_qty, 0) > 0 THEN p.ctn_qty ELSE (SELECT COALESCE(SUM(pe.cartons), 0) FROM purchase_expenses pe WHERE pe.purchase_id = p.id) END as ctn_qty
         FROM purchases p ORDER BY p.id DESC LIMIT 500
       `);
       return res.rows;
     }
     case 'get-purchase-items': {
-      const r = await query('SELECT * FROM purchase_items WHERE purchase_id=$1 ORDER BY id', [data]);
+      const r = await query(`
+        SELECT pi.*, p.gender, p.category, p.size_range, p.description AS base_description, p.brand
+        FROM purchase_items pi
+        LEFT JOIN products p ON pi.item_code = p.item_code
+        WHERE pi.purchase_id=$1 
+        ORDER BY pi.id
+      `, [data]);
       return r.rows;
     }
     case 'get-purchase-expenses': {
@@ -3148,7 +3214,7 @@ async function handleIPC(channel, ...args) {
       );
       const saleId = sr.rows[0].id;
       for (const item of items) {
-        const profit = (item.saleRate - item.purchaseRate) * item.packets;
+        const profit = ((item.saleRate - item.purchaseRate) * item.packets) - (parseFloat(item.discount) || 0);
         await query(
           'INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
           [saleId, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit, item.discount || 0]
@@ -3884,9 +3950,9 @@ async function handleIPC(channel, ...args) {
 
     case 'get-daily-report': {
       try {
-        const { startDate, endDate, startTime, endTime, userId } = data;
-        const start = startDate;
-        const end = endDate;
+        const { startDate, endDate, startTime, endTime, userId } = data || {};
+        const start = (startDate && typeof startDate === 'string' && startDate.trim()) ? startDate.trim() : '2000-01-01';
+        const end = (endDate && typeof endDate === 'string' && endDate.trim()) ? endDate.trim() : '2099-12-31';
 
         const hasTimeFilter = !!(startTime || endTime);
         const matchesTimeWindow = (createdAt) => {
@@ -3926,10 +3992,40 @@ async function handleIPC(channel, ...args) {
         for (const sale of sales) {
           if (!matchesTimeWindow(sale.created_at)) continue;
           const itemsRes = await query(`
-            SELECT item_code, item_description, packets as quantity, sale_rate, purchase_rate, amount, profit
-            FROM sale_items
-            WHERE sale_id = $1
-            ORDER BY id
+            SELECT si.item_code, si.item_description, si.packets as quantity, si.sale_rate, COALESCE(si.discount, 0) as discount,
+              COALESCE(
+                CASE
+                  WHEN COALESCE(lp.net_rate, 0) > 0 THEN lp.net_rate
+                  WHEN COALESCE(nc.total_packets, 0) > 0 THEN nc.total_net_amount / nc.total_packets
+                  ELSE si.purchase_rate
+                END, si.purchase_rate
+              ) as purchase_rate,
+              si.amount,
+              (si.amount - (COALESCE(
+                CASE
+                  WHEN COALESCE(lp.net_rate, 0) > 0 THEN lp.net_rate
+                  WHEN COALESCE(nc.total_packets, 0) > 0 THEN nc.total_net_amount / nc.total_packets
+                  ELSE si.purchase_rate
+                END, si.purchase_rate
+              ) * si.packets)) as profit
+            FROM sale_items si
+            LEFT JOIN (
+              SELECT item_code, net_rate FROM (
+                SELECT pi.item_code, pi.net_rate,
+                  ROW_NUMBER() OVER (PARTITION BY pi.item_code ORDER BY pu.id DESC, pi.id DESC) as rn
+                FROM purchase_items pi
+                JOIN purchases pu ON pi.purchase_id = pu.id
+                WHERE pu.is_posted = 1 AND pi.net_rate > 0
+              ) ranked WHERE rn = 1
+            ) lp ON lp.item_code = si.item_code
+            LEFT JOIN (
+              SELECT pi.item_code, SUM(pi.packets) as total_packets, SUM(pi.net_rate * pi.packets) as total_net_amount
+              FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
+              WHERE pu.is_posted = 1 AND pi.net_rate > 0
+              GROUP BY pi.item_code
+            ) nc ON nc.item_code = si.item_code
+            WHERE si.sale_id = $1
+            ORDER BY si.id
           `, [sale.id]);
           const items = itemsRes.rows;
 
@@ -4067,7 +4163,9 @@ async function handleIPC(channel, ...args) {
 
     case 'get-user-report': {
       try {
-        const { startDate, endDate } = data;
+        const { startDate, endDate } = data || {};
+        const start = (startDate && typeof startDate === 'string' && startDate.trim()) ? startDate.trim() : '2000-01-01';
+        const end = (endDate && typeof endDate === 'string' && endDate.trim()) ? endDate.trim() : '2099-12-31';
         const usersRes = await query('SELECT id, username FROM users');
         const users = usersRes.rows;
 
@@ -4080,7 +4178,7 @@ async function handleIPC(channel, ...args) {
                 SUM(total_amount) as total_sales
             FROM sales
             WHERE user_id = $1 AND sale_date::date BETWEEN $2 AND $3
-          `, [user.id, startDate, endDate]);
+          `, [user.id, start, end]);
           const salesStats = sRes.rows[0] || {};
 
           const rRes = await query(`
@@ -4149,7 +4247,9 @@ async function handleIPC(channel, ...args) {
 
     case 'get-date-summary': {
       try {
-        const { startDate, endDate } = data;
+        const { startDate, endDate } = data || {};
+        const start = (startDate && typeof startDate === 'string' && startDate.trim()) ? startDate.trim() : '2000-01-01';
+        const end = (endDate && typeof endDate === 'string' && endDate.trim()) ? endDate.trim() : '2099-12-31';
         const glResSummary = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
         const summaryBankNames = glResSummary.rows.map(r => (r.account_name || '').toLowerCase().trim());
 
@@ -4162,7 +4262,7 @@ async function handleIPC(channel, ...args) {
           WHERE sale_date::date BETWEEN $1 AND $2
           GROUP BY sale_date::date
           ORDER BY day ASC
-        `, [startDate, endDate]);
+        `, [start, end]);
 
         return res.rows.map(row => {
           let cash = 0, digital = 0;
@@ -4196,7 +4296,9 @@ async function handleIPC(channel, ...args) {
 
     case 'get-sales-report': {
       try {
-        const { startDate, endDate } = data;
+        const { startDate, endDate } = data || {};
+        const start = (startDate && typeof startDate === 'string' && startDate.trim()) ? startDate.trim() : '2000-01-01';
+        const end = (endDate && typeof endDate === 'string' && endDate.trim()) ? endDate.trim() : '2099-12-31';
         const tRes = await query(`
           SELECT 
             COUNT(id) as total_invoices,
@@ -4206,14 +4308,14 @@ async function handleIPC(channel, ...args) {
             SUM(misc_charges) as total_misc_charges
           FROM sales 
           WHERE sale_date::date BETWEEN $1 AND $2
-        `, [startDate, endDate]);
+        `, [start, end]);
 
         const pRes = await query(`
           SELECT SUM(si.profit) as total_profit
           FROM sale_items si
           JOIN sales s ON si.sale_id = s.id
           WHERE s.sale_date::date BETWEEN $1 AND $2
-        `, [startDate, endDate]);
+        `, [start, end]);
 
         const iRes = await query(`
           SELECT 
@@ -4224,7 +4326,7 @@ async function handleIPC(channel, ...args) {
           WHERE s.sale_date::date BETWEEN $1 AND $2
           GROUP BY si.item_code, si.item_description
           ORDER BY qty DESC
-        `, [startDate, endDate]);
+        `, [start, end]);
 
         return {
           ...tRes.rows[0],
@@ -4261,10 +4363,10 @@ async function handleIPC(channel, ...args) {
                 COALESCE(purchases.qty, 0) - COALESCE(sales.qty, 0) + COALESCE(returns_in.qty, 0) - COALESCE(returns_out.qty, 0) + COALESCE(adjustments.qty, 0)
               ) AS INTEGER) AS stock_packets,
               CASE
-                WHEN COALESCE(net_cost.total_packets, 0) > 0 THEN net_cost.total_net_amount / net_cost.total_packets
+                WHEN COALESCE(net_cost.total_packets, 0) > 0 THEN net_cost.total_pnet_amount / net_cost.total_packets
                 ELSE p.purchase_rate
               END AS actual_rate,
-              latest_purchase.net_rate AS latest_net_rate
+              latest_purchase.pnet_rate AS latest_net_rate
             FROM products p
             LEFT JOIN manufacturer_brands mb ON LOWER(TRIM(mb.brand_name)) = LOWER(TRIM(p.brand))
             LEFT JOIN suppliers s ON s.id = mb.supplier_id
@@ -4272,7 +4374,6 @@ async function handleIPC(channel, ...args) {
             LEFT JOIN (
               SELECT pi.item_code, SUM(pi.packets) as qty
               FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
-              WHERE pu.is_posted = 1
               GROUP BY pi.item_code
             ) purchases ON purchases.item_code = p.item_code
             LEFT JOIN (
@@ -4288,20 +4389,23 @@ async function handleIPC(channel, ...args) {
               SELECT item_code, SUM(adjustment_qty) as qty FROM stock_adjustments GROUP BY item_code
             ) adjustments ON adjustments.item_code = p.item_code
             LEFT JOIN (
-              SELECT pi.item_code, SUM(pi.packets) as total_packets, SUM(pi.net_rate * pi.packets) as total_net_amount
+              SELECT pi.item_code, SUM(pi.packets) as total_packets,
+                SUM((CASE WHEN pi.pre_disc_price > 0 THEN (pi.pre_disc_price - (pi.pre_disc_price * COALESCE(pi.disc_pct, 0) / 100.0) - COALESCE(pi.flat_discount, 0)) ELSE COALESCE(pi.net_rate, pi.rate) END) * pi.packets) as total_pnet_amount
               FROM purchase_items pi JOIN purchases pu ON pi.purchase_id = pu.id
-              WHERE pu.is_posted = 1 AND pi.net_rate > 0
               GROUP BY pi.item_code
             ) net_cost ON net_cost.item_code = p.item_code
             LEFT JOIN (
-              SELECT item_code, net_rate FROM (
+              SELECT item_code, pnet_rate FROM (
                 SELECT 
                   pi.item_code, 
-                  pi.net_rate,
+                  CASE
+                    WHEN pi.pre_disc_price > 0 THEN (pi.pre_disc_price - (pi.pre_disc_price * COALESCE(pi.disc_pct, 0) / 100.0) - COALESCE(pi.flat_discount, 0))
+                    WHEN pi.net_rate > 0 THEN pi.net_rate
+                    ELSE pi.rate
+                  END as pnet_rate,
                   ROW_NUMBER() OVER (PARTITION BY pi.item_code ORDER BY pu.id DESC, pi.id DESC) as rn
                 FROM purchase_items pi
                 JOIN purchases pu ON pi.purchase_id = pu.id
-                WHERE pu.is_posted = 1 AND pi.net_rate > 0
               ) ranked
               WHERE rn = 1
             ) latest_purchase ON latest_purchase.item_code = p.item_code

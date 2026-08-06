@@ -34,7 +34,7 @@ import './App.css';
 const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWindow, hasPermission, handleEditProduct, handleEditPurchase, handleEditReturn, handleEditSale, handleEditSalesReturn, setShowLayoutTabs }) => {
   const tabKey = win.rootKey || win.key;
 
-  if (tabKey === 'new-item') return <NewItemForm editItemData={win.editItemData} onClearEdit={closeTopWindow} isActive={isActive} currentUser={currentUser} />;
+  if (tabKey === 'new-item') return <NewItemForm editItemData={win.editItemData} onClearEdit={closeTopWindow} isActive={isActive} currentUser={currentUser} openWindow={openWindow} />;
   if (tabKey === 'products') return <ProductList onEditProduct={hasPermission('manage_products') ? handleEditProduct : undefined} currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'stock') return <StockList isActive={isActive} currentUser={currentUser} />;
 
@@ -43,7 +43,7 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
       onSaveSuccess={() => { closeTopWindow(); openWindow('purchases'); }}
       onCancelEdit={closeTopWindow} isActive={isActive} />
   );
-  if (tabKey === 'fast-purchase') return <FastPurchase currentUser={currentUser} isActive={isActive} />;
+  if (tabKey === 'fast-purchase') return <FastPurchase currentUser={currentUser} openWindow={openWindow} isActive={isActive} onClose={closeTopWindow} />;
   if (tabKey === 'purchases') return <PurchaseList currentUser={currentUser} onEditPurchase={hasPermission('manage_purchases') ? handleEditPurchase : undefined} isActive={isActive} />;
   if (tabKey === 'open-purchase') return (
     <OpenPurchase currentUser={currentUser} purchaseToEdit={win.purchaseToEdit}
@@ -61,6 +61,7 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
     <NewSale currentUser={currentUser} saleToEdit={win.saleToEdit}
       onSaveSuccess={() => { closeTopWindow(); openWindow('sale', { forceNewInstance: true }); }}
       onExit={closeTopWindow} isActive={isActive}
+      onViewSalesList={() => openWindow('sales-list')}
       onNewSale={() => { openWindow('sale', { forceNewInstance: true }); }} />
   );
   if (tabKey === 'sales-list') return <SalesList onEditSale={handleEditSale} onNewSale={() => openWindow('sale', { forceNewInstance: true })} onExit={closeTopWindow} currentUser={currentUser} isActive={isActive} />;
@@ -133,7 +134,6 @@ function App() {
 
   const purchaseMenuOptions = [
     { label: 'New Purchase', tab: 'new-purchase', icon: '🛒', perm: 'manage_purchases' },
-    { label: 'Fast Purchase', tab: 'fast-purchase', icon: '⚡', perm: 'manage_purchases' },
     { label: 'Purchase List', tab: 'purchases', icon: '📋', perm: 'view_purchases' },
     { label: 'Purchase Return', tab: 'purchase-return', icon: '🔙', perm: 'manage_purchase_returns' },
     { label: 'Returns List', tab: 'purchase-return-list', icon: '📋', perm: 'manage_purchase_returns' },
@@ -145,7 +145,10 @@ function App() {
     { label: 'New Item', tab: 'new-item', icon: '📝', perm: 'manage_products' },
     { label: 'Item List', tab: 'products', icon: '📦', perm: 'view_products' },
     { label: 'Stock Inventory', tab: 'stock', icon: '📊', perm: 'view_stock' },
-    { label: 'Mfg/Brand Stock', tab: 'manufacturer-stock', icon: '🏭', perm: 'view_reports' },
+  ].filter(opt => hasPermission(opt.perm));
+
+  const stockReportMenuOptions = [
+    { label: 'Supp/Brand Stock', tab: 'manufacturer-stock', icon: '🏭', perm: 'view_reports' },
   ].filter(opt => hasPermission(opt.perm));
 
   const accountsMenuOptions = [
@@ -219,7 +222,16 @@ function App() {
         const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
         const hasSelection = isInput && e.target.selectionStart !== e.target.selectionEnd;
         const hasModal = document.querySelector('.modal-overlay');
-        if (!hasSelection && !hasModal) { e.preventDefault(); closeTopWindow(); }
+        if (!hasSelection && !hasModal) {
+          e.preventDefault();
+          const topWin = windowStack[windowStack.length - 1];
+          if (topWin && (topWin.key === 'new-item' || topWin.rootKey === 'new-item')) {
+            closeTopWindow();
+            openWindow('fast-purchase');
+          } else {
+            closeTopWindow();
+          }
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         if (hasPermission('create_sale')) { e.preventDefault(); openWindow('sale', { forceNewInstance: true }); }
@@ -249,11 +261,7 @@ function App() {
 
   const handleEditProduct = (product) => openWindow('new-item', { editItemData: product });
   const handleEditPurchase = (purchase) => {
-    if (purchase.supplier_name === 'Opening Stock') {
-      openWindow('open-purchase', { purchaseToEdit: purchase });
-    } else {
-      openWindow('new-purchase', { purchaseToEdit: purchase });
-    }
+    openWindow('new-purchase', { purchaseToEdit: purchase });
   };
   const handleEditReturn = (ret) => openWindow('purchase-return', { returnToEdit: ret });
   const handleEditSale = (sale) => openWindow('sale', { saleToEdit: sale });
@@ -310,7 +318,31 @@ function App() {
 
           <div className="nav-divider" />
 
-          {/* 2. PURCHASES DROPDOWN */}
+          {/* 2. PRODUCTS & STOCK DROPDOWN */}
+          {productMenuOptions.length > 0 && (
+            <div className="nav-item-with-dropdown">
+              <button
+                className={`nav-item ${productMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'products' ? null : 'products')}
+              >
+                <span className="icon">📦</span> Items & Stock {openMenu === 'products' ? '▲' : '▼'}
+              </button>
+              {openMenu === 'products' && (
+                <div className="dropdown-menu">
+                  {productMenuOptions.map(opt => (
+                    <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab ? 'current' : ''}`}
+                      onClick={() => openWindow(opt.tab, opt.tab === 'new-item' ? { editItemData: null } : {})}>
+                      <span className="icon">{opt.icon}</span> {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="nav-divider" />
+
+          {/* 3. PURCHASES DROPDOWN */}
           {purchaseMenuOptions.length > 0 && (
             <div className="nav-item-with-dropdown">
               <button
@@ -334,20 +366,20 @@ function App() {
 
           <div className="nav-divider" />
 
-          {/* 3. PRODUCTS & STOCK DROPDOWN */}
-          {productMenuOptions.length > 0 && (
+          {/* 3.5 STOCK REPORT DROPDOWN */}
+          {stockReportMenuOptions.length > 0 && (
             <div className="nav-item-with-dropdown">
               <button
-                className={`nav-item ${productMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
-                onClick={() => setOpenMenu(openMenu === 'products' ? null : 'products')}
+                className={`nav-item ${stockReportMenuOptions.some(o => o.tab === activeTab) ? 'active' : ''}`}
+                onClick={() => setOpenMenu(openMenu === 'stock-report' ? null : 'stock-report')}
               >
-                <span className="icon">📦</span> Items & Stock {openMenu === 'products' ? '▲' : '▼'}
+                <span className="icon">📊</span> Stock Report {openMenu === 'stock-report' ? '▲' : '▼'}
               </button>
-              {openMenu === 'products' && (
+              {openMenu === 'stock-report' && (
                 <div className="dropdown-menu">
-                  {productMenuOptions.map(opt => (
+                  {stockReportMenuOptions.map(opt => (
                     <button key={opt.tab} className={`dropdown-item ${activeTab === opt.tab ? 'current' : ''}`}
-                      onClick={() => openWindow(opt.tab, opt.tab === 'new-item' ? { editItemData: null } : {})}>
+                      onClick={() => openWindow(opt.tab)}>
                       <span className="icon">{opt.icon}</span> {opt.label}
                     </button>
                   ))}

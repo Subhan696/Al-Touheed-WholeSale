@@ -86,8 +86,7 @@ function parsePaymentMethodString(str) {
 
 
 
-function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, isActive }) {
-
+function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesList, onNewSale, isActive }) {
   const isEditing = !!saleToEdit;
 
   const salesVersion = useDataVersion('sales');
@@ -605,7 +604,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const rate = parseFloat(product.sale_rate) || 0;
 
-    const purRate = parseFloat(product.purchase_rate) || 0;
+    const purRate = Math.round((parseFloat(product.actual_cost) || parseFloat(product.purchase_rate) || 0) * 100) / 100;
 
     const baseDisc = parseFloat(product.discount) || 0;
 
@@ -797,7 +796,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const rate = parseFloat(product.sale_rate) || 0;
 
-    const purRate = parseFloat(product.purchase_rate) || 0;
+    const purRate = Math.round((parseFloat(product.actual_cost) || parseFloat(product.purchase_rate) || 0) * 100) / 100;
 
     const newIdx = itemsRef.current.length;
 
@@ -1297,7 +1296,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const rate = parseFloat(product.sale_rate) || 0;
 
-    const purRate = parseFloat(product.purchase_rate) || 0;
+    const purRate = Math.round((parseFloat(product.actual_cost) || parseFloat(product.purchase_rate) || 0) * 100) / 100;
 
     const baseDisc = parseFloat(product.discount) || 0;
 
@@ -1843,13 +1842,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     }, 0);
 
-    const totalPackets = items.reduce((s, i) => {
-
+    const totalQty = items.reduce((s, i) => {
       const p = parseInt(i.packets) || 0;
-
       return s + (i.isReturn ? 0 : Math.abs(p));
-
     }, 0);
+
+    const totalPackets = Math.round(items.reduce((s, i) => {
+      if (i.isReturn) return s;
+      const qty = Math.abs(parseFloat(i.packets) || 0);
+      const packing = parseFloat(i.packingQty) || 1;
+      return s + (packing > 0 ? (qty / packing) : qty);
+    }, 0) * 100) / 100;
 
     const totalReturnQty = items.reduce((s, i) => i.isReturn ? s + Math.abs(parseInt(i.packets) || 0) : s, 0);
 
@@ -1871,7 +1874,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
     const grandTotal = subTotal + miscAmt - totalDiscountAmt;
 
-    return { subTotal, itemDiscounts, totalDiscountAmt, totalPackets, grandTotal, totalReturnQty, totalReturnAmount };
+    return { subTotal, itemDiscounts, totalDiscountAmt, totalQty, totalPackets, grandTotal, totalReturnQty, totalReturnAmount };
 
   }, [items, discount, extraDiscountPct, miscCharges]);
 
@@ -2395,7 +2398,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
           <td class="right">${formatAmt(rate)}</td>
 
-          ${hasDiscount ? `<td class="right">${formatAmt(Math.abs(disc))}</td>` : ''}
+          ${hasDiscount ? `<td class="right">${disc !== 0 ? formatAmt(Math.abs(disc)) : ''}</td>` : ''}
 
           <td class="right">${formatAmt(Math.abs(item.amount))}</td>
 
@@ -2566,21 +2569,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
 
       const tfootHtml = isLastPage ? `
-
         <tfoot>
-
           <tr>
-
-            <th colspan="3" style="text-align: right; border: none; padding-right: 10px; font-size: 12px; font-weight: 900;">Total Qty:</th>
-
-            <th style="border-top: 2px solid #000; border-bottom: 2px solid #000; font-size: 13px; font-weight: 900;">${totals.totalPackets}</th>
-
+            <th style="border: none;"></th>
+            <th style="text-align: left; border: none; padding-left: 5px; font-size: 13px; font-weight: 900;">Total Packets: ${totals.totalPackets}</th>
+            <th style="text-align: right; border: none; padding-right: 10px; font-size: 12px; font-weight: 900;">Total Qty:</th>
+            <th style="border-top: 2px solid #000; border-bottom: 2px solid #000; font-size: 13px; font-weight: 900; text-align: center;">${totals.totalQty}</th>
             <th colspan="${hasDiscount ? 3 : 2}" style="border: none;"></th>
-
           </tr>
-
         </tfoot>
-
       ` : '';
 
 
@@ -2623,89 +2620,79 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
             </div>
 
-            <div style="text-align: right;">
-
-              <div><strong>Subtotal:</strong> ${formatAmt(totals.subTotal + (totals.totalReturnAmount || 0))}</div>
-
-              ${hasAnyDiscount ? `<div><strong>Total Discount:</strong> ${formatAmt(totals.totalDiscountAmt)}</div>` : ''}
-
-              ${(totals.totalReturnQty > 0 || totals.totalReturnAmount > 0) ? `
-
-                <div style="margin-top: 4px;">
-
-                  <span style="background-color: #d1d5db; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">
-
-                    <span style="margin-right: 15px;"><strong>Total Return Qty:</strong> ${totals.totalReturnQty}</span>
-
-                    <span><strong>Return Amount:</strong> -${formatAmt(totals.totalReturnAmount)}</span>
-
-                  </span>
-
+            <div style="width: 280px; margin-left: auto;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Subtotal:</strong></span>
+                <span>${formatAmt(totals.subTotal + (totals.totalReturnAmount || 0))}</span>
+              </div>
+              ${hasAnyDiscount ? `
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="white-space: nowrap;"><strong>Total Discount:</strong></span>
+                  <span>${formatAmt(totals.totalDiscountAmt)}</span>
                 </div>
-
               ` : ''}
-
+              ${(totals.totalReturnQty > 0 || totals.totalReturnAmount > 0) ? `
+                <div style="margin-top: 4px; text-align: right;">
+                  <span style="background-color: #d1d5db; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                    <span style="margin-right: 15px;"><strong>Total Return Qty:</strong> ${totals.totalReturnQty}</span>
+                    <span><strong>Return Amount:</strong> -${formatAmt(totals.totalReturnAmount)}</span>
+                  </span>
+                </div>
+              ` : ''}
             </div>
-
           </div>
 
           ${(customerPrevBalance && parseFloat(customerPrevBalance) !== 0 && (currentUser?.permissions || []).includes('use_master_cashier')) ? `
-
-            <div class="net-total" style="margin-bottom: 2px;">
-
-              <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
-
+            <div class="net-total" style="border-bottom: none; margin-bottom: 0;">
+              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Invoice Net Total:</strong></span>
+                <span>${formatAmt(totals.grandTotal)}</span>
+              </div>
             </div>
-
-            <div class="net-total" style="margin-bottom: 2px;">
-
-              <strong>Previous Balance:</strong> ${customerPrevBalance > 0 ? '+' : '-'}${formatAmt(Math.abs(parseFloat(customerPrevBalance)))}
-
+            <div class="net-total" style="margin-bottom: 0;">
+              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Previous Balance:</strong></span>
+                <span>${customerPrevBalance > 0 ? '+' : '-'}${formatAmt(Math.abs(parseFloat(customerPrevBalance)))}</span>
+              </div>
             </div>
-
-            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 0; margin-top: 2px;">
-
-              <strong>Net Payable Total:</strong> ${formatAmt(totals.grandTotal + parseFloat(customerPrevBalance))}
-
+            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: none; padding: 3px 6px; margin-top: 2px;">
+              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Net Payable Total:</strong></span>
+                <span>${formatAmt(totals.grandTotal + parseFloat(customerPrevBalance))}</span>
+              </div>
             </div>
-
           ` : `
-
-            <div class="net-total">
-
-              <strong>Invoice Net Total:</strong> ${formatAmt(totals.grandTotal)}
-
+            <div class="net-total" style="border-bottom: none;">
+              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Invoice Net Total:</strong></span>
+                <span>${formatAmt(totals.grandTotal)}</span>
+              </div>
             </div>
-
           `}
 
           ${payments.length > 0 ? `
-
-            <div class="net-total" style="margin-bottom: 2px;">
-
-              <strong>Cash Received:</strong> ${formatAmt(cashReceived)}
-
-            </div>
-
-            ${bankReceived > 0 ? `
-
-              <div class="net-total" style="margin-bottom: 2px;">
-
-                <strong>Bank Online/Cheque Received:</strong> ${formatAmt(bankReceived)}
-
+            <div class="net-total" style="margin-bottom: 0;">
+              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Cash Received:</strong></span>
+                <span>${formatAmt(cashReceived)}</span>
               </div>
-
-            ` : ''}
-
-            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 0; margin-top: 2px;">
-
-              <strong>Balance Amount:</strong> ${formatAmt(balanceAmount)}
-
             </div>
-
+            ${bankReceived > 0 ? `
+              <div class="net-total" style="margin-bottom: 0;">
+                <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                  <span style="white-space: nowrap;"><strong>Bank / Online Received:</strong></span>
+                  <span>${formatAmt(bankReceived)}</span>
+                </div>
+              </div>
+            ` : ''}
+            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 6px; margin-top: 2px;">
+              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                <span style="white-space: nowrap;"><strong>Balance Amount:</strong></span>
+                <span>${formatAmt(balanceAmount)}</span>
+              </div>
+            </div>
           ` : ''}
-
-        </div>
+          </div>
 
       ` : '';
 
@@ -3167,19 +3154,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
           <button type="button" className="topbar-btn topbar-btn-secondary" onClick={() => isEditing ? onExit() : window.location.reload()}>{isEditing ? 'Cancel' : 'Reset'}</button>
 
-          <button type="button" className="topbar-btn topbar-btn-tertiary" onClick={onExit}>Exit</button>
+          <button type="button" className="topbar-btn topbar-btn-secondary" onClick={onViewSalesList}>View Sales List</button>
 
           {isEditing && (
 
             <button type="button" className="topbar-btn" style={{ background: '#b91c1c', color: '#fff' }} onClick={handleDeleteSale}>Delete</button>
 
           )}
-
-          <button type="button" className="topbar-btn topbar-btn-primary" onClick={handleSubmit} disabled={isSubmitting}>
-
-            {isSubmitting ? 'Saving...' : isEditing ? 'Update Sale' : 'Save Sale'}
-
-          </button>
 
           <button type="button" className="topbar-btn topbar-btn-primary" onClick={handlePreview} disabled={isSubmitting} style={{ background: '#3b82f6', borderColor: '#3b82f6' }}>
 
@@ -3769,6 +3750,87 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
         </div>
 
+        {/* Payment Details Side Panel when editing */}
+        {isEditing && (() => {
+          const receivedList = Array.isArray(receivedPayments)
+            ? receivedPayments
+            : Object.entries(receivedPayments || {}).map(([method, amount]) => ({ method, amount }));
+          const totalReceived = receivedList.reduce((acc, p) => acc + (typeof p === 'number' ? p : (parseFloat(p.amount) || 0)), 0);
+          const prevBal = parseFloat(customerPrevBalance || 0);
+          const netPayable = totals.grandTotal + prevBal;
+          const remBalance = netPayable - totalReceived;
+
+          return (
+            <div className="edit-side-panel" style={{
+              flex: '0 0 320px',
+              background: '#f9fafb',
+              borderLeft: '1px solid #e5e7eb',
+              padding: '16px',
+              boxSizing: 'border-box',
+              overflowY: 'auto'
+            }}>
+              <h3 style={{ marginTop: 0, color: '#111827', fontSize: '1rem', fontWeight: 800, borderBottom: '2px solid #cbd5e1', paddingBottom: '8px' }}>
+                Payment Details
+              </h3>
+
+              <div style={{ background: 'white', padding: '14px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0', marginTop: '10px' }}>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#4b5563', fontWeight: 700 }}>Received Amounts</h4>
+
+                {receivedList.length > 0 ? (
+                  receivedList.map((p, pIdx) => (
+                    <div key={pIdx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f3f4f6' }}>
+                      <span style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e293b' }}>{p.method}</span>
+                      <span style={{ fontWeight: 800, fontSize: '1.4rem', color: '#0f172a' }}>PKR {Math.round(p.amount || 0).toLocaleString()}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ color: '#94a3b8', fontSize: '0.85rem', fontStyle: 'italic', padding: '4px 0' }}>No payments recorded</div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '2px solid #e5e7eb' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Total Received</span>
+                  <span style={{ fontWeight: 900, color: '#4f46e5', fontSize: '1.4rem' }}>
+                    PKR {Math.round(totalReceived).toLocaleString()}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '1px dashed #e5e7eb' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Current Bill</span>
+                  <span style={{ fontWeight: 900, fontSize: '1.3rem', color: '#0f172a' }}>
+                    PKR {Math.round(totals.grandTotal).toLocaleString()}
+                  </span>
+                </div>
+
+                {prevBal !== 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '1px dashed #e5e7eb' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Previous Balance</span>
+                    <span style={{ fontWeight: 900, fontSize: '1.2rem', color: prevBal > 0 ? '#dc2626' : '#16a34a' }}>
+                      {prevBal > 0 ? '+' : ''} PKR {Math.round(prevBal).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '2px solid #e5e7eb' }}>
+                  <span style={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>Balance</span>
+                  <span style={{
+                    fontWeight: 900,
+                    fontSize: '1.3rem',
+                    color: Math.round(remBalance) > 0 ? '#dc2626' : '#16a34a'
+                  }}>
+                    PKR {Math.round(remBalance).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '16px' }}>
+                <p style={{ color: '#6b7280', fontSize: '0.8rem', lineHeight: '1.2' }}>
+                  * Payment amounts shown are original.
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
       </div>
 
 
@@ -3797,7 +3859,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
 
             {focusedItem
 
-              ? <strong style={{ fontSize: '1rem' }}>PKR {focusedItem.purchaseRate ?? '—'}</strong>
+              ? <strong style={{ fontSize: '1rem' }}>PKR {focusedItem.purchaseRate != null && !isNaN(focusedItem.purchaseRate) ? (Math.round(parseFloat(focusedItem.purchaseRate) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '—'}</strong>
 
               : <span className="footer-placeholder">—</span>}
 
@@ -3846,11 +3908,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onNewSale, is
         </div>
 
         <div className="footer-total-qty">
-
-          <span>Total Items</span>
-
-          <strong>{totals.totalPackets}</strong>
-
+          <span style={{ fontSize: '0.7rem' }}>Total Pkts / Pcs</span>
+          <strong style={{ fontSize: '0.9rem', whiteSpace: 'nowrap' }}>{totals.totalPackets} pkts / {totals.totalQty} pcs</strong>
         </div>
 
         <div className="footer-total-qty">

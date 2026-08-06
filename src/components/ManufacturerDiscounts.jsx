@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import './ManufacturerDiscounts.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -25,9 +25,11 @@ function ManufacturerDiscounts({ openWindow }) {
   const [rows, setRows] = useState([makeRow()]);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [showManageModal, setShowManageModal] = useState(false);
   const [newMfgName, setNewMfgName] = useState('');
+  const [manageSearchQuery, setManageSearchQuery] = useState('');
 
   const gridRefs = useRef({});
   const manageInputRef = useRef(null);
@@ -376,6 +378,26 @@ function ManufacturerDiscounts({ openWindow }) {
     return { ...r, _bg, _hideMfg, isStart, isEnd };
   });
 
+  // Filter rows based on search query
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return decoratedRows;
+    const q = searchQuery.toLowerCase().trim();
+    return decoratedRows.filter(r => {
+      const manufacturer = (r.manufacturer || '').toLowerCase();
+      const brand = (r.brand || '').toLowerCase();
+      const supplier = suppliersList.find(s => String(s.id) === String(r.supplier_id));
+      const supplierName = supplier ? supplier.name.toLowerCase() : '';
+      return manufacturer.includes(q) || brand.includes(q) || supplierName.includes(q);
+    });
+  }, [decoratedRows, searchQuery, suppliersList]);
+
+  // Filter suppliers for manage modal
+  const filteredSuppliersList = useMemo(() => {
+    if (!manageSearchQuery.trim()) return suppliersList;
+    const q = manageSearchQuery.toLowerCase().trim();
+    return suppliersList.filter(s => s.name.toLowerCase().includes(q));
+  }, [suppliersList, manageSearchQuery]);
+
   return (
     <div className="manufacturer-discounts-page">
       <div className="md-header">
@@ -384,6 +406,13 @@ function ManufacturerDiscounts({ openWindow }) {
           <p className="md-subtitle">Link each brand to its supplier account so stock &amp; ledger reports group correctly. Select multiple brands to auto-split them into rows! Empty row at bottom for new manufacturers.</p>
         </div>
         <div className="md-actions">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search supplier, brand..."
+            style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 7, fontSize: '0.82rem', width: 200, marginRight: 8 }}
+          />
           {statusMsg && <span className="md-status">{statusMsg}</span>}
           {rows.filter(r => r.brand && !r.supplier_id).length > 0 && (
             <span style={{ color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '4px 10px', fontSize: '0.82rem', fontWeight: 600 }}>
@@ -410,7 +439,7 @@ function ManufacturerDiscounts({ openWindow }) {
             </tr>
           </thead>
           <tbody>
-            {decoratedRows.map((r, i) => (
+            {filteredRows.map((r, i) => (
               <tr key={r.id} style={{ backgroundColor: r._bg }} className={`${r.isStart ? 'md-group-start' : ''} ${r.isEnd ? 'md-group-end' : ''} ${r._hideMfg ? 'md-mfg-hide' : ''}`}>
                 <td className="center-text">{i + 1}</td>
                 <td className="md-cell-mfg" style={{ position: 'relative' }}>
@@ -514,10 +543,19 @@ function ManufacturerDiscounts({ openWindow }) {
                 placeholder="New Supplier Name..." style={{ flex: 1, padding: "8px 10px", border: "1px solid #e4e6ef", borderRadius: 5, fontSize: "0.9rem" }} />
               <button className="md-btn md-btn-primary" onClick={handleAddMfg}>Add</button>
             </div>
+            <div style={{ marginBottom: 12 }}>
+              <input
+                type="text"
+                value={manageSearchQuery}
+                onChange={e => setManageSearchQuery(e.target.value)}
+                placeholder="Search suppliers..."
+                style={{ width: '100%', padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: "0.85rem" }}
+              />
+            </div>
             <div style={{ maxHeight: 300, overflowY: "auto" }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
-                  {suppliersList.map(item => (
+                  {filteredSuppliersList.map(item => (
                     <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       {editingMfgId === item.id ? (
                         <>
@@ -547,7 +585,7 @@ function ManufacturerDiscounts({ openWindow }) {
                       )}
                     </tr>
                   ))}
-                  {suppliersList.length === 0 && <tr><td colSpan="2" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>No suppliers found</td></tr>}
+                  {filteredSuppliersList.length === 0 && <tr><td colSpan="2" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>No suppliers found</td></tr>}
                 </tbody>
               </table>
             </div>

@@ -15,7 +15,8 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     const balance = supplierBalances[balKey];
     let balText = '';
     if (showSupplierBalance && balance !== undefined) {
-      balText = ` | Balance: ${fmt2(Math.abs(balance))} ${balance >= 0 ? 'Cr' : 'Dr'}`;
+      const netBal = balance - (sup.totalValue || 0);
+      balText = ` | Sup Bal: ${fmt2(Math.abs(balance))} ${balance >= 0 ? 'Cr' : 'Dr'} | Net Bal: ${fmt2(Math.abs(netBal))} ${netBal >= 0 ? 'Cr' : 'Dr'}`;
     }
 
     let categoriesHtml = '';

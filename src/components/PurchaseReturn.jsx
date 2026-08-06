@@ -376,14 +376,13 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
       const q = parseInt(r.packets) || 0;
       const base = parseFloat(r.preDiscPrice) || 0;
       const flat = parseFloat(r.flatDiscount) || 0;
-      const pPrice = Math.max(0, base - flat);
       const dPct = parseFloat(r.discPct) || 0;
-      const rDisc = pPrice * (dPct / 100);
-      const netRate = pPrice - rDisc;
+      const rDisc = base * (dPct / 100);
+      const netRate = Math.max(0, base - rDisc - flat);
       const rowTotal = netRate * q;
       const rowGross = base * q;
 
-      mathMap[r.id] = { pPrice, rowDiscTotal: (flat + rDisc) * q, rowTotal, netRate };
+      mathMap[r.id] = { pPrice: netRate, rowDiscTotal: (flat + rDisc) * q, rowTotal, netRate };
       if (r.description && q > 0) {
         sub += rowTotal;
         grossSub += rowGross;
@@ -709,9 +708,9 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                       <th style={{ padding: '0 4px', textAlign: 'left' }}>Description</th>
                       <th style={{ width: 50, textAlign: 'center', padding: '0 2px' }}>Qty</th>
                       <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Pre-Disc</th>
+                      <th style={{ width: 50, textAlign: 'right', padding: '0 4px' }}>Disc%</th>
                       <th style={{ width: 60, textAlign: 'right', padding: '0 4px' }}>Flat Disc</th>
                       <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Net Rate</th>
-                      <th style={{ width: 50, textAlign: 'right', padding: '0 4px' }}>Disc%</th>
                       <th style={{ width: 60, textAlign: 'right', padding: '0 4px' }}>Discount</th>
                       <th style={{ width: 80, textAlign: 'right', padding: '0 4px' }}>Amount</th>
                       <th style={{ width: 24, padding: '0' }}></th>
@@ -720,7 +719,6 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                   <tbody>
                     {items.map((row, idx) => {
                       const math = rowMath[row.id] || { pPrice: 0, rowTotal: 0, netRate: 0, rowDiscTotal: 0 };
-                      const rDiscAmount = (parseFloat(row.preDiscPrice || 0) - parseFloat(row.flatDiscount || 0)) * (parseFloat(row.discPct || 0) / 100) * (parseInt(row.packets || 0));
                       return (
                         <tr key={row.id} style={{ height: 32, borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ textAlign: 'center', fontWeight: 700, color: '#1e1e2d', fontSize: '0.85rem' }}>
@@ -796,6 +794,19 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                             <input
                               type="text"
                               inputMode="decimal"
+                              value={row.discPct || ''}
+                              onChange={e => updateRow(row.id, 'discPct', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
+                              onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
+                              placeholder="0%"
+                              className="form-input center-text"
+                              style={{ height: 24, padding: 2 }}
+                            />
+                          </td>
+
+                          <td style={{ padding: '0 4px' }}>
+                            <input
+                              type="text"
+                              inputMode="decimal"
                               value={row.flatDiscount || ''}
                               onChange={e => updateRow(row.id, 'flatDiscount', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
                               onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
@@ -809,21 +820,8 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                             {math.netRate > 0 ? Math.round(math.netRate).toLocaleString() : '—'}
                           </td>
 
-                          <td style={{ padding: '0 4px' }}>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={row.discPct || ''}
-                              onChange={e => updateRow(row.id, 'discPct', parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
-                              onFocus={e => { setActiveRowId(row.id); e.target.select(); }}
-                              placeholder="0%"
-                              className="form-input center-text"
-                              style={{ height: 24, padding: 2 }}
-                            />
-                          </td>
-
                           <td style={{ textAlign: 'right', fontSize: '0.85rem', fontWeight: 500, color: '#6b7280', padding: '0 4px' }}>
-                            {rDiscAmount > 0 ? Math.round(rDiscAmount).toLocaleString() : '—'}
+                            {math.rowDiscTotal > 0 ? Math.round(math.rowDiscTotal).toLocaleString() : '—'}
                           </td>
 
                           <td className="amount-cell" style={{ textAlign: 'right', fontWeight: 700, color: '#991b1b', fontSize: '0.88rem', padding: '0 4px' }}>

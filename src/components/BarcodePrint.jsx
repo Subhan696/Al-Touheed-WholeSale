@@ -87,7 +87,6 @@ function BarcodePrint({ isActive }) {
         nameParts.push(desc);
         nameParts.push(cat);
         nameParts.push(size);
-        nameParts.push(gender);
 
         let itemName = nameParts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || 'Unknown';
 
@@ -147,7 +146,6 @@ function BarcodePrint({ isActive }) {
               nameParts.push(desc);
               nameParts.push((found.category || '').trim());
               nameParts.push((found.size_range || '').trim());
-              nameParts.push((found.gender || '').trim());
               return nameParts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || 'Unknown';
             })(),
             item_description: found.description || 'Unknown',
