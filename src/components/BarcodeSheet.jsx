@@ -90,6 +90,7 @@ function BarcodeSheet({ items, onClose }) {
       for (let i = 0; i < item.quantity; i++) {
         labels.push({
           ...item,
+          isLastOfItem: (i === item.quantity - 1),
           uniqueKey: `${itemIdx}-${item.item_code}-${i}`
         });
       }
@@ -183,9 +184,13 @@ function BarcodeSheet({ items, onClose }) {
             <p className="label-item-name">
               {label.item_name || 'NO_NAME'}
             </p>
-
             <div className="label-footer">
               <div className="label-packing">{label.packing}</div>
+              {label.isLastOfItem && (
+                <div style={{ fontSize: '11pt', letterSpacing: '0.5px', textAlign: 'center', color: '#000', fontWeight: '900', margin: '0 4px', alignSelf: 'flex-end', lineHeight: 1 }}>
+                  ---------
+                </div>
+              )}
               <div className="label-price">{label.sale_rate}</div>
             </div>
           </div>

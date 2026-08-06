@@ -32,11 +32,10 @@ export function buildPurchaseReturnHTML(header, items) {
     const q = parseInt(item.packets || item.qty || item.stock_packets) || 0;
     const base = parseFloat(item.preDiscPrice || item.pre_disc_price || item.rate) || 0;
     const flat = parseFloat(item.flatDiscount || item.flat_discount) || 0;
-    const pPrice = Math.max(0, base - flat);
     const dPct = parseFloat(item.discPct || item.disc_pct) || 0;
-    const rDisc = pPrice * (dPct / 100);
-    const netRate = parseFloat(item.netRate || item.net_rate || (pPrice - rDisc)) || 0;
-    const amt = parseFloat(item.amount || (netRate * q)) || 0;
+    const rDisc = base * (dPct / 100);
+    const netRate = Math.max(0, base - rDisc - flat);
+    const amt = netRate * q;
 
     totalQty += q;
     grossSub += base * q;

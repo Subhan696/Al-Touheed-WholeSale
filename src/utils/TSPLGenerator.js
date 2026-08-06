@@ -14,40 +14,56 @@ export const generateTSPL = (items) => {
         const quantity = parseInt(item.quantity, 10) || 1;
         if (quantity <= 0) return;
 
-        commands += 'CLS\n';
+        const buildLabelCmds = (isLastLabel) => {
+            let cmd = 'CLS\n';
 
-        // --- Item Code ---
-        commands += `TEXT 34,0,"0",0,16,16,"${item.item_code}"\n`;
+            // --- Item Code ---
+            cmd += `TEXT 34,0,"0",0,16,16,"${item.item_code}"\n`;
 
-        // --- Header: Brand (Top Right) ---
-        commands += `TEXT 300,10,"0",0,11,11,"ATG"\n`;
+            // --- Header: Brand (Top Right) ---
+            cmd += `TEXT 300,10,"0",0,11,11,"ATG"\n`;
 
-        // --- Barcode ---
-        commands += `BARCODE 34,40,"128",40,0,0,3,6,"${item.item_code}"\n`;
+            // --- Barcode ---
+            cmd += `BARCODE 34,40,"128",40,0,0,3,6,"${item.item_code}"\n`;
 
-        // --- Description ---
-        let fullDesc = item.item_name || 'NO_NAME';
-        if (fullDesc.length > 30) fullDesc = fullDesc.substring(0, 30);
-        commands += `TEXT 34,88,"0",0,11,11,"${fullDesc}"\n`;
-        // --- Footer: Packing (Bottom Left) ---
-        const packingText = (item.packing || 1).toString();
-        commands += `TEXT 34,130,"0",0,16,16,"${packingText}"\n`;
+            // --- Description ---
+            let fullDesc = item.item_name || 'NO_NAME';
+            if (fullDesc.length > 30) fullDesc = fullDesc.substring(0, 30);
+            cmd += `TEXT 34,88,"0",0,11,11,"${fullDesc}"\n`;
 
+            // --- Footer: Packing (Bottom Left) ---
+            const packingText = (item.packing || 1).toString();
+            cmd += `TEXT 34,130,"0",0,16,16,"${packingText}"\n`;
 
-        // --- Price: bigger width, slightly shorter height, bolder ---
-        const price = `${item.sale_rate || 0}`;
-        const priceFontW = 24; // Wider
-        const priceFontH = 18; // Slightly shorter
-        let priceEstimatedWidth = price.length * (priceFontW + 2);
-        let priceX = 300 - priceEstimatedWidth; // Move more left
-        if (priceX < 50) priceX = 50;
+            // --- Dashed line to separate end of item code (between packing and price) ---
+            if (isLastLabel) {
+                const dashStr = "---------";
+                cmd += `TEXT 110,148,"0",0,14,14,"${dashStr}"\n`;
+                cmd += `TEXT 112,148,"0",0,14,14,"${dashStr}"\n`;
+                cmd += `TEXT 110,150,"0",0,14,14,"${dashStr}"\n`;
+                cmd += `TEXT 112,150,"0",0,14,14,"${dashStr}"\n`;
+            }
 
-        // Fake bold by printing twice slightly shifted
-        commands += `TEXT ${priceX},125,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
-        commands += `TEXT ${priceX + 2},125,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
+            // --- Price ---
+            const price = `${item.sale_rate || 0}`;
+            const priceFontW = 24;
+            const priceFontH = 18;
+            let priceEstimatedWidth = price.length * (priceFontW + 2);
+            let priceX = 300 - priceEstimatedWidth;
+            if (priceX < 50) priceX = 50;
 
-        // --- Print ---
-        commands += `PRINT 1,${quantity}\n`;
+            cmd += `TEXT ${priceX},125,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
+            cmd += `TEXT ${priceX + 2},125,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
+
+            return cmd;
+        };
+
+        if (quantity > 1) {
+            commands += buildLabelCmds(false);
+            commands += `PRINT 1,${quantity - 1}\n`;
+        }
+        commands += buildLabelCmds(true);
+        commands += `PRINT 1,1\n`;
     });
 
     return commands;
