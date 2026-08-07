@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useDataVersion } from '../context/DataContext';
+import { getLocalDateString } from '../utils/dateUtils';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -29,7 +30,10 @@ const formatDateDMY = (val) => {
 
 function PurchaseList({ currentUser, onEditPurchase, isActive }) {
   const [purchases, setPurchases] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [filterDate, setFilterDate] = useState(() => getLocalDateString());
+  const [showAll, setShowAll] = useState(false);
   const version = useDataVersion('purchases');
   const [showBulkPost, setShowBulkPost] = useState(false);
   const [bulkFrom, setBulkFrom] = useState('');
@@ -61,18 +65,26 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
   useEffect(() => { load(); }, [version]);
 
   const load = async () => {
-    try { setPurchases(await ipcRenderer.invoke('get-purchases') || []); } catch {}
+    setLoading(true);
+    try {
+      const res = await ipcRenderer.invoke('get-purchases') || [];
+      setPurchases(res);
+    } catch {} finally {
+      setLoading(false);
+    }
   };
 
   const handleDelete = async (p) => {
-    if (window.confirm(`Delete purchase #${p.id}?`)) {
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete purchase #${p.id}?`);
+    if (confirmed) {
       await ipcRenderer.invoke('delete-purchase', p.id);
       load();
     }
   };
 
   const handlePost = async (p) => {
-    if (window.confirm(`Post purchase #${p.id}? Once posted, stock will be updated.`)) {
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', `Post purchase #${p.id}? Once posted, stock will be updated.`);
+    if (confirmed) {
       await ipcRenderer.invoke('post-purchase', p.id);
       load();
     }
@@ -104,25 +116,39 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
     setIsPosting(false);
   };
 
-  const filtered = purchases.filter(p =>
-    !search || 
-    p.supplier_name?.toLowerCase().includes(search.toLowerCase()) || 
-    p.invoice_no?.toLowerCase().includes(search.toLowerCase()) ||
-    p.blt_number?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = React.useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return purchases.filter(p => {
+      const matchSearch = !q || 
+        p.supplier_name?.toLowerCase().includes(q) || 
+        p.invoice_no?.toLowerCase().includes(q) ||
+        p.blt_number?.toLowerCase().includes(q) ||
+        String(p.id).includes(q);
+
+      const pDate = getLocalDateString(p.purchase_date || p.created_at);
+      const matchDate = showAll || pDate === filterDate;
+
+      return matchSearch && matchDate;
+    });
+  }, [purchases, search, filterDate, showAll]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '2px solid #e4e6ef', marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>Purchase List <span style={{ fontSize: '0.85rem', color: '#aaa', fontWeight: 400 }}>({filtered.length})</span></h2>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <input placeholder="Search supplier, invoice or BLT #..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', width: 280, fontFamily: 'inherit' }} />
-          <button onClick={() => setShowBulkPost(true)} style={{ background: '#50cd89', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', marginLeft: 12 }}>Post Multiple (Ctrl+E)</button>
+        <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>
+          Purchase List <span style={{ fontSize: '0.85rem', color: '#6b7280', fontWeight: 500 }}>({filtered.length} {showAll ? 'total' : `on ${formatDateDMY(filterDate)}`})</span>
+        </h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input placeholder="Search supplier, invoice or BLT #..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '6px 12px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', width: 240, fontFamily: 'inherit' }} />
+          <input type="date" value={filterDate} onChange={e => { setFilterDate(e.target.value); setShowAll(false); }} style={{ padding: '6px 10px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', fontFamily: 'inherit' }} />
+          <button onClick={() => setShowAll(true)} className="btn btn-secondary" style={{ height: 34, fontSize: '0.85rem', background: showAll ? '#3699ff' : '#e4e6ef', color: showAll ? '#fff' : '#3f4254' }}>Retrieve All</button>
+          <button onClick={load} className="btn btn-secondary" style={{ height: 34, fontSize: '0.85rem' }}>🔄 Refresh</button>
+          <button onClick={() => setShowBulkPost(true)} className="btn" style={{ background: '#50cd89', color: '#fff', height: 34, fontSize: '0.85rem', fontWeight: 600 }}>Post Multiple (Ctrl+E)</button>
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e4e6ef', borderRadius: 8, background: '#fff' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-          <thead style={{ position: 'sticky', top: 0, background: '#f5f7fa' }}>
+          <thead style={{ position: 'sticky', top: 0, background: '#f5f7fa', zIndex: 1 }}>
             <tr>
               <th style={th}>ID</th>
               <th style={th}>Date</th>
@@ -137,7 +163,9 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={10} style={{ padding: 60, textAlign: 'center', color: '#888', fontWeight: 600 }}>Loading purchases...</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={10} style={{ padding: 60, textAlign: 'center', color: '#aaa' }}>No purchases</td></tr>
             ) : filtered.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid #f0f0f0' }}>

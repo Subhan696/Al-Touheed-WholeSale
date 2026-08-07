@@ -216,6 +216,99 @@ function App() {
     return [];
   });
 
+  const swapTopWindow = (newKey, props = {}) => {
+    setWindowStack(prev => {
+      if (prev.length === 0) return [{ id: `w-${Date.now()}`, key: newKey, rootKey: newKey, ...props }];
+      const next = prev.slice(0, -1);
+      const winId = `w-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      return [...next, { id: winId, key: newKey, rootKey: newKey, ...props }];
+    });
+  };
+
+  const getWindowInfo = (win) => {
+    const baseKey = win.rootKey || win.key || '';
+    let title = 'Window';
+    let icon = '📄';
+
+    if (baseKey === 'new-item') { title = 'New Item'; icon = '📝'; }
+    else if (baseKey === 'products') { title = 'Product List'; icon = '📦'; }
+    else if (baseKey === 'stock') { title = 'Stock Inventory'; icon = '📊'; }
+    else if (baseKey === 'new-purchase') { title = 'New Purchase'; icon = '🛒'; }
+    else if (baseKey === 'fast-purchase') { title = 'Fast Purchase'; icon = '⚡'; }
+    else if (baseKey === 'purchases') { title = 'Purchase List'; icon = '📋'; }
+    else if (baseKey === 'open-purchase') { title = 'Open Purchase'; icon = '📦'; }
+    else if (baseKey === 'purchase-return') { title = 'Purchase Return'; icon = '🔙'; }
+    else if (baseKey === 'purchase-return-list') { title = 'Return List'; icon = '📋'; }
+    else if (baseKey === 'sale' || baseKey.startsWith('sale-')) { title = 'New Sale'; icon = '🧾'; }
+    else if (baseKey === 'sales-list') { title = 'Sales List'; icon = '📈'; }
+    else if (baseKey === 'sales-return') { title = 'Sales Return'; icon = '↩️'; }
+    else if (baseKey === 'sales-return-list') { title = 'Sales Return List'; icon = '📋'; }
+    else if (baseKey === 'barcode-print') { title = 'Barcode Print'; icon = '🏷️'; }
+    else if (baseKey === 'reports') { title = 'Reports'; icon = '📊'; }
+    else if (baseKey === 'users') { title = 'User Mgmt'; icon = '👥'; }
+    else if (baseKey === 'customers') { title = 'Customers'; icon = '🧑‍🤝‍🧑'; }
+    else if (baseKey === 'ledgers') { title = 'Ledgers'; icon = '📒'; }
+    else if (baseKey === 'gl-accounts') { title = 'Chart of Accounts'; icon = '🏛️'; }
+    else if (baseKey === 'gl-vouchers') { title = 'GL Vouchers'; icon = '🧾'; }
+    else if (baseKey === 'gl-ledger') { title = 'GL Ledger'; icon = '📖'; }
+    else if (baseKey === 'gl-cash-activity') { title = 'Cash Activity'; icon = '💸'; }
+    else if (baseKey === 'backup') { title = 'Backup'; icon = '💾'; }
+    else if (baseKey === 'network-settings') { title = 'Network'; icon = '🌐'; }
+    else if (baseKey === 'receipt-settings') { title = 'Receipt Settings'; icon = '🖨️'; }
+    else { title = baseKey.replace(/-/g, ' '); }
+
+    const timestampMatch = typeof win.key === 'string' && win.key.match(/-(\d+)$/);
+    if (timestampMatch) {
+      const timeStr = new Date(parseInt(timestampMatch[1])).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      title += ` (${timeStr})`;
+    }
+
+    return { title, icon };
+  };
+
+  const bringWindowToFront = (idToMove) => {
+    setWindowStack(prev => {
+      const idx = prev.findIndex(w => w.id === idToMove);
+      if (idx === -1 || idx === prev.length - 1) return prev;
+      const next = [...prev];
+      const [win] = next.splice(idx, 1);
+      next.push(win);
+      return next;
+    });
+  };
+
+  const closeSpecificWindow = (idToClose, e) => {
+    if (e) e.stopPropagation();
+    setWindowStack(prev => {
+      if (prev.length > 1) {
+        return prev.filter(w => w.id !== idToClose);
+      }
+      return prev;
+    });
+  };
+
+  // Handle IPC switch-to-window event from Electron native menu bar
+  useEffect(() => {
+    const { ipcRenderer } = window.require('electron');
+    const handleSwitch = (event, winId) => {
+      bringWindowToFront(winId);
+    };
+    ipcRenderer.on('switch-to-window', handleSwitch);
+    return () => {
+      ipcRenderer.removeListener('switch-to-window', handleSwitch);
+    };
+  }, []);
+
+  // Sync window stack with Electron native menu bar
+  useEffect(() => {
+    const { ipcRenderer } = window.require('electron');
+    const titles = windowStack.map(win => {
+      const info = getWindowInfo(win);
+      return { id: win.id, title: `${info.icon} ${info.title}` };
+    });
+    ipcRenderer.send('update-window-menu', titles);
+  }, [windowStack]);
+
   React.useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
@@ -225,9 +318,8 @@ function App() {
         if (!hasSelection && !hasModal) {
           e.preventDefault();
           const topWin = windowStack[windowStack.length - 1];
-          if (topWin && (topWin.key === 'new-item' || topWin.rootKey === 'new-item')) {
-            closeTopWindow();
-            openWindow('fast-purchase');
+          if (topWin && (topWin.key === 'new-item' || topWin.rootKey === 'new-item' || (typeof topWin.key === 'string' && topWin.key.startsWith('new-item')))) {
+            swapTopWindow('fast-purchase');
           } else {
             closeTopWindow();
           }
@@ -456,7 +548,7 @@ function App() {
             const baseKey = win.rootKey || win.key;
             const isFullScreen = ['sale', 'sales-return'].includes(baseKey);
             return (
-              <div key={win.id} className={`window-layer ${isFullScreen ? 'fullscreen-mode' : ''}`} style={{ zIndex: index + 10, display: isTop ? 'block' : 'none' }}>
+              <div key={win.id} className={`window-layer ${isFullScreen ? 'fullscreen-mode' : ''} ${isTop ? 'active-window' : ''}`} style={{ zIndex: index + 10, display: isTop ? 'block' : 'none' }}>
                 <div className="window-content-wrapper">
                   <WindowContent
                     win={win} isActive={isTop} currentUser={currentUser}

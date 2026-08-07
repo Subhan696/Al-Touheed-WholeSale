@@ -20,6 +20,13 @@ export const generateTSPL = (items) => {
             // --- Item Code ---
             cmd += `TEXT 34,0,"0",0,16,16,"${item.item_code}"\n`;
 
+            // --- Dashed line between item code and ATG ---
+            if (isLastLabel) {
+                const dashStr = "-----------";
+                cmd += `TEXT 150,5,"0",0,11,11,"${dashStr}"\n`;
+                cmd += `TEXT 152,5,"0",0,11,11,"${dashStr}"\n`;
+            }
+
             // --- Header: Brand (Top Right) ---
             cmd += `TEXT 300,10,"0",0,11,11,"ATG"\n`;
 
@@ -34,15 +41,6 @@ export const generateTSPL = (items) => {
             // --- Footer: Packing (Bottom Left) ---
             const packingText = (item.packing || 1).toString();
             cmd += `TEXT 34,130,"0",0,16,16,"${packingText}"\n`;
-
-            // --- Dashed line to separate end of item code (between packing and price) ---
-            if (isLastLabel) {
-                const dashStr = "---------";
-                cmd += `TEXT 110,148,"0",0,14,14,"${dashStr}"\n`;
-                cmd += `TEXT 112,148,"0",0,14,14,"${dashStr}"\n`;
-                cmd += `TEXT 110,150,"0",0,14,14,"${dashStr}"\n`;
-                cmd += `TEXT 112,150,"0",0,14,14,"${dashStr}"\n`;
-            }
 
             // --- Price ---
             const price = `${item.sale_rate || 0}`;

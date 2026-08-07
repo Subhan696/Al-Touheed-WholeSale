@@ -3,6 +3,22 @@ import './NewItemForm.css';
 
 const { ipcRenderer } = window.require('electron');
 
+const formatExactDateTime = (dateStr) => {
+  if (!dateStr) return 'Unknown Date/Time';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+};
+
 function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWindow }) {
   const [itemCode, setItemCode] = useState('');
   const [description, setDescription] = useState('');
@@ -447,9 +463,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
           description: payload.description,
           gender: payload.gender,
           category: payload.category,
+          brand: payload.brand,
           sizeRange: payload.sizeRange,
-          purchaseRate: payload.purchaseRate,
-          saleRate: payload.saleRate,
           year: payload.year,
         });
         if (dup) {
@@ -519,7 +534,18 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
     setIsSubmitting(true);
     setStatusMsg('Merging...');
     try {
-      const newPacking = pendingPayload.packingQty || parseInt(duplicateItem.packing_qty) || 0;
+      const originalPacking = parseInt(duplicateItem.packing_qty) || 0;
+      let activeSessionId = sessionId;
+      if (!activeSessionId) {
+        activeSessionId = await ipcRenderer.invoke('start-new-item-session');
+        setSessionId(activeSessionId);
+      }
+      // If a new purchase rate was entered, overwrite existing purchase rate; keep sale rate identical to existing item
+      const newPurchaseRate = (pendingPayload && pendingPayload.purchaseRate !== undefined && !isNaN(pendingPayload.purchaseRate) && pendingPayload.purchaseRate > 0)
+        ? pendingPayload.purchaseRate
+        : duplicateItem.purchase_rate;
+      const existingSaleRate = duplicateItem.sale_rate;
+
       await ipcRenderer.invoke('update-product', {
         id: duplicateItem.id,
         itemCode: duplicateItem.item_code,
@@ -528,18 +554,22 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
         category: duplicateItem.category,
         brand: duplicateItem.brand || pendingPayload.brand,
         sizeRange: duplicateItem.size_range,
-        purchaseRate: duplicateItem.purchase_rate,
-        saleRate: duplicateItem.sale_rate,
-        packingQty: newPacking,
+        purchaseRate: newPurchaseRate, // Overwrites purchase rate with new value
+        saleRate: existingSaleRate,     // Sale rate remains unchanged
+        packingQty: originalPacking,
         year: duplicateItem.year,
         photoPath: duplicateItem.photo_path,
         discount: duplicateItem.discount,
         note: duplicateItem.note,
+        sessionId: activeSessionId,
       });
-      setStatusMsg(`✅ Merged into existing item ${duplicateItem.item_code} (Packing: ${newPacking})`);
+      // Immediately reload session items list so UI reflects the merged item right away
+      await loadSessionItems(activeSessionId);
+      setStatusMsg(`✅ Merged into Session #${activeSessionId} (${duplicateItem.item_code})`);
       setTimeout(() => {
         setStatusMsg('');
-        loadNextCode(); setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
+        loadNextCode();
+        setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
         setPhotoFile(null); setPhotoPreview(null); setNote('');
         setTimeout(() => refs.current.brand?.focus(), 50);
       }, 1000);
@@ -593,11 +623,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
-      // Ctrl+X: close profit sheet if open, otherwise open Fast Purchase window
+      // Ctrl+X: close profit sheet if open; otherwise App.jsx handles swapping to Fast Purchase
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
-        if (showProfitModal) { e.preventDefault(); setShowProfitModal(false); return; }
-        e.preventDefault();
-        openWindow('fast-purchase');
+        if (showProfitModal) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowProfitModal(false);
+          return;
+        }
         return;
       }
       // Ctrl+F: toggle Fast mode
@@ -690,14 +723,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
           }}>{statusMsg}</span>
         )}
         <div className="header-actions">
-          <button type="button" onClick={() => openWindow('fast-purchase')} className="btn" style={{ fontSize: '0.9rem', padding: '4px 8px', minWidth: '40px', background: '#73cbfb', color: '#000', border: '1px solid #2d9efb', fontWeight: 700 }}>
+          <button type="button" onClick={() => openWindow('fast-purchase')} className="btn" style={{ background: '#73cbfb', color: '#000', border: '1px solid #2d9efb', fontWeight: 700 }}>
             FP
           </button>
-          <button type="button" onClick={() => setSpecialMode(!specialMode)} className="btn" style={{ fontSize: '1rem', padding: '6px 12px', background: specialMode ? '#6df166' : '#49f843ff', color: '#000', border: '1px solid #2af31f', fontWeight: 700 }}>
+          <button type="button" onClick={() => setSpecialMode(!specialMode)} className="btn" style={{ background: specialMode ? '#6df166' : '#49f843ff', color: '#000', border: '1px solid #2af31f', fontWeight: 700 }}>
             {specialMode ? '⚡ Fast ON' : '⚡ Fast'}
           </button>
           <button type="button" onClick={() => setShowProfitModal(true)} className="btn btn-secondary">📊 Profit Sheet</button>
-          <select value="" onChange={e => { if (e.target.value) openListManager(e.target.value); }} className="btn btn-secondary" style={{ appearance: 'none', paddingRight: '12px' }}>
+          <select value="" onChange={e => { if (e.target.value) openListManager(e.target.value); }} className="btn btn-secondary" style={{ appearance: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
             <option value="" disabled>⚙️ Manage Lists...</option>
             <option value="brands">🏢 Brands</option>
             <option value="genders">👔 Genders</option>
@@ -705,7 +738,6 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
             <option value="size_ranges">📏 Sizes</option>
             <option value="packings">📦 Packings</option>
           </select>
-          <button type="button" onClick={handleReset} className="btn btn-secondary">Reset</button>
           <button type="button" onClick={handleSubmit} className="btn btn-primary" disabled={isSubmitting}>
             {isSubmitting ? 'Saving...' : 'Save (Ctrl+S)'}
           </button>
@@ -821,7 +853,7 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                         onKeyDown={e => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
-                            refs.current.saleRate?.focus();
+                            handleSubmit(e);
                           }
                           if (e.key === 'Tab' && !e.shiftKey) {
                             e.preventDefault();
@@ -1551,57 +1583,62 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
 
       {/* Duplicate Item Detection Modal */}
       {duplicateItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 12, width: 520, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(2px)' }}>
+          <div style={{ background: 'white', borderRadius: 10, width: 460, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.3)', border: '1px solid #f59e0b' }}>
 
             {/* Header */}
-            <div style={{ background: '#f59e0b', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: '1.6rem' }}>⚠️</span>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>Duplicate Item Detected</h3>
-                <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'rgba(255,255,255,0.85)' }}>An item with identical details already exists</p>
+            <div style={{ background: '#d97706', padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '1.3rem' }}>⚠️</span>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#fff' }}>Duplicate Item Detected</h3>
               </div>
+              <span style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+                Code: {duplicateItem.item_code}
+              </span>
             </div>
 
-            {/* Comparison */}
-            <div style={{ padding: '20px 24px' }}>
-              <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#92400e', marginBottom: 8 }}>Existing Item — Code: {duplicateItem.item_code}</div>
-                <table style={{ width: '100%', fontSize: '0.85rem', color: '#78350f' }}>
-                  <tbody>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600, width: 100 }}>Description</td><td>{duplicateItem.description}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Gender</td><td>{duplicateItem.gender}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Category</td><td>{duplicateItem.category}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Size</td><td>{duplicateItem.size_range}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Purchase</td><td>Rs. {parseFloat(duplicateItem.purchase_rate).toFixed(2)}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Sale</td><td>Rs. {parseFloat(duplicateItem.sale_rate).toFixed(2)}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Packing</td><td>{duplicateItem.packing_qty}</td></tr>
-                    <tr><td style={{ padding: '3px 0', fontWeight: 600 }}>Year</td><td>{duplicateItem.year}</td></tr>
-                  </tbody>
-                </table>
+            {/* Content */}
+            <div style={{ padding: '16px 18px' }}>
+
+              {/* Exact Saved Timestamp Banner */}
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400e', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>📅 Saved On:</span>
+                <span style={{ color: '#78350f', fontWeight: 800 }}>{formatExactDateTime(duplicateItem.created_at || duplicateItem.updated_at)}</span>
               </div>
 
-              <p style={{ fontSize: '0.88rem', color: '#475569', margin: '0 0 4px', lineHeight: 1.5 }}>
-                <strong>Merge</strong> will update the existing item with the entered brand and packing qty.<br />
-                <strong>Create New</strong> will save as a separate item with a new code.
-              </p>
+              {/* Single Line Item Specification */}
+              <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: 6, padding: '10px 14px', marginBottom: 12 }}>
+                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#1e293b', marginBottom: 6, lineHeight: 1.4 }}>
+                  {`${duplicateItem.description || ''} + ${duplicateItem.category || ''} + ${duplicateItem.size_range || ''} + ${duplicateItem.gender || ''}`}
+                </div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 600, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ color: '#047857' }}>Purchase Rate: <strong style={{ fontWeight: 800, fontSize: '0.95rem' }}>Rs. {parseFloat(duplicateItem.purchase_rate || 0).toFixed(2)}</strong></span>
+                  <span style={{ color: '#cbd5e1' }}>|</span>
+                  <span style={{ color: '#1d4ed8' }}>Sale Rate: <strong style={{ fontWeight: 800, fontSize: '0.95rem' }}>Rs. {parseFloat(duplicateItem.sale_rate || 0).toFixed(2)}</strong></span>
+                </div>
+                {pendingPayload && pendingPayload.purchaseRate && parseFloat(pendingPayload.purchaseRate) !== parseFloat(duplicateItem.purchase_rate) && (
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b45309', marginTop: 6, background: '#fef3c7', padding: '4px 8px', borderRadius: 4 }}>
+                    ⚠️ New Purchase Rate (Rs. {parseFloat(pendingPayload.purchaseRate).toFixed(2)}) will overwrite existing rate, keeping Sale Rate at Rs. {parseFloat(duplicateItem.sale_rate || 0).toFixed(2)}.
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Actions */}
-            <div style={{ padding: '14px 24px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div style={{ padding: '10px 18px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 onClick={() => { setDuplicateItem(null); setPendingPayload(null); }}
-                style={{ padding: '9px 18px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.88rem' }}
+                style={{ padding: '7px 14px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.84rem' }}
               >Cancel</button>
               <button
                 autoFocus
                 onClick={handleDuplicateMerge}
-                style={{ padding: '9px 22px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.88rem' }}
+                style={{ padding: '7px 16px', background: '#d97706', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
               >🔀 Merge</button>
               <button
                 onClick={handleDuplicateCreateNew}
-                style={{ padding: '9px 22px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.88rem' }}
-              >➕ Create New</button>
+                style={{ padding: '7px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
+              >➕ Save as New</button>
             </div>
           </div>
         </div>

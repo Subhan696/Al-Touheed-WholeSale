@@ -177,6 +177,11 @@ function BarcodeSheet({ items, onClose }) {
           <div key={label.uniqueKey} className="barcode-label">
             <div className="label-header">
               <div className="label-item-code">{label.item_code}</div>
+              {label.isLastOfItem && (
+                <div style={{ fontSize: '10pt', letterSpacing: '0.5px', textAlign: 'center', color: '#000', fontWeight: '900', margin: '0 4px', lineHeight: 1 }}>
+                  ------------
+                </div>
+              )}
               <div className="label-brand">ATG</div>
             </div>
             <img ref={el => barcodeRefs.current[label.uniqueKey] = el} className="barcode-canvas" alt="" />
@@ -186,11 +191,6 @@ function BarcodeSheet({ items, onClose }) {
             </p>
             <div className="label-footer">
               <div className="label-packing">{label.packing}</div>
-              {label.isLastOfItem && (
-                <div style={{ fontSize: '11pt', letterSpacing: '0.5px', textAlign: 'center', color: '#000', fontWeight: '900', margin: '0 4px', alignSelf: 'flex-end', lineHeight: 1 }}>
-                  ---------
-                </div>
-              )}
               <div className="label-price">{label.sale_rate}</div>
             </div>
           </div>

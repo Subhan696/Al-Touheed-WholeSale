@@ -60,12 +60,13 @@ export default function GLAccounts() {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this account?')) {
+    const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Are you sure you want to delete this account?');
+    if (confirmed) {
       try {
         await ipcRenderer.invoke('delete-gl-account', id);
         fetchAccounts();
       } catch (err) {
-        alert('Cannot delete account (it might be used in vouchers).');
+        await ipcRenderer.invoke('alert-dialog', 'Cannot delete account (it might be used in vouchers).');
       }
     }
   };

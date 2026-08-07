@@ -375,6 +375,11 @@ async function initDatabase() {
   `);
 
   await query(`
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_pid ON purchase_items(purchase_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_code ON purchase_items(item_code);
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS purchase_returns (
       id SERIAL PRIMARY KEY,
       return_date DATE NOT NULL,
@@ -1953,14 +1958,24 @@ async function handleIPC(channel, ...args) {
       return String(num + 1).padStart(4, '0');
     }
     case 'check-duplicate-product': {
-      const { description, gender, category, sizeRange, purchaseRate, saleRate, year, brand, excludeId } = data;
-      let sql = `SELECT * FROM products WHERE description ILIKE $1 AND gender ILIKE $2 AND category ILIKE $3 AND size_range ILIKE $4 AND purchase_rate = $5 AND sale_rate = $6 AND year = $7 AND brand ILIKE $8`;
-      const params = [description.trim(), gender || '', category || '', sizeRange || '', purchaseRate, saleRate, year || '', brand || ''];
+      const { description, gender, category, sizeRange, year, brand, excludeId } = data;
+      let sql = `SELECT * FROM products WHERE description ILIKE $1 AND COALESCE(gender, '') ILIKE $2 AND COALESCE(category, '') ILIKE $3 AND COALESCE(size_range, '') ILIKE $4`;
+      const params = [(description || '').trim(), gender || '', category || '', sizeRange || ''];
+
+      let paramIdx = 5;
+      if (year) {
+        sql += ` AND COALESCE(year, '') = $${paramIdx++}`;
+        params.push(year);
+      }
+      if (brand) {
+        sql += ` AND COALESCE(brand, '') ILIKE $${paramIdx++}`;
+        params.push(brand);
+      }
       if (excludeId) {
-        sql += ` AND id != $9`;
+        sql += ` AND id != $${paramIdx++}`;
         params.push(excludeId);
       }
-      sql += ` LIMIT 1`;
+      sql += ` ORDER BY created_at DESC LIMIT 1`;
       const r = await query(sql, params);
       return r.rows.length > 0 ? r.rows[0] : null;
     }
@@ -1974,10 +1989,13 @@ async function handleIPC(channel, ...args) {
       return { success: true, id: r.rows[0].id, itemCode: r.rows[0].item_code };
     }
     case 'update-product': {
-      const { id, itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, photoPath, brand, discount, note } = data;
+      const { id, itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, photoPath, brand, discount, note, sessionId } = data;
       await query(
-        'UPDATE products SET item_code=$1, description=$2, gender=$3, category=$4, size_range=$5, purchase_rate=$6, sale_rate=$7, packing_qty=$8, year=$9, photo_path=$10, brand=$11, discount=$12, note=$13, updated_at=NOW() WHERE id=$14',
-        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, photoPath || null, brand || '', discount ? parseFloat(discount) : 0, note || '', id]
+        `UPDATE products SET item_code=$1, description=$2, gender=$3, category=$4, size_range=$5, purchase_rate=$6, sale_rate=$7, packing_qty=$8, year=$9, photo_path=$10, brand=$11, discount=$12, note=$13, 
+         session_id = CASE WHEN $14::integer IS NOT NULL AND $14::integer > 0 THEN $14::integer ELSE session_id END,
+         created_at = CASE WHEN $14::integer IS NOT NULL AND $14::integer > 0 THEN NOW() ELSE created_at END,
+         updated_at = NOW() WHERE id=$15`,
+        [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, photoPath || null, brand || '', discount ? parseFloat(discount) : 0, note || '', sessionId ? parseInt(sessionId) : null, id]
       );
       broadcast('products');
       return { success: true };
@@ -2422,9 +2440,16 @@ async function handleIPC(channel, ...args) {
     case 'get-purchases': {
       const res = await query(`
         SELECT p.*, 
-               (SELECT SUM(pi.packets) FROM purchase_items pi WHERE pi.purchase_id = p.id) as total_qty,
-               CASE WHEN COALESCE(p.ctn_qty, 0) > 0 THEN p.ctn_qty ELSE (SELECT COALESCE(SUM(pe.cartons), 0) FROM purchase_expenses pe WHERE pe.purchase_id = p.id) END as ctn_qty
-        FROM purchases p ORDER BY p.id DESC LIMIT 500
+               COALESCE(pi.total_qty, 0) as total_qty,
+               CASE WHEN COALESCE(p.ctn_qty, 0) > 0 THEN p.ctn_qty ELSE COALESCE(pe.cartons, 0) END as ctn_qty
+        FROM purchases p
+        LEFT JOIN (
+          SELECT purchase_id, SUM(packets) as total_qty FROM purchase_items GROUP BY purchase_id
+        ) pi ON pi.purchase_id = p.id
+        LEFT JOIN (
+          SELECT purchase_id, COALESCE(SUM(cartons), 0) as cartons FROM purchase_expenses GROUP BY purchase_id
+        ) pe ON pe.purchase_id = p.id
+        ORDER BY p.id DESC LIMIT 500
       `);
       return res.rows;
     }
@@ -3521,7 +3546,8 @@ async function handleIPC(channel, ...args) {
 
     // ─── UTILS ────────────────────────────────────────────────────────────────
     case 'confirm-dialog': {
-      const result = await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      const result = await dialog.showMessageBox(win || BrowserWindow.getAllWindows()[0], {
         type: 'warning',
         buttons: ['Cancel', 'Yes'],
         defaultId: 1,
@@ -3529,15 +3555,24 @@ async function handleIPC(channel, ...args) {
         title: 'Confirm',
         message: data || 'Are you sure?'
       });
+      if (win && !win.isDestroyed()) {
+        win.focus();
+        win.webContents.focus();
+      }
       return result.response === 1;
     }
     case 'alert-dialog': {
-      await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      await dialog.showMessageBox(win || BrowserWindow.getAllWindows()[0], {
         type: 'info',
         buttons: ['OK'],
         title: 'Alert',
         message: data || 'Alert'
       });
+      if (win && !win.isDestroyed()) {
+        win.focus();
+        win.webContents.focus();
+      }
       return { success: true };
     }
 
@@ -5228,9 +5263,70 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
-
-  Menu.setApplicationMenu(null);
 }
+
+function rebuildMenu(windowStack = []) {
+  if (!mainWindow) return;
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Sale', accelerator: 'CmdOrCtrl+B', click: () => { if (mainWindow) mainWindow.webContents.send('global-keyboard-shortcut', { key: 'b', ctrlKey: true }); } },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        ...windowStack.map((win) => ({
+          label: win.title || 'Window',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send('switch-to-window', win.id);
+          }
+        })),
+        ...(windowStack.length > 0 ? [{ type: 'separator' }] : []),
+        { role: 'close' }
+      ]
+    }
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+ipcMain.on('update-window-menu', (event, windowStack) => {
+  rebuildMenu(windowStack);
+});
 
 // IPC handler for DB status (always available, even before login)
 ipcMain.handle('get-db-status', () => dbStatus);
@@ -5255,6 +5351,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  rebuildMenu([]);
 });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
