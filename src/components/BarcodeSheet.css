@@ -168,7 +168,7 @@
 .barcode-label {
   border: 1px solid #e4e6ef;
   border-radius: 4px;
-  padding: 1.5mm 2mm;
+  padding: 3.5mm 2mm 1.5mm 2mm;
   background: white;
   display: flex;
   flex-direction: column;
@@ -195,6 +195,22 @@
   font-weight: 900;
   font-family: 'Arial', sans-serif;
   color: #000;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.label-dashed-line {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10pt;
+  letter-spacing: -0.5px;
+  text-align: right;
+  color: #000;
+  font-weight: 900;
+  margin-left: 14px;
+  margin-right: 4px;
   line-height: 1;
 }
 

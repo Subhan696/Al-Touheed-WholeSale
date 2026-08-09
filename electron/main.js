@@ -1982,7 +1982,7 @@ async function handleIPC(channel, ...args) {
     case 'save-product': {
       const { itemCode, description, gender, category, sizeRange, purchaseRate, saleRate, packingQty, year, brand, discount, note, sessionId, createdBy } = data;
       const r = await query(
-        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note, session_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, item_code',
+        'INSERT INTO products (item_code, description, gender, category, size_range, purchase_rate, sale_rate, packing_qty, year, brand, discount, note, session_id, created_by, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW(), NOW()) RETURNING id, item_code',
         [itemCode, description, gender || '', category || '', sizeRange || '', purchaseRate, saleRate, packingQty, year || null, brand || '', discount ? parseFloat(discount) : 0, note || '', sessionId || 0, createdBy || 'Unknown']
       );
       broadcast('products');
@@ -2104,14 +2104,14 @@ async function handleIPC(channel, ...args) {
     }
 
     case 'get-products-by-session': {
-      const r = await query('SELECT * FROM products WHERE session_id = $1 ORDER BY id ASC', [data]);
+      const r = await query('SELECT * FROM products WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [data]);
       return r.rows;
     }
 
     case 'get-products-by-session-range': {
       const { from, to } = data;
       // Fetch products between from and to (inclusive)
-      const r = await query('SELECT * FROM products WHERE session_id >= $1 AND session_id <= $2 ORDER BY session_id ASC, id ASC', [from, to]);
+      const r = await query('SELECT * FROM products WHERE session_id >= $1 AND session_id <= $2 ORDER BY session_id ASC, created_at ASC, id ASC', [from, to]);
       return r.rows;
     }
 

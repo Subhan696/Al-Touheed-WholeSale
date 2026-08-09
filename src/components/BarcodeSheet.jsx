@@ -178,8 +178,8 @@ function BarcodeSheet({ items, onClose }) {
             <div className="label-header">
               <div className="label-item-code">{label.item_code}</div>
               {label.isLastOfItem && (
-                <div style={{ fontSize: '10pt', letterSpacing: '0.5px', textAlign: 'center', color: '#000', fontWeight: '900', margin: '0 4px', lineHeight: 1 }}>
-                  ------------
+                <div className="label-dashed-line">
+                  --------------------
                 </div>
               )}
               <div className="label-brand">ATG</div>

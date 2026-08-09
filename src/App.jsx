@@ -361,7 +361,7 @@ function App() {
 
   const activeBaseKey = windowStack[windowStack.length - 1]?.rootKey || activeTab;
   const isFullScreenMode = ['sale', 'sales-return'].includes(activeBaseKey);
-  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'fast-purchase' || activeBaseKey === 'open-purchase' || activeBaseKey === 'purchase-return';
+  const isMiniSidebar = activeBaseKey === 'new-purchase' || activeBaseKey === 'open-purchase' || activeBaseKey === 'purchase-return';
 
   return (
     <div className="app-container">
@@ -378,11 +378,38 @@ function App() {
               <span className="user-role">{currentUser?.role}</span>
             </div>
           </div>
-          {hasPermission('view_reports') && (
-            <button className={`nav-item nav-item-reports ${activeTab === 'reports' ? 'active' : ''}`} onClick={() => openWindow('reports')} style={{ marginTop: '10px' }}>
-              <span className="icon">📊</span> Reports
-            </button>
-          )}
+          <div className="quick-action-circles">
+            {hasPermission('create_sale') && (
+              <button
+                type="button"
+                className={`circle-btn circle-btn-sale ${activeTab === 'sale' || activeTab.startsWith('sale') ? 'active' : ''}`}
+                onClick={() => openWindow('sale', { forceNewInstance: true })}
+                title="New Sale (S)"
+              >
+                S
+              </button>
+            )}
+            {hasPermission('manage_products') && (
+              <button
+                type="button"
+                className={`circle-btn circle-btn-entry ${activeTab === 'new-item' || activeTab.startsWith('new-item') ? 'active' : ''}`}
+                onClick={() => openWindow('new-item')}
+                title="New Item Entry (E)"
+              >
+                E
+              </button>
+            )}
+            {hasPermission('view_reports') && (
+              <button
+                type="button"
+                className={`circle-btn circle-btn-reports ${activeTab === 'reports' ? 'active' : ''}`}
+                onClick={() => openWindow('reports')}
+                title="Reports (R)"
+              >
+                R
+              </button>
+            )}
+          </div>
         </div>
 
         <nav className="sidebar-nav">

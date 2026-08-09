@@ -18,29 +18,33 @@ export const generateTSPL = (items) => {
             let cmd = 'CLS\n';
 
             // --- Item Code ---
-            cmd += `TEXT 34,0,"0",0,16,16,"${item.item_code}"\n`;
+            cmd += `TEXT 34,18,"0",0,16,16,"${item.item_code}"\n`;
 
             // --- Dashed line between item code and ATG ---
             if (isLastLabel) {
-                const dashStr = "-----------";
-                cmd += `TEXT 150,5,"0",0,11,11,"${dashStr}"\n`;
-                cmd += `TEXT 152,5,"0",0,11,11,"${dashStr}"\n`;
+                const codeLen = item.item_code ? item.item_code.length : 4;
+                const minGapX = 34 + (codeLen * 16) + 14;
+                let dashStartX = 210;
+                if (dashStartX < minGapX) dashStartX = minGapX;
+                const dashStr = "--------";
+                cmd += `TEXT ${dashStartX},23,"0",0,11,11,"${dashStr}"\n`;
+                cmd += `TEXT ${dashStartX + 2},23,"0",0,11,11,"${dashStr}"\n`;
             }
 
             // --- Header: Brand (Top Right) ---
-            cmd += `TEXT 300,10,"0",0,11,11,"ATG"\n`;
+            cmd += `TEXT 300,28,"0",0,11,11,"ATG"\n`;
 
             // --- Barcode ---
-            cmd += `BARCODE 34,40,"128",40,0,0,3,6,"${item.item_code}"\n`;
+            cmd += `BARCODE 34,58,"128",40,0,0,3,6,"${item.item_code}"\n`;
 
             // --- Description ---
             let fullDesc = item.item_name || 'NO_NAME';
             if (fullDesc.length > 30) fullDesc = fullDesc.substring(0, 30);
-            cmd += `TEXT 34,88,"0",0,11,11,"${fullDesc}"\n`;
+            cmd += `TEXT 34,106,"0",0,11,11,"${fullDesc}"\n`;
 
             // --- Footer: Packing (Bottom Left) ---
             const packingText = (item.packing || 1).toString();
-            cmd += `TEXT 34,130,"0",0,16,16,"${packingText}"\n`;
+            cmd += `TEXT 34,148,"0",0,16,16,"${packingText}"\n`;
 
             // --- Price ---
             const price = `${item.sale_rate || 0}`;
@@ -50,8 +54,8 @@ export const generateTSPL = (items) => {
             let priceX = 300 - priceEstimatedWidth;
             if (priceX < 50) priceX = 50;
 
-            cmd += `TEXT ${priceX},125,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
-            cmd += `TEXT ${priceX + 2},125,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
+            cmd += `TEXT ${priceX},143,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
+            cmd += `TEXT ${priceX + 2},143,"0",0,${priceFontW},${priceFontH},"${price}"\n`;
 
             return cmd;
         };

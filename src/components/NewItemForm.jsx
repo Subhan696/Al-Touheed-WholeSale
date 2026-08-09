@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import './NewItemForm.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -100,6 +101,8 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
   const companyRef = useRef(null);
   const newCompanyInputRef = useRef(null);
   const profitModalRefs = useRef({});
+  const duplicateBoxRef = useRef(null);
+  const mergeBtnRef = useRef(null);
 
   const handleNewSession = async () => {
     try {
@@ -129,6 +132,106 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
     // No longer clearing session on isActive = false so it persists until tab closed (ctrl+x)
     return () => clearInterval(interval);
   }, [isActive, isEditing, sessionId]);
+
+  // Trap focus inside duplicate box modal when active & set default focus to Merge button
+  useEffect(() => {
+    if (!duplicateItem) return;
+
+    const focusTimer = setTimeout(() => {
+      if (mergeBtnRef.current) {
+        mergeBtnRef.current.focus();
+      } else if (duplicateBoxRef.current) {
+        const mergeBtn = Array.from(duplicateBoxRef.current.querySelectorAll('button')).find(btn => btn.textContent.includes('Merge'));
+        if (mergeBtn) {
+          mergeBtn.focus();
+        }
+      }
+    }, 30);
+
+    if (mergeBtnRef.current) {
+      mergeBtnRef.current.focus();
+    }
+
+    const handleKeyDown = (e) => {
+      const modal = duplicateBoxRef.current;
+      if (!modal) return;
+
+      if (e.key === 'Tab') {
+        const focusables = Array.from(
+          modal.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter(el => !el.disabled && el.offsetWidth > 0 && el.offsetHeight > 0);
+
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const firstEl = focusables[0];
+        const lastEl = focusables[focusables.length - 1];
+        const activeEl = document.activeElement;
+
+        if (e.shiftKey) {
+          // Shift + Tab navigation
+          if (activeEl === firstEl || !modal.contains(activeEl)) {
+            e.preventDefault();
+            lastEl.focus();
+          }
+        } else {
+          // Tab navigation
+          if (activeEl === lastEl || !modal.contains(activeEl)) {
+            e.preventDefault();
+            firstEl.focus();
+          }
+        }
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        const focusables = Array.from(
+          modal.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter(el => !el.disabled && el.offsetWidth > 0 && el.offsetHeight > 0);
+
+        if (focusables.length > 0) {
+          const activeEl = document.activeElement;
+          const currentIndex = focusables.indexOf(activeEl);
+          e.preventDefault();
+          if (currentIndex >= 0 && currentIndex < focusables.length - 1) {
+            focusables[currentIndex + 1].focus();
+          } else {
+            focusables[0].focus();
+          }
+        }
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        const focusables = Array.from(
+          modal.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter(el => !el.disabled && el.offsetWidth > 0 && el.offsetHeight > 0);
+
+        if (focusables.length > 0) {
+          const activeEl = document.activeElement;
+          const currentIndex = focusables.indexOf(activeEl);
+          e.preventDefault();
+          if (currentIndex > 0) {
+            focusables[currentIndex - 1].focus();
+          } else {
+            focusables[focusables.length - 1].focus();
+          }
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setDuplicateItem(null);
+        setPendingPayload(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [duplicateItem]);
 
   useEffect(() => { loadCompanies(); loadProfitRules(); loadLists(); loadOverallProfit(); }, []);
 
@@ -571,7 +674,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
         loadNextCode();
         setDescription(''); setPurchaseRate(''); setSaleRate(''); setDiscount(''); setDiscountPct('');
         setPhotoFile(null); setPhotoPreview(null); setNote('');
-        setTimeout(() => refs.current.brand?.focus(), 50);
+        if (specialMode) {
+          setDescription(brand + ' D-');
+          setTimeout(() => refs.current.description?.focus(), 50);
+        } else {
+          setTimeout(() => refs.current.brand?.focus(), 50);
+        }
       }, 1000);
     } catch (err) {
       setStatusMsg(`❌ Merge failed: ${err.message}`);
@@ -1582,17 +1690,17 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
       )}
 
       {/* Duplicate Item Detection Modal */}
-      {duplicateItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(2px)' }}>
-          <div style={{ background: 'white', borderRadius: 10, width: 460, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.3)', border: '1px solid #f59e0b' }}>
+      {duplicateItem && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(3px)' }}>
+          <div ref={duplicateBoxRef} style={{ background: 'white', borderRadius: 12, width: 460, overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)', border: '1px solid rgba(0, 0, 0, 0.15)' }}>
 
             {/* Header */}
-            <div style={{ background: '#d97706', padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: '1.3rem' }}>⚠️</span>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#fff' }}>Duplicate Item Detected</h3>
               </div>
-              <span style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
+              <span style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', padding: '3px 10px', borderRadius: 6, fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700 }}>
                 Code: {duplicateItem.item_code}
               </span>
             </div>
@@ -1627,21 +1735,26 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
             {/* Actions */}
             <div style={{ padding: '10px 18px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
+                className="black-focus"
                 onClick={() => { setDuplicateItem(null); setPendingPayload(null); }}
-                style={{ padding: '7px 14px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.84rem' }}
+                style={{ padding: '7px 14px', background: '#e2e8f0', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.84rem' }}
               >Cancel</button>
               <button
+                ref={mergeBtnRef}
                 autoFocus
+                className="black-focus"
                 onClick={handleDuplicateMerge}
-                style={{ padding: '7px 16px', background: '#d97706', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
+                style={{ padding: '7px 16px', background: '#d97706', color: '#fff', border: '1px solid #b45309', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
               >🔀 Merge</button>
               <button
+                className="black-focus"
                 onClick={handleDuplicateCreateNew}
-                style={{ padding: '7px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
+                style={{ padding: '7px 16px', background: '#2563eb', color: '#fff', border: '1px solid #1d4ed8', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
               >➕ Save as New</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

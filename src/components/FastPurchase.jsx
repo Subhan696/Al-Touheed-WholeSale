@@ -847,7 +847,7 @@ function FastPurchase({ currentUser, isActive, onClose }) {
                 {companies.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-            <div className="form-group" style={{ width: 180, marginBottom: 0 }}>
+            <div className="form-group" style={{ width: 220, marginBottom: 0 }}>
               <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#0f172a', marginBottom: 2, display: 'block' }}>Amount</label>
               <input
                 ref={amountRef}
@@ -892,10 +892,10 @@ function FastPurchase({ currentUser, isActive, onClose }) {
                   <th style={{ width: 50, textAlign: 'center', padding: '0 2px' }}>Packing</th>
                   <th style={{ width: 40, textAlign: 'center', padding: '0 2px', color: '#b45309' }}>PKT</th>
                   <th style={{ width: 55, textAlign: 'center', padding: '0 2px', background: '#fef9c3', color: '#92400e' }}>QTY</th>
-                  <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>P.Price</th>
-                  <th style={{ width: 80, textAlign: 'right', padding: '0 4px' }}>Total</th>
-                  <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Net Rate</th>
-                  <th style={{ width: 24, padding: '0' }}></th>
+                  <th style={{ width: 105, textAlign: 'right', padding: '0 4px' }}>P.Price</th>
+                  <th style={{ width: 140, textAlign: 'right', padding: '0 4px' }}>Total</th>
+                  <th style={{ width: 140, textAlign: 'right', padding: '0 4px' }}>Net Rate</th>
+                  <th style={{ width: 30, padding: '0' }}></th>
                 </tr>
               )}
               itemContent={(idx, row) => {
@@ -1020,7 +1020,7 @@ function FastPurchase({ currentUser, isActive, onClose }) {
                   <td style={{ padding: '0 4px', color: '#475569', fontWeight: 700 }}>Items: {totals.count}</td>
                   <td></td>
                   <td style={{ textAlign: 'center', padding: '0 2px' }}>
-                    <span style={{ background: '#fef9c3', border: '1px solid #fbbf24', borderRadius: 4, color: '#78350f', padding: '1px 4px', fontSize: '0.85rem' }}>
+                    <span style={{ background: '#fef9c3', border: '1px solid #fbbf24', borderRadius: 4, color: '#78350f', padding: '1px 4px', fontSize: '0.9rem' }}>
                       {calcTotalPackets(items)}
                     </span>
                   </td>

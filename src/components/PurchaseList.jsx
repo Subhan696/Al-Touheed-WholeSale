@@ -69,7 +69,7 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
     try {
       const res = await ipcRenderer.invoke('get-purchases') || [];
       setPurchases(res);
-    } catch {} finally {
+    } catch { } finally {
       setLoading(false);
     }
   };
@@ -119,8 +119,8 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
   const filtered = React.useMemo(() => {
     const q = search.toLowerCase().trim();
     return purchases.filter(p => {
-      const matchSearch = !q || 
-        p.supplier_name?.toLowerCase().includes(q) || 
+      const matchSearch = !q ||
+        p.supplier_name?.toLowerCase().includes(q) ||
         p.invoice_no?.toLowerCase().includes(q) ||
         p.blt_number?.toLowerCase().includes(q) ||
         String(p.id).includes(q);
@@ -147,19 +147,19 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e4e6ef', borderRadius: 8, background: '#fff' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', tableLayout: 'fixed' }}>
           <thead style={{ position: 'sticky', top: 0, background: '#f5f7fa', zIndex: 1 }}>
             <tr>
-              <th style={th}>ID</th>
-              <th style={th}>Date</th>
-              <th style={th}>Invoice</th>
+              <th style={{ ...th, width: 55 }}>ID</th>
+              <th style={{ ...th, width: 100 }}>Date</th>
+              <th style={{ ...th, width: 85 }}>Invoice</th>
               <th style={th}>Supplier</th>
-              <th style={{ ...th, textAlign: 'center' }}>Blt No.</th>
-              <th style={{ ...th, textAlign: 'center' }}>Ctn Qty</th>
-              <th style={{ ...th, textAlign: 'center' }}>Total Qty (Pcs)</th>
-              <th style={{ ...th, textAlign: 'right' }}>Total</th>
-              <th style={{ ...th, textAlign: 'center' }}>Status</th>
-              <th style={{ ...th, textAlign: 'center' }}>Actions</th>
+              <th style={{ ...th, textAlign: 'center', width: 90 }}>Blt No.</th>
+              <th style={{ ...th, textAlign: 'center', width: 75 }}>Ctn Qty</th>
+              <th style={{ ...th, textAlign: 'center', width: 100 }}>Total Qty (Pcs)</th>
+              <th style={{ ...th, textAlign: 'right', width: 120 }}>Total</th>
+              <th style={{ ...th, textAlign: 'center', width: 90 }}>Status</th>
+              <th style={{ ...th, textAlign: 'center', width: 110 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -169,14 +169,14 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
               <tr><td colSpan={10} style={{ padding: 60, textAlign: 'center', color: '#aaa' }}>No purchases</td></tr>
             ) : filtered.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                <td style={{ ...td, fontWeight: 'bold', color: '#3699ff' }}>#{p.id}</td>
-                <td style={td}>{formatDateDMY(p.purchase_date || p.created_at)}</td>
-                <td style={td}>{p.invoice_no || '—'}</td>
-                <td style={td}>{p.supplier_name}</td>
-                <td style={{ ...td, textAlign: 'center', color: '#555' }}>{p.blt_number || p.blt_no || p.bilty_no || '—'}</td>
+                <td style={{ ...td, fontWeight: 'bold', color: '#3699ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{p.id}</td>
+                <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatDateDMY(p.purchase_date || p.created_at)}</td>
+                <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.invoice_no || '—'}</td>
+                <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.supplier_name}</td>
+                <td style={{ ...td, textAlign: 'center', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.blt_number || p.blt_no || p.bilty_no || '—'}</td>
                 <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#555' }}>{p.ctn_qty || p.ctn_bag || 0}</td>
                 <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#555' }}>{p.total_qty || 0}</td>
-                <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>PKR {parseFloat(p.total_amount).toLocaleString()}</td>
+                <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{parseFloat(p.total_amount).toLocaleString()}</td>
                 <td style={{ ...td, textAlign: 'center' }}>
                   {p.is_posted === 1 ? (
                     <span style={{ background: '#e8fff3', color: '#50cd89', padding: '4px 8px', borderRadius: 4, fontSize: '0.8rem', fontWeight: 600 }}>Posted</span>
@@ -203,39 +203,39 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
             <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: 4 }}>From ID</label>
-                <input 
+                <input
                   ref={fromRef}
-                  type="number" 
-                  value={bulkFrom} 
-                  onChange={e => setBulkFrom(e.target.value)} 
+                  type="number"
+                  value={bulkFrom}
+                  onChange={e => setBulkFrom(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Enter') { e.preventDefault(); toRef.current?.focus(); }
                     if (e.key === 'Escape') { e.preventDefault(); setShowBulkPost(false); setBulkMsg(''); }
                   }}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: 4 }} 
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: 4 }}
                 />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: 4 }}>To ID</label>
-                <input 
+                <input
                   ref={toRef}
-                  type="number" 
-                  value={bulkTo} 
-                  onChange={e => setBulkTo(e.target.value)} 
+                  type="number"
+                  value={bulkTo}
+                  onChange={e => setBulkTo(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Enter') { e.preventDefault(); passRef.current?.focus(); }
                     if (e.key === 'Escape') { e.preventDefault(); setShowBulkPost(false); setBulkMsg(''); }
                   }}
-                  style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: 4 }} 
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: 4 }}
                 />
               </div>
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: 4 }}>Your Password</label>
-              <input 
+              <input
                 ref={passRef}
-                type="password" 
-                value={bulkPass} 
+                type="password"
+                value={bulkPass}
                 onChange={e => setBulkPass(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter') { e.preventDefault(); handleBulkSubmit(); }
