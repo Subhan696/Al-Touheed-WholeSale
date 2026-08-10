@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDataVersion } from '../context/DataContext';
 import { getLocalDateString } from '../utils/dateUtils';
+import SuccessAnimation from './SuccessAnimation';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -82,10 +83,15 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
     }
   };
 
+  const [showSuccessAnim, setShowSuccessAnim] = useState(false);
+  const [animMeta, setAnimMeta] = useState({ title: 'Purchase Posted!', subtitle: 'Stock updated successfully ✓' });
+
   const handlePost = async (p) => {
     const confirmed = await ipcRenderer.invoke('confirm-dialog', `Post purchase #${p.id}? Once posted, stock will be updated.`);
     if (confirmed) {
       await ipcRenderer.invoke('post-purchase', p.id);
+      setAnimMeta({ title: 'Purchase Posted!', subtitle: `Purchase #${p.id} posted & stock updated ✓` });
+      setShowSuccessAnim(true);
       load();
     }
   };
@@ -104,8 +110,8 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
     }
     const result = await ipcRenderer.invoke('post-purchase-bulk', { fromId: parseInt(bulkFrom), toId: parseInt(bulkTo) });
     if (result.success) {
-      setToastMsg(`Successfully posted purchases from ID #${bulkFrom} to #${bulkTo}!`);
-      setTimeout(() => setToastMsg(''), 3000);
+      setAnimMeta({ title: 'Purchases Posted!', subtitle: `Bulk stock updated from #${bulkFrom} to #${bulkTo} ✓` });
+      setShowSuccessAnim(true);
       setShowBulkPost(false);
       setBulkFrom('');
       setBulkTo('');
@@ -150,7 +156,7 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', tableLayout: 'fixed' }}>
           <thead style={{ position: 'sticky', top: 0, background: '#f5f7fa', zIndex: 1 }}>
             <tr>
-              <th style={{ ...th, width: 55 }}>ID</th>
+              <th style={{ ...th, width: 70 }}>ID</th>
               <th style={{ ...th, width: 100 }}>Date</th>
               <th style={{ ...th, width: 85 }}>Invoice</th>
               <th style={th}>Supplier</th>
@@ -258,6 +264,13 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
           {toastMsg}
         </div>
       )}
+
+      <SuccessAnimation
+        show={showSuccessAnim}
+        title={animMeta.title}
+        subtitle={animMeta.subtitle}
+        onClose={() => setShowSuccessAnim(false)}
+      />
 
     </div>
   );

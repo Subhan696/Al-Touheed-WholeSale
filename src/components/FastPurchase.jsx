@@ -120,13 +120,62 @@ function FastPurchase({ currentUser, isActive, onClose }) {
     }
   };
 
+  const getSupplierForBrand = (brandName, discountsList, companiesList) => {
+    if (!brandName) return '';
+    const b = brandName.trim().toLowerCase();
+
+    if (discountsList && discountsList.length > 0) {
+      const rule = discountsList.find(d =>
+        (d.brand_name || '').trim().toLowerCase() === b ||
+        (d.company_name || '').trim().toLowerCase() === b
+      );
+      if (rule) {
+        const sup = rule.supplier_name || rule.company_name;
+        if (sup) return sup;
+      }
+    }
+
+    if (companiesList && companiesList.length > 0) {
+      const compMatch = companiesList.find(c => (c || '').trim().toLowerCase() === b);
+      if (compMatch) return compMatch;
+    }
+
+    return '';
+  };
+
   useEffect(() => {
-    const loadDropdowns = () => {
-      ipcRenderer.invoke('get-manufacturers').then(res => setCompanies(res.map(c => c.name))).catch(() => { });
-      ipcRenderer.invoke('get-raw-manufacturer-brands').then(res => setMfgDiscounts(res || [])).catch(() => { });
+    const loadData = async () => {
+      try {
+        const [comps, mfg, sess] = await Promise.all([
+          ipcRenderer.invoke('get-manufacturers').catch(() => []),
+          ipcRenderer.invoke('get-raw-manufacturer-brands').catch(() => []),
+          ipcRenderer.invoke('get-item-sessions').catch(() => [])
+        ]);
+        const compNames = (comps || []).map(c => c.name);
+        setCompanies(compNames);
+        const mfgData = mfg || [];
+        setMfgDiscounts(mfgData);
+
+        // Auto-select supplier of the last session's brand
+        let hasAutoSupplier = false;
+        if (sess && sess.length > 0 && sess[0].brand) {
+          const autoSupplier = getSupplierForBrand(sess[0].brand, mfgData, compNames);
+          if (autoSupplier) {
+            setSupplierName(autoSupplier);
+            hasAutoSupplier = true;
+          }
+        }
+        if (hasAutoSupplier) {
+          setTimeout(() => amountRef.current?.focus(), 120);
+        } else {
+          setTimeout(() => supplierRef.current?.focus(), 100);
+        }
+      } catch (err) {
+        console.error('Failed to load FastPurchase data:', err);
+        setTimeout(() => supplierRef.current?.focus(), 100);
+      }
     };
-    loadDropdowns();
-    setTimeout(() => supplierRef.current?.focus(), 100);
+    loadData();
 
     // Load printers for barcode printing
     const loadPrinters = async () => {
@@ -255,10 +304,26 @@ function FastPurchase({ currentUser, isActive, onClose }) {
 
       const products = await ipcRenderer.invoke('get-products-by-session-range', { from: fromId, to: toId });
       if (products && products.length > 0) {
+        const sessionBrand = products[0]?.brand || sess[0]?.brand || '';
+        let targetSupplier = supplierName;
+        if (!targetSupplier && sessionBrand) {
+          targetSupplier = getSupplierForBrand(sessionBrand, mfgDiscounts, companies);
+          if (targetSupplier) {
+            setSupplierName(targetSupplier);
+          }
+        }
+        if (targetSupplier) {
+          setTimeout(() => amountRef.current?.focus(), 60);
+        }
+
         const newRows = products.map(p => {
           let flatD = 0, pctD = 0;
-          if (supplierName && p.brand) {
-            const rule = mfgDiscounts.find(d => d.company_name.toLowerCase() === supplierName.toLowerCase() && d.brand_name.toLowerCase() === p.brand.toLowerCase());
+          const currentSup = targetSupplier || supplierName;
+          if (currentSup && p.brand) {
+            const rule = mfgDiscounts.find(d =>
+              (d.company_name || '').toLowerCase() === currentSup.toLowerCase() &&
+              (d.brand_name || '').toLowerCase() === p.brand.toLowerCase()
+            );
             if (rule) {
               pctD = parseFloat(rule.purchase_discount_pct) || 0;
               flatD = parseFloat(rule.discount_amount) || 0;

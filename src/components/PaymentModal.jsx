@@ -275,6 +275,13 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
 
   const [bankRows, setBankRows] = useState([]); // [{id, accountName, amount, remarks}]
   const [custBalance, setCustBalance] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  useEffect(() => {
+    submittingRef.current = false;
+    setIsSubmitting(false);
+  }, []);
 
   useEffect(() => {
     // When editing, use the stored customerPrevBalance from the invoice
@@ -398,6 +405,10 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
   };
 
   const handleConfirm = () => {
+    if (submittingRef.current || isSubmitting) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+
     const validPayments = [];
 
     // Add Cash Payment
@@ -430,6 +441,25 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
   const fillCashAmount = () => {
     setCashAmount(Math.max(0, grandTotal - totalBankAmount).toString());
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const canSubmit = allowCredit ? true : (totalReceived >= grandTotal);
+        if (canSubmit && !submittingRef.current && !isSubmitting) {
+          handleConfirm();
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [allowCredit, totalReceived, grandTotal, parsedCashAmount, bankRows, selectedCashAcc, cashAccounts, onConfirm, onCancel, isSubmitting]);
 
   return (
     <>
@@ -576,13 +606,13 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
       </div>
 
       <div className="payment-modal-footer">
-        <button className="btn ghost" onClick={onCancel}>Cancel</button>
+        <button className="btn ghost" onClick={onCancel} disabled={isSubmitting}>Cancel</button>
         <button
           className="btn primary"
           onClick={handleConfirm}
-          disabled={allowCredit ? false : totalReceived < grandTotal}
+          disabled={isSubmitting || (allowCredit ? false : totalReceived < grandTotal)}
         >
-          {invoiceBalance > 0 && allowCredit ? 'Save Credit Invoice' : 'Confirm Payment'}
+          {isSubmitting ? 'Saving...' : (invoiceBalance > 0 && allowCredit ? 'Save Credit Invoice' : 'Confirm Payment')}
         </button>
       </div>
     </>

@@ -20,15 +20,19 @@ export const generateTSPL = (items) => {
             // --- Item Code ---
             cmd += `TEXT 34,18,"0",0,16,16,"${item.item_code}"\n`;
 
-            // --- Dashed line between item code and ATG ---
+            // --- Dashed line next to ATG (Right Side) ---
             if (isLastLabel) {
-                const codeLen = item.item_code ? item.item_code.length : 4;
-                const minGapX = 34 + (codeLen * 16) + 14;
-                let dashStartX = 210;
-                if (dashStartX < minGapX) dashStartX = minGapX;
-                const dashStr = "--------";
-                cmd += `TEXT ${dashStartX},23,"0",0,11,11,"${dashStr}"\n`;
-                cmd += `TEXT ${dashStartX + 2},23,"0",0,11,11,"${dashStr}"\n`;
+                const codeLen = item.item_code ? String(item.item_code).length : 4;
+                const itemCodeEndX = 34 + (codeLen * 16);
+                // Start after item code + gap, default to X=160 (gives ~1.6 cm long dashed line)
+                const dashStartX = Math.max(160, itemCodeEndX + 24);
+                const dashWidthDots = Math.max(0, 290 - dashStartX);
+                const numDashes = Math.min(14, Math.floor(dashWidthDots / 9));
+                if (numDashes >= 3) {
+                    const dashStr = "-".repeat(numDashes);
+                    cmd += `TEXT ${dashStartX},23,"0",0,11,11,"${dashStr}"\n`;
+                    cmd += `TEXT ${dashStartX + 2},23,"0",0,11,11,"${dashStr}"\n`;
+                }
             }
 
             // --- Header: Brand (Top Right) ---

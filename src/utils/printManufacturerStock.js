@@ -48,8 +48,8 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     });
 
     suppliersHtml += `
-      <div style="margin-bottom: 20px; page-break-inside: avoid;">
-        <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 8px 12px; font-weight: 900; font-size: 14.5px; display: flex; justify-content: space-between;">
+      <div style="margin-bottom: 20px;">
+        <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 8px 12px; font-weight: 900; font-size: 14.5px; display: flex; justify-content: space-between; page-break-after: avoid; break-after: avoid;">
           <span>SUPPLIER: ${sup.name}${balText}</span>
           <span>Total Qty: ${fmt(sup.totalQty)} | Total Value: PKR ${fmt(sup.totalValue)}</span>
         </div>
@@ -88,7 +88,7 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     if (filteredBals.length > 0) {
       const rowsHtml = filteredBals.map(([name, bal]) => `
         <tr>
-          <td style="border: 1px solid #000; padding: 6px 8px; font-size: 13.5px; font-weight: 600;">${name}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; font-size: 13.5px; font-weight: 600; text-transform: uppercase;">${(name || '').toUpperCase()}</td>
           <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 13.5px; font-weight: bold;">${bal >= 0 ? 'Cr' : 'Dr'}</td>
           <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: 900; font-size: 14px;">${fmt2(Math.abs(bal))}</td>
         </tr>
@@ -128,6 +128,8 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
         body { font-family: 'Arial', sans-serif; color: #000; background: #fff; margin: 0; padding: 0; font-size: 13px; font-weight: bold; -webkit-print-color-adjust: exact; }
         .no-print { display: none !important; }
         td, th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        tr { page-break-inside: avoid; break-inside: avoid; }
+        thead { display: table-header-group; }
       }
       body { font-family: 'Arial', sans-serif; color: #000; background: #fff; margin: 0; padding: 15px; font-size: 13px; font-weight: bold; }
       

@@ -311,10 +311,12 @@ function App() {
 
   React.useEffect(() => {
     const handleKeyDown = (e) => {
+      const tag = (e.target?.tagName || '').toUpperCase();
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+      const hasModal = !!document.querySelector('.modal-overlay');
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
-        const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
         const hasSelection = isInput && e.target.selectionStart !== e.target.selectionEnd;
-        const hasModal = document.querySelector('.modal-overlay');
         if (!hasSelection && !hasModal) {
           e.preventDefault();
           const topWin = windowStack[windowStack.length - 1];
@@ -328,10 +330,32 @@ function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         if (hasPermission('create_sale')) { e.preventDefault(); openWindow('sale', { forceNewInstance: true }); }
       }
+
+      // Single keypress shortcuts (s, e, r) when focus is outside input fields and modals
+      if (!isInput && !hasModal && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const k = (e.key || '').toLowerCase();
+        const code = e.code || '';
+        if (k === 's' || code === 'KeyS') {
+          if (hasPermission('create_sale')) {
+            e.preventDefault();
+            openWindow('sale', { forceNewInstance: true });
+          }
+        } else if (k === 'e' || code === 'KeyE') {
+          if (hasPermission('manage_products')) {
+            e.preventDefault();
+            openWindow('new-item');
+          }
+        } else if (k === 'r' || code === 'KeyR') {
+          if (hasPermission('view_reports')) {
+            e.preventDefault();
+            openWindow('reports');
+          }
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [windowStack, activeTab]);
+  }, [windowStack, activeTab, currentUser]);
 
   if (!isAuthenticated) {
     if (showNetworkSetup) {

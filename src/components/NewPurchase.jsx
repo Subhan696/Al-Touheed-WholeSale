@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { TableVirtuoso } from 'react-virtuoso';
+import SuccessAnimation from './SuccessAnimation';
 import './NewPurchase.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -56,6 +57,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const [items, setItems] = useState(() => [makeRow()]);
   const [statusMsg, setStatusMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessAnim, setShowSuccessAnim] = useState(false);
   const [expenseAccounts, setExpenseAccounts] = useState([]);
   const [purchaseExpenses, setPurchaseExpenses] = useState([]);
   const [purchaseExpenseTotal, setPurchaseExpenseTotal] = useState('');
@@ -78,6 +80,8 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const [showAllSessions, setShowAllSessions] = useState(false);
 
   const [companies, setCompanies] = useState([]);
+  const [supplierBalances, setSupplierBalances] = useState({});
+  const [historicalSupplierBal, setHistoricalSupplierBal] = useState(null);
   const [mfgDiscounts, setMfgDiscounts] = useState([]);
   const [genders, setGenders] = useState([]);
 
@@ -198,7 +202,26 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           setPurchaseExpenseTotal(total > 0 ? String(total) : '');
         });
       }).catch(() => { });
+
+      if (p.supplier_name) {
+        ipcRenderer.invoke('get-supplier-statement', { supplier_name: p.supplier_name }).then(data => {
+          if (data && Array.isArray(data.transactions)) {
+            let running = parseFloat(data.initial_balance) || 0;
+            let targetBal = null;
+            data.transactions.forEach(t => {
+              running += (parseFloat(t.credit) || 0) - (parseFloat(t.debit) || 0);
+              if (t.type === `PV-${p.id}` || (String(t.id) === String(p.id) && String(t.type).startsWith('PV-'))) {
+                targetBal = running;
+              }
+            });
+            if (targetBal !== null) {
+              setHistoricalSupplierBal(targetBal);
+            }
+          }
+        }).catch(() => {});
+      }
     } else {
+      setHistoricalSupplierBal(null);
       setTimeout(() => invoiceRef.current?.focus(), 80);
     }
   }, [purchaseToEdit]);
@@ -206,6 +229,13 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   useEffect(() => {
     const loadDropdowns = () => {
       ipcRenderer.invoke('get-manufacturers').then(res => setCompanies(res.map(c => c.name))).catch(() => { });
+      ipcRenderer.invoke('get-suppliers-ledger').then(ledgerData => {
+        const balMap = {};
+        (ledgerData || []).forEach(s => {
+          balMap[(s.name || '').trim().toLowerCase()] = s.net_balance !== undefined ? s.net_balance : s.balance;
+        });
+        setSupplierBalances(balMap);
+      }).catch(() => { });
       ipcRenderer.invoke('get-raw-manufacturer-brands').then(res => setMfgDiscounts(res || [])).catch(() => { });
       ipcRenderer.invoke('get-genders').then(res => setGenders(res || [])).catch(() => { });
       ipcRenderer.invoke('get-expense-accounts').then(res => {
@@ -672,7 +702,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         setStatusMsg(isEditing ? '✓ Purchase updated!' : '✓ Purchase saved!');
         setShowAuth(false);
         setAuthPass('');
-        setTimeout(() => { setStatusMsg(''); onSaveSuccess?.(); }, 1200);
+        setShowSuccessAnim(true);
       } else {
         setStatusMsg(`Error: ${result.error || 'Failed'}`);
         setIsSubmitting(false);
@@ -814,13 +844,42 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             <span className={statusMsg.startsWith('Error') ? 'error' : 'success'}>{statusMsg}</span>
           )}
         </div>
-        <div className="header-actions" style={{ display: 'flex', gap: 8 }}>
+        <div className="header-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {(() => {
+            const isHist = isEditing && historicalSupplierBal !== null && supplierName.toLowerCase() === (purchaseToEdit?.supplier_name || '').toLowerCase();
+            const balVal = isHist ? historicalSupplierBal : (supplierName ? supplierBalances[supplierName.trim().toLowerCase()] : null);
+            if (balVal === null || balVal === undefined) return null;
+            return (
+              <div style={{
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                padding: '3px 10px',
+                borderRadius: 6,
+                background: balVal > 0 ? '#fee2e2' : balVal < 0 ? '#dcfce7' : '#f1f5f9',
+                color: balVal > 0 ? '#dc2626' : balVal < 0 ? '#15803d' : '#475569',
+                border: `1.5px solid ${balVal > 0 ? '#fca5a5' : balVal < 0 ? '#86efac' : '#cbd5e1'}`,
+                display: 'flex',
+                alignItems: 'center',
+                whiteSpace: 'nowrap'
+              }}>
+                {isHist ? `Saved Bal (#${purchaseToEdit.id}):` : 'Bal:'} {Math.abs(balVal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {balVal > 0 ? 'Cr (Payable)' : balVal < 0 ? 'Dr (Advance)' : 'Nil'}
+              </div>
+            );
+          })()}
           <button
             type="button"
             onClick={() => setAutoMode(m => !m)}
             className="btn btn-secondary sm"
             disabled={isEditing}
-            style={{ background: autoMode ? '#22c55e' : '#94a3b8', color: 'white', borderColor: autoMode ? '#22c55e' : '#94a3b8', minWidth: 70 }}
+            style={{
+              background: autoMode ? '#22c55e' : '#94a3b8',
+              color: 'white',
+              borderColor: autoMode ? '#22c55e' : '#94a3b8',
+              padding: '2px 8px',
+              fontSize: '0.75rem',
+              height: 26,
+              lineHeight: '20px'
+            }}
           >
             ⚡ {autoMode ? 'Auto ON' : 'Auto OFF'}
           </button>
@@ -1561,6 +1620,18 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           </div>
         </div>
       )}
+
+      <SuccessAnimation
+        show={showSuccessAnim}
+        title={isEditing ? "Purchase Updated!" : "Purchase Saved!"}
+        subtitle={isEditing ? "Purchase record updated successfully ✓" : "Purchase saved successfully ✓"}
+        onClose={() => {
+          setShowSuccessAnim(false);
+          setStatusMsg('');
+          setIsSubmitting(false);
+          onSaveSuccess?.();
+        }}
+      />
 
     </div>
   );

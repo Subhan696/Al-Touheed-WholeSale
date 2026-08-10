@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SuccessAnimation from './SuccessAnimation';
 import './GL.css';
 const { ipcRenderer } = window.require('electron');
 
@@ -33,6 +34,237 @@ const getSafeDateStr = (rawDate) => {
   }
 };
 
+function AccountSearchPicker({ accounts, value, onChange, placeholder = '-- Select Account --', disabled = false }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [dropdownStyle, setDropdownStyle] = useState({});
+
+  const containerRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  const selectedAccount = React.useMemo(() => {
+    return (accounts || []).find(a => String(a.id) === String(value));
+  }, [accounts, value]);
+
+  const filteredAccounts = React.useMemo(() => {
+    const q = searchTerm.toLowerCase().trim();
+    if (!q) return accounts || [];
+    return (accounts || []).filter(a => {
+      const name = (a.account_name || '').toLowerCase();
+      const type = (a.account_type || '').toLowerCase();
+      const cleanName = name.replace(/^(customer|supplier|bank|cash)\s*-\s*/i, '');
+      return name.includes(q) || type.includes(q) || cleanName.includes(q);
+    });
+  }, [accounts, searchTerm]);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [searchTerm]);
+
+  const updatePosition = React.useCallback(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const dropdownHeight = 240;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const placeTop = spaceBelow < dropdownHeight && rect.top > dropdownHeight;
+
+      setDropdownStyle({
+        position: 'fixed',
+        top: placeTop ? Math.max(10, rect.top - dropdownHeight - 4) : rect.bottom + 4,
+        left: Math.max(10, rect.left),
+        width: Math.max(rect.width, 320),
+        maxHeight: dropdownHeight,
+        background: '#fff',
+        border: '1.5px solid #3b82f6',
+        borderRadius: '8px',
+        boxShadow: '0 12px 30px rgba(0,0,0,0.22)',
+        zIndex: 999999,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+      };
+    }
+  }, [isOpen, updatePosition]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelect = (account) => {
+    onChange(account ? String(account.id) : '');
+    setIsOpen(false);
+    setIsFocused(false);
+    setSearchTerm('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (!isOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        e.preventDefault();
+        setIsOpen(true);
+        setSearchTerm('');
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex(prev => Math.min(prev + 1, filteredAccounts.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex(prev => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredAccounts.length > 0 && selectedIndex >= 0 && selectedIndex < filteredAccounts.length) {
+        handleSelect(filteredAccounts[selectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+    }
+  };
+
+  const getTypeBadge = (type) => {
+    switch (type?.toLowerCase()) {
+      case 'customer':
+        return { label: 'Cust', bg: '#dbeafe', color: '#1e40af' };
+      case 'supplier':
+        return { label: 'Supp', bg: '#f3e8ff', color: '#6b21a8' };
+      case 'bank':
+        return { label: 'Bank', bg: '#dcfce7', color: '#166534' };
+      case 'cash':
+        return { label: 'Cash', bg: '#ecfdf5', color: '#047857' };
+      case 'expense':
+        return { label: 'Exp', bg: '#fef3c7', color: '#92400e' };
+      default:
+        return { label: type || 'GL', bg: '#f1f5f9', color: '#475569' };
+    }
+  };
+
+  const displayInputValue = isFocused ? searchTerm : (selectedAccount ? selectedAccount.account_name : '');
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+      <input
+        ref={searchInputRef}
+        type="text"
+        disabled={disabled}
+        value={displayInputValue}
+        placeholder={placeholder}
+        onFocus={() => {
+          if (disabled) return;
+          setIsFocused(true);
+          setSearchTerm('');
+          setIsOpen(true);
+        }}
+        onChange={e => {
+          setSearchTerm(e.target.value);
+          if (!isOpen) setIsOpen(true);
+        }}
+        onKeyDown={handleKeyDown}
+        style={{
+          width: '100%',
+          padding: '6px 10px',
+          border: isOpen ? '1.5px solid #3b82f6' : '1px solid #cbd5e1',
+          borderRadius: '6px',
+          background: disabled ? '#f1f5f9' : '#fff',
+          fontSize: '0.88rem',
+          fontWeight: 600,
+          color: selectedAccount && !isFocused ? '#0f172a' : '#1e293b',
+          outline: 'none',
+          boxSizing: 'border-box'
+        }}
+      />
+
+      {isOpen && (
+        <div style={dropdownStyle}>
+          <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
+            <div
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(null); }}
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.82rem',
+                color: '#64748b',
+                cursor: 'pointer',
+                background: !value ? '#eff6ff' : 'transparent'
+              }}
+            >
+              -- Select Account --
+            </div>
+
+            {filteredAccounts.length === 0 ? (
+              <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
+                No matching accounts found
+              </div>
+            ) : (
+              filteredAccounts.map((a, idx) => {
+                const isSelected = String(a.id) === String(value);
+                const isHighlighted = idx === selectedIndex;
+                const badge = getTypeBadge(a.account_type);
+                return (
+                  <div
+                    key={a.id}
+                    onMouseDown={(e) => { e.preventDefault(); handleSelect(a); }}
+                    onMouseEnter={() => setSelectedIndex(idx)}
+                    style={{
+                      padding: '7px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      cursor: 'pointer',
+                      background: isHighlighted ? '#e0f2fe' : isSelected ? '#f1f5f9' : 'transparent',
+                      fontWeight: isSelected ? 700 : 500,
+                      color: isSelected ? '#1e40af' : '#1e293b',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {a.account_name}
+                    </span>
+                    <span style={{
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      background: badge.bg,
+                      color: badge.color,
+                      marginLeft: 8,
+                      flexShrink: 0
+                    }}>
+                      {badge.label}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, voucherToEdit }) {
   const [voucherType, setVoucherType] = useState(voucherToEdit ? normalizeVType(voucherToEdit.voucher_type) : (initialCustomer ? 'CR' : 'BP'));
   const [voucherDate, setVoucherDate] = useState(voucherToEdit ? getSafeDateStr(voucherToEdit.voucher_date) : getSafeDateStr());
@@ -40,6 +272,7 @@ export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, v
   const [headerAccount, setHeaderAccount] = useState('');
   const [remarks, setRemarks] = useState(voucherToEdit ? (voucherToEdit.remarks || '') : (initialCustomer ? `Payment received from ${initialCustomer.name}` : ''));
   const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
+  const [showSuccessAnim, setShowSuccessAnim] = useState(false);
   const [headerBalance, setHeaderBalance] = useState(null);
   const [rowBalances, setRowBalances] = useState({});
   const [loadingBalances, setLoadingBalances] = useState({});
@@ -351,9 +584,7 @@ export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, v
     try {
       await ipcRenderer.invoke('save-voucher', payload);
       setStatusMsg({ type: 'success', text: voucherToEdit ? '✅ Transaction Updated Successfully!' : '✅ Transaction Saved Successfully!' });
-      setTimeout(() => {
-        if (onSuccess) onSuccess();
-      }, 1000);
+      setShowSuccessAnim(true);
     } catch (err) {
       setStatusMsg({ type: 'error', text: '❌ Error saving transaction: ' + err.message });
     }
@@ -407,14 +638,14 @@ export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, v
           <div className="md:col-span-4 border-t pt-3 mt-1">
             <label className="block text-sm font-semibold mb-1">A/c Head (Bank/Cash Account)</label>
             <div className="flex items-center gap-3">
-              <select
-                value={headerAccount}
-                onChange={e => { setHeaderAccount(e.target.value); fetchBalance(e.target.value, 'header'); }}
-                className="flex-1 border p-2 rounded text-base font-semibold focus:outline-blue-500 bg-white"
-              >
-                <option value="">-- Select Bank / Cash Account --</option>
-                {headerAccounts.map(a => <option key={a.id} value={a.id}>{a.account_name}</option>)}
-              </select>
+              <div className="flex-1">
+                <AccountSearchPicker
+                  accounts={headerAccounts}
+                  value={headerAccount}
+                  onChange={newId => { setHeaderAccount(newId); fetchBalance(newId, 'header'); }}
+                  placeholder="-- Select Bank / Cash Account --"
+                />
+              </div>
               <BalanceBadgeHeader bal={headerBalance} loading={loadingBalances.header} errorMsg={balanceErrors.header} totalGridDebit={totalDebit} totalGridCredit={totalCredit} />
             </div>
           </div>
@@ -425,7 +656,7 @@ export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, v
         <table className="min-w-full text-sm border-collapse border border-slate-300">
           <thead className="bg-slate-200">
             <tr>
-              <th className="border p-2">Account Name</th>
+              <th className="border p-2" style={{ width: 280 }}>Account Name</th>
               <th className="border p-2">Ref No</th>
               <th className="border p-2">Description</th>
               <th className="border p-2 bg-indigo-100 text-indigo-900 w-48">Closing Balance</th>
@@ -437,11 +668,13 @@ export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, v
           <tbody>
             {details.map((row, idx) => (
               <tr key={row.id}>
-                <td className="border p-1">
-                  <select value={row.account_id} onChange={e => handleDetailChange(idx, 'account_id', e.target.value)} className="w-full p-1 border rounded focus:outline-blue-500">
-                    <option value="">-- Select --</option>
-                    {accounts.map(a => <option key={a.id} value={a.id}>{a.account_name}</option>)}
-                  </select>
+                <td className="border p-1" style={{ minWidth: 260 }}>
+                  <AccountSearchPicker
+                    accounts={accounts}
+                    value={row.account_id}
+                    onChange={newId => handleDetailChange(idx, 'account_id', newId)}
+                    placeholder="-- Select Account --"
+                  />
                 </td>
                 <td className="border p-1"><input type="text" value={row.reference_no} onChange={e => handleDetailChange(idx, 'reference_no', e.target.value)} className="w-full p-1 border" /></td>
                 <td className="border p-1"><input type="text" value={row.description} onChange={e => handleDetailChange(idx, 'description', e.target.value)} className="w-full p-1 border" /></td>
@@ -507,6 +740,16 @@ export default function GLVoucherEntry({ onCancel, onSuccess, initialCustomer, v
         <button onClick={addRow} className="bg-slate-200 text-slate-800 px-4 py-2 rounded shadow hover:bg-slate-300">+ Add Row</button>
         <button onClick={handleSave} className="bg-green-600 text-white px-6 py-2 rounded shadow hover:bg-green-700 text-lg font-bold">Save Transaction</button>
       </div>
+
+      <SuccessAnimation
+        show={showSuccessAnim}
+        title={voucherToEdit ? "Transaction Updated!" : "Transaction Saved!"}
+        subtitle={voucherToEdit ? "Voucher entry updated successfully ✓" : "Voucher entry posted to GL ledger ✓"}
+        onClose={() => {
+          setShowSuccessAnim(false);
+          if (onSuccess) onSuccess();
+        }}
+      />
     </div>
   );
 }

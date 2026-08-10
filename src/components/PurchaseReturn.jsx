@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './NewPurchase.css';
 import { printPurchaseReturn, savePurchaseReturnPDF } from '../utils/printPurchaseReturn';
+import SuccessAnimation from './SuccessAnimation';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -39,6 +40,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   const [activeRowId, setActiveRowId] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessAnim, setShowSuccessAnim] = useState(false);
   
   const [suppliersList, setSuppliersList] = useState([]);
   const [expenseAccounts, setExpenseAccounts] = useState([]);
@@ -472,7 +474,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
 
       if (result.success) {
         setStatusMsg(isEditing ? '✓ Return updated!' : '✓ Return saved!');
-        setTimeout(() => { setStatusMsg(''); onSaveSuccess?.(); }, 1200);
+        setShowSuccessAnim(true);
       } else {
         setStatusMsg(`Error: ${result.error || 'Failed'}`);
         setIsSubmitting(false);
@@ -907,6 +909,18 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
           );
         })()}
       </div>
+
+      <SuccessAnimation
+        show={showSuccessAnim}
+        title={isEditing ? "Return Updated!" : "Return Saved!"}
+        subtitle={isEditing ? "Purchase return updated successfully ✓" : "Purchase return transaction posted ✓"}
+        onClose={() => {
+          setShowSuccessAnim(false);
+          setStatusMsg('');
+          setIsSubmitting(false);
+          onSaveSuccess?.();
+        }}
+      />
     </div>
   );
 }

@@ -987,7 +987,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                     <label>Packing Qty</label>
                     <select ref={el => refs.current.packing = el} value={packingQty}
                       onChange={e => setPackingQty(parseInt(e.target.value))}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); } }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                          e.preventDefault();
+                          refs.current.saleRate?.focus();
+                        }
+                      }}
                       className="form-input">
                       {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                     </select>
@@ -1037,7 +1042,12 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                     <label>Packing Qty</label>
                     <select ref={el => refs.current.packing = el} value={packingQty}
                       onChange={e => setPackingQty(parseInt(e.target.value))}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refs.current.saleRate?.focus(); } }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                          e.preventDefault();
+                          refs.current.saleRate?.focus();
+                        }
+                      }}
                       className="form-input">
                       {packingsList.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                     </select>

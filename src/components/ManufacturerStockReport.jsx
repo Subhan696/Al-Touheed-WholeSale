@@ -777,7 +777,7 @@ function SupplierStockReport() {
                 <tbody>
                   {filteredSupplierBalances.map(([name, balance]) => (
                     <tr key={name}>
-                      <td style={{ fontWeight: 600 }}>{name}</td>
+                      <td style={{ fontWeight: 600, textTransform: 'uppercase' }}>{(name || '').toUpperCase()}</td>
                       <td>
                         <span style={{
                           padding: '3px 8px', borderRadius: 5, fontWeight: 700, fontSize: '0.8rem',

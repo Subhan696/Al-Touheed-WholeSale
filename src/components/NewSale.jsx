@@ -128,6 +128,35 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
   const [customerPhone, setCustomerPhone] = useState('');
 
   const [customerCity, setCustomerCity] = useState('');
+  const [cities, setCities] = useState(PAKISTAN_CITIES);
+  const [showAddCity, setShowAddCity] = useState(false);
+  const [newCityName, setNewCityName] = useState('');
+  const newCityRef = useRef(null);
+
+  const loadCities = async () => {
+    try {
+      const result = await ipcRenderer.invoke('get-cities');
+      const names = (result || []).map(r => r.name);
+      const merged = Array.from(new Set([...names, ...PAKISTAN_CITIES])).sort((a, b) => a.localeCompare(b));
+      setCities(merged.length ? merged : PAKISTAN_CITIES);
+    } catch { }
+  };
+
+  const handleAddCity = async () => {
+    const trimmed = newCityName.trim();
+    if (!trimmed) return;
+    try {
+      await ipcRenderer.invoke('add-city', trimmed);
+      await loadCities();
+      setCustomerCity(trimmed);
+      setNewCityName('');
+      setShowAddCity(false);
+    } catch { }
+  };
+
+  useEffect(() => {
+    loadCities();
+  }, []);
 
   const [paymentMethod, setPaymentMethod] = useState('Cash');
 
@@ -148,6 +177,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (customerModalOpen) {
+      loadCities();
+      setShowAddCity(false);
+    }
+  }, [customerModalOpen]);
 
   const [customerSearch, setCustomerSearch] = useState('');
 
@@ -4411,57 +4447,68 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                 </div>
 
                 <div style={{ flex: 1 }}>
-
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>City</label>
-
                   <select
-
                     ref={newCustCityRef}
-
-                    value={customerCity}
-
-                    onChange={e => setCustomerCity(e.target.value)}
-
-                    onKeyDown={async e => {
-
-                      if (e.key === 'Enter') {
-
-                        e.preventDefault();
-
-                        if (!customerName.trim()) { setCustomerModalOpen(false); return; }
-
-                        if (!customerId) {
-
-                          try {
-
-                            const res = await ipcRenderer.invoke('add-customer', { name: customerName.trim(), phone: customerPhone.trim(), city: customerCity.trim() });
-
-                            if (res.success) setCustomerId(res.id);
-
-                          } catch (err) { }
-
-                        }
-
-                        setCustomerModalOpen(false);
-
+                    value={showAddCity ? '__add_new__' : customerCity}
+                    onChange={e => {
+                      if (e.target.value === '__add_new__') {
+                        setShowAddCity(true);
+                        setNewCityName('');
+                        setTimeout(() => newCityRef.current?.focus(), 50);
+                      } else {
+                        setShowAddCity(false);
+                        setCustomerCity(e.target.value);
                       }
-
                     }}
-
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && !showAddCity) {
+                        e.preventDefault();
+                        if (!customerName.trim()) { setCustomerModalOpen(false); return; }
+                        if (!customerId) {
+                          try {
+                            const res = await ipcRenderer.invoke('add-customer', { name: customerName.trim(), phone: customerPhone.trim(), city: customerCity.trim() });
+                            if (res.success) setCustomerId(res.id);
+                          } catch (err) { }
+                        }
+                        setCustomerModalOpen(false);
+                      }
+                    }}
                     style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none', background: '#fff', cursor: 'pointer' }}
-
                   >
-
                     <option value="">Select City...</option>
-
-                    {PAKISTAN_CITIES.map(c => (
-
+                    {cities.map(c => (
                       <option key={c} value={c}>{c}</option>
-
                     ))}
-
+                    <option value="__add_new__">+ Add new city / place...</option>
                   </select>
-
+                  {showAddCity && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <input
+                        ref={newCityRef}
+                        type="text"
+                        value={newCityName}
+                        onChange={e => setNewCityName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCity(); } if (e.key === 'Escape') { setShowAddCity(false); } }}
+                        placeholder="Type new city or place name"
+                        style={{ flex: 1, padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCity}
+                        style={{ padding: '8px 14px', background: '#3699ff', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
+                      >
+                        Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowAddCity(false); setNewCityName(''); }}
+                        style={{ padding: '8px 14px', background: '#f5f8fa', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
 
               </div>
