@@ -325,6 +325,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
   const scanRef = useRef(null);
 
+  const tableWrapRef = useRef(null);
+
   const codeRefs = useRef({});
 
   const packetsRefs = useRef({});
@@ -600,7 +602,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       if (!isInRow) scanRef.current?.focus();
 
-      const wrap = document.querySelector('.sale-table-wrap');
+      const wrap = tableWrapRef.current;
 
       if (wrap) wrap.scrollTo({ top: wrap.scrollHeight, behavior: 'smooth' });
 
@@ -1440,7 +1442,12 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
 
-      if (showCodeRowDrop && codeRowResults.length > 0) { fillRow(idx, codeRowResults[0]); return; }
+      if (showCodeRowDrop && codeRowResults.length > 0) {
+        // Prefer exact code match, fallback to first result
+        const exact = codeRowResults.find(r => r.item_code.toLowerCase() === codeVal);
+        fillRow(idx, exact || codeRowResults[0]);
+        return;
+      }
 
       // No dropdown — move to packing
 
@@ -1888,7 +1895,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
       const qty = Math.abs(parseFloat(i.packets) || 0);
       const packing = parseFloat(i.packingQty) || 1;
       return s + (packing > 0 ? (qty / packing) : qty);
-    }, 0) * 100) / 100;
+    }, 0));
 
     const totalReturnQty = items.reduce((s, i) => i.isReturn ? s + Math.abs(parseInt(i.packets) || 0) : s, 0);
 
@@ -2296,19 +2303,33 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     // ── Dynamic Pagination ──────────────────────────────────────────────────
 
-    // Page 1 has full shop & customer header (~220px height) -> fits max 20 items.
+    // ── Dynamic Pagination Rules ──────────────────────────────────────────
 
-    // Subsequent pages omit shop header -> fit up to 30 items per page.
+    // 1. Single-page limit: 16 items ONLY for Master Cashier mode when customer has a previous balance,
 
-    // Last page needs space for Totals & Signatures (~140px height) -> fits max 24 items.
+    //    otherwise 20 items for standard invoices.
+
+    // 2. Multi-page invoice: Page 1 holds 20 items.
+
+    // 3. Middle pages: Hold up to 30 items.
+
+    // 4. Last page of a multi-page invoice: Holds up to 25 items max.
 
 
 
-    const FIRST_PAGE_LIMIT = 20;
+    const useMasterCashier = (currentUser?.permissions || []).includes('use_master_cashier');
 
-    const SUBSEQUENT_PAGE_LIMIT = 30;
+    const isMasterCashierWithPrevBalance = useMasterCashier && customerPrevBalance && parseFloat(customerPrevBalance) !== 0;
 
-    const LAST_PAGE_WITH_TOTALS_LIMIT = 18;
+
+
+    const SINGLE_PAGE_MAX = isMasterCashierWithPrevBalance ? 16 : 20;
+
+    const FIRST_PAGE_MULTI_MAX = 20;
+
+    const LAST_PAGE_MULTI_MAX = 25;
+
+    const MIDDLE_PAGE_MAX = 30;
 
 
 
@@ -2322,43 +2343,59 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       chunks.push([]);
 
+    } else if (remainingItems.length <= SINGLE_PAGE_MAX) {
+
+      // Single-page invoice: Page 1 is both first & last page (up to 16 items)
+
+      chunks.push(remainingItems);
+
     } else {
 
-      let pageIdx = 0;
+      // Multi-page invoice:
+
+      // Page 1 gets 20 items. However if total items is 17..20, Page 1 takes 16
+
+      // so it cleanly splits into 2 pages with the last page getting the remaining 1..4 items.
+
+      const p1Take = (remainingItems.length <= FIRST_PAGE_MULTI_MAX) ? SINGLE_PAGE_MAX : FIRST_PAGE_MULTI_MAX;
+
+      chunks.push(remainingItems.slice(0, p1Take));
+
+      remainingItems = remainingItems.slice(p1Take);
+
+
+
+      // Subsequent pages
 
       while (remainingItems.length > 0) {
 
-        pageIdx++;
+        if (remainingItems.length <= LAST_PAGE_MULTI_MAX) {
 
-        let limit;
+          // Last page gets up to 25 items
 
+          chunks.push(remainingItems);
 
-
-        if (pageIdx === 1) {
-
-          limit = FIRST_PAGE_LIMIT;
+          remainingItems = [];
 
         } else {
 
-          if (remainingItems.length <= LAST_PAGE_WITH_TOTALS_LIMIT) {
+          // Middle page gets up to 30 items.
 
-            limit = remainingItems.length;
+          // If remaining is 26..30, take 25 so the last page gets 1..5 items (never exceeds 25).
 
-          } else {
+          let take = MIDDLE_PAGE_MAX;
 
-            limit = SUBSEQUENT_PAGE_LIMIT;
+          if (remainingItems.length > LAST_PAGE_MULTI_MAX && remainingItems.length <= MIDDLE_PAGE_MAX) {
+
+            take = LAST_PAGE_MULTI_MAX;
 
           }
 
+          chunks.push(remainingItems.slice(0, take));
+
+          remainingItems = remainingItems.slice(take);
+
         }
-
-
-
-        const currentChunk = remainingItems.slice(0, limit);
-
-        chunks.push(currentChunk);
-
-        remainingItems = remainingItems.slice(limit);
 
       }
 
@@ -2492,11 +2529,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     const totalReceived = cashReceived + bankReceived;
 
-    const useMasterCashier = (currentUser?.permissions || []).includes('use_master_cashier');
+    const totalOwedBeforePayments = (customerPrevBalance !== 0 && useMasterCashier)
+      ? (totals.grandTotal + parseFloat(customerPrevBalance || 0))
+      : totals.grandTotal;
 
-    const finalNetPayable = (customerPrevBalance !== 0 && useMasterCashier) ? (totals.grandTotal + parseFloat(customerPrevBalance || 0)) : totals.grandTotal;
+    const balanceAmount = totalOwedBeforePayments - totalReceived;
 
-    const balanceAmount = finalNetPayable - totalReceived;
+    const finalNetPayable = (useMasterCashier && balanceAmount > 0)
+      ? balanceAmount
+      : totalOwedBeforePayments;
 
 
 
@@ -2523,6 +2564,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
       </div>
 
     `;
+
 
 
 
@@ -2693,7 +2735,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
             </div>
             <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: none; padding: 3px 6px; margin-top: 2px;">
               <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
-                <span style="white-space: nowrap;"><strong>Net Payable Total:</strong></span>
+                <span style="white-space: nowrap;"><strong>Total Amount Owed:</strong></span>
                 <span>${formatAmt(totals.grandTotal + parseFloat(customerPrevBalance))}</span>
               </div>
             </div>
@@ -2721,12 +2763,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                 </div>
               </div>
             ` : ''}
-            <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 6px; margin-top: 2px;">
-              <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
-                <span style="white-space: nowrap;"><strong>Balance Amount:</strong></span>
-                <span>${formatAmt(balanceAmount)}</span>
+            ${(Math.abs(balanceAmount) > 0.01) ? `
+              <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 6px; margin-top: 2px;">
+                <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
+                  <span style="white-space: nowrap;"><strong>Balance:</strong></span>
+                  <span>${formatAmt(balanceAmount)}</span>
+                </div>
               </div>
-            </div>
+            ` : ''}
           ` : ''}
           </div>
 
@@ -2740,7 +2784,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <div class="page-content">
 
-            ${isFirstPage ? headerBlockHtml : `<div class="page-num continued">Page ${pageIdx + 1} of ${chunks.length}</div>`}
+            ${isFirstPage ? headerBlockHtml : `<div class="page-header-continued"><span class="inv-num-continued">Invoice No: ${getPrintedInvoiceNo(invoiceNo)}</span><span class="page-num-continued">Page ${pageIdx + 1} of ${chunks.length}</span></div>`}
 
             <table>
 
@@ -2836,7 +2880,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           .page-num { position: absolute; top: 0; right: 0; font-size: 11px; }
 
-          .page-num.continued { position: static; text-align: right; margin-bottom: 6px; }
+          .page-header-continued { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: bold; }
 
 
 
@@ -3158,15 +3202,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           </span>
 
-          {saleToEdit?.updated_at && saleToEdit.updated_at !== saleToEdit.created_at && (
-
-            <span className="topbar-dt" style={{ marginLeft: '15px', color: '#dc2626', fontWeight: 'bold' }}>
-
-              (Updated: {`${String(new Date(saleToEdit.updated_at).getDate()).padStart(2, '0')}-${String(new Date(saleToEdit.updated_at).getMonth() + 1).padStart(2, '0')}-${new Date(saleToEdit.updated_at).getFullYear()}, ${new Date(saleToEdit.updated_at).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}`})
-
-            </span>
-
-          )}
+          {saleToEdit?.updated_at && saleToEdit.updated_at !== saleToEdit.created_at && (() => {
+            const uDate = parseLocalDate(saleToEdit.updated_at);
+            const formatted = `${String(uDate.getDate()).padStart(2, '0')}-${String(uDate.getMonth() + 1).padStart(2, '0')}-${uDate.getFullYear()}, ${uDate.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}`;
+            return (
+              <span style={{ marginLeft: '10px', color: '#dc2626', fontWeight: '600', fontSize: '0.72rem' }}>
+                (Updated: {formatted})
+              </span>
+            );
+          })()}
 
           {!isEditing && onNewSale && (
 
@@ -3176,15 +3220,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <button type="button" className="topbar-btn" onClick={() => setShowInvoiceDiscountModal(true)} title="Invoice Discounts (F6)" style={{ background: '#10b981', color: '#fff', marginLeft: 10 }}>Disc (F6)</button>
 
-          <span className="topbar-title yellow">{isEditing ? 'Edit Sale' : 'New Sale'}</span>
+          <span className={`topbar-title ${isEditing ? 'transparent' : 'yellow'}`}>{isEditing ? 'Edit Sale' : 'New Sale'}</span>
 
         </div>
 
         <div className="topbar-right">
 
-          <button type="button" onClick={() => setStockSearchModalOpen(true)} title="Stock Search (F8)" style={{ background: '#0284c7', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>S</button>
+          <button type="button" className="topbar-btn" onClick={() => setStockSearchModalOpen(true)} title="Stock Search (F8)" style={{ background: '#0284c7', color: '#fff', padding: '2px 8px', fontSize: '0.75rem', height: 26, lineHeight: '20px' }}>Search</button>
 
-          <button type="button" onClick={() => setCustomerModalOpen(true)} title="Search Customer (F4)" style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>C</button>
+          <button type="button" className="topbar-btn" onClick={() => setCustomerModalOpen(true)} title="Search Customer (F4)" style={{ background: '#3b82f6', color: '#fff' }}>CUST</button>
 
           <button type="button" className="topbar-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={() => setShowReturnModal(true)}>Add Return Item</button>
 
@@ -3200,7 +3244,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <button type="button" className="topbar-btn topbar-btn-primary" onClick={handlePreview} disabled={isSubmitting} style={{ background: '#3b82f6', borderColor: '#3b82f6' }}>
 
-            👀 Print Preview
+            Print Preview
 
           </button>
 
@@ -3386,7 +3430,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       <div className="sale-body">
 
-        <div className="sale-table-wrap">
+        <div className="sale-table-wrap" ref={tableWrapRef}>
 
           <table className="sale-table">
 
@@ -3468,35 +3512,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
                     />
 
-                    {showCodeRowDrop && activeCodeRow === idx && codeRowResults.length > 0 && (
 
-                      <div className="autocomplete-dropdown" style={{ position: 'absolute', top: '100%', left: 0, zIndex: 300, minWidth: 420 }}>
 
-                        {codeRowResults.slice(0, 8).map(p => (
-
-                          <div key={p.id} className="suggestion-item"
-
-                            onMouseDown={e => { e.preventDefault(); fillRow(idx, p); }}>
-
-                            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#4f46e5', marginRight: 8, minWidth: 80 }}>{p.item_code}</span>
-
-                            <span style={{ flex: 1, fontSize: '0.85rem' }}>{descForProduct(p)}</span>
-
-                            {p.packing_qty > 0 && (
-
-                              <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: 3, padding: '0 5px', fontSize: '0.7rem', fontWeight: 700, marginLeft: 6 }}>{p.packing_qty}pcs</span>
-
-                            )}
-
-                            <span style={{ fontWeight: 700, color: '#059669', marginLeft: 10, minWidth: 70, textAlign: 'right' }}>PKR {Math.round(p.sale_rate).toLocaleString()}</span>
-
-                          </div>
-
-                        ))}
-
-                      </div>
-
-                    )}
 
                   </td>
 
@@ -3903,12 +3920,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
         </div>
 
-        <div className="footer-subtotal">
-
-          <span>Subtotal</span>
-
-          <span>{Math.round(totals.subTotal).toLocaleString()}</span>
-
+        <div className="footer-subtotal" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', lineHeight: '1.2' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+            <span style={{ fontSize: '0.95rem', color: '#6b7280' }}>Subtotal</span>
+            <span style={{ fontWeight: '700', fontSize: '1.2rem', color: '#111827' }}>{Math.round(totals.subTotal).toLocaleString()}</span>
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#4b5563', fontWeight: '700', whiteSpace: 'nowrap', marginTop: '2px' }}>
+            {totals.totalPackets} pkts / {totals.totalQty} pcs
+          </div>
         </div>
 
         <div className="footer-discount">
@@ -3941,11 +3960,6 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
             onChange={e => setExtraDiscountPct(e.target.value)} placeholder="%" />
 
-        </div>
-
-        <div className="footer-total-qty">
-          <span style={{ fontSize: '0.7rem' }}>Total Pkts / Pcs</span>
-          <strong style={{ fontSize: '0.9rem', whiteSpace: 'nowrap' }}>{totals.totalPackets} pkts / {totals.totalQty} pcs</strong>
         </div>
 
         <div className="footer-total-qty">

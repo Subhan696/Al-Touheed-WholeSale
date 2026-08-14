@@ -44,19 +44,19 @@ export default function GLVouchers() {
   const [viewDetails, setViewDetails] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
-  const [startDate, setStartDate] = useState(getFirstDayOfMonthString);
+  const [startDate, setStartDate] = useState(getLocalDateString);
   const [endDate, setEndDate] = useState(getLocalDateString);
 
   useEffect(() => {
-    fetchVouchers();
-    const handleUpdate = () => fetchVouchers();
+    fetchVouchers(startDate, endDate);
+    const handleUpdate = () => fetchVouchers(startDate, endDate);
     ipcRenderer.on('vouchers', handleUpdate);
     return () => ipcRenderer.removeListener('vouchers', handleUpdate);
   }, []);
 
-  const fetchVouchers = async () => {
+  const fetchVouchers = async (sDate = startDate, eDate = endDate) => {
     try {
-      const res = await ipcRenderer.invoke('get-vouchers', { startDate, endDate });
+      const res = await ipcRenderer.invoke('get-vouchers', { startDate: sDate, endDate: eDate });
       setVouchers(res || []);
     } catch (err) {
       console.error(err);
@@ -103,7 +103,7 @@ export default function GLVouchers() {
       <GLVoucherEntry
         voucherToEdit={editingVoucher}
         onCancel={() => { setShowEntry(false); setEditingVoucher(null); }}
-        onSuccess={() => { setShowEntry(false); setEditingVoucher(null); fetchVouchers(); }}
+        onSuccess={() => { setShowEntry(false); setEditingVoucher(null); fetchVouchers(startDate, endDate); }}
       />
     );
   }
@@ -125,18 +125,75 @@ export default function GLVouchers() {
         </button>
       </div>
 
-      <div className="bg-white p-4 rounded shadow mb-6 border border-slate-200 flex gap-4 items-end">
-        <div>
-          <label className="block text-sm font-semibold mb-1">Start Date</label>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border p-2 rounded" />
+      <div className="bg-white p-4 rounded shadow mb-6 border border-slate-200 flex flex-wrap gap-4 items-end justify-between">
+        <div className="flex gap-4 items-end flex-wrap">
+          <div>
+            <label className="block text-sm font-semibold mb-1">Start Date</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={e => {
+                setStartDate(e.target.value);
+                fetchVouchers(e.target.value, endDate);
+              }}
+              className="border p-2 rounded text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">End Date</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={e => {
+                setEndDate(e.target.value);
+                fetchVouchers(startDate, e.target.value);
+              }}
+              className="border p-2 rounded text-sm"
+            />
+          </div>
+          <button
+            onClick={() => fetchVouchers(startDate, endDate)}
+            className="bg-slate-800 text-white px-4 py-2 rounded shadow hover:bg-slate-900 text-sm font-semibold"
+          >
+            🔍 Filter
+          </button>
         </div>
-        <div>
-          <label className="block text-sm font-semibold mb-1">End Date</label>
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border p-2 rounded" />
+
+        <div className="flex gap-2 items-center flex-wrap">
+          <button
+            onClick={() => {
+              const today = getLocalDateString();
+              setStartDate(today);
+              setEndDate(today);
+              fetchVouchers(today, today);
+            }}
+            className="bg-blue-50 text-blue-700 border border-blue-300 px-3 py-2 rounded text-xs font-bold hover:bg-blue-100"
+          >
+            📅 Today
+          </button>
+          <button
+            onClick={() => {
+              const firstDay = getFirstDayOfMonthString();
+              const today = getLocalDateString();
+              setStartDate(firstDay);
+              setEndDate(today);
+              fetchVouchers(firstDay, today);
+            }}
+            className="bg-indigo-50 text-indigo-700 border border-indigo-300 px-3 py-2 rounded text-xs font-bold hover:bg-indigo-100"
+          >
+            📆 This Month
+          </button>
+          <button
+            onClick={() => {
+              setStartDate('');
+              setEndDate('');
+              fetchVouchers('', '');
+            }}
+            className="bg-amber-50 text-amber-700 border border-amber-300 px-3 py-2 rounded text-xs font-bold hover:bg-amber-100"
+          >
+            🌐 Show All
+          </button>
         </div>
-        <button onClick={fetchVouchers} className="bg-slate-800 text-white px-4 py-2 rounded shadow hover:bg-slate-900">
-          Load Transactions
-        </button>
       </div>
 
       <div className="bg-white rounded shadow overflow-x-auto border border-slate-200">

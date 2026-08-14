@@ -470,8 +470,11 @@ function FastPurchase({ currentUser, isActive, onClose }) {
         return;
       }
       const drop = activeDrop?.rowId === rowId ? activeDrop.results : [];
-      if (drop.length > 0) fillRow(rowId, drop[0]);
-      else packetsRefs.current[rowId]?.focus();
+      const codeVal = rows[idx]?.itemCode?.trim().toLowerCase() || '';
+      if (drop.length > 0) {
+        const exact = drop.find(r => r.item_code.toLowerCase() === codeVal);
+        fillRow(rowId, exact || drop[0]);
+      } else packetsRefs.current[rowId]?.focus();
     }
     if (e.key === 'Escape') setActiveDrop(null);
     if (e.key === 'ArrowDown') { e.preventDefault(); focusInput(idx + 1, codeRefs); }
@@ -843,6 +846,7 @@ function FastPurchase({ currentUser, isActive, onClose }) {
               <option key={p.name} value={p.name}>{p.name}</option>
             ))}
           </select>
+
           <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b', padding: '2px 10px', fontSize: '0.75rem' }}>
             📦 Import Session
           </button>
@@ -988,20 +992,7 @@ function FastPurchase({ currentUser, isActive, onClose }) {
                         className="form-input"
                         style={{ padding: '2px 4px', fontSize: '0.88rem', height: 26, borderRadius: 2, ...(row.locked ? { background: '#f1f5f9', color: '#64748b', cursor: 'default' } : {}) }}
                       />
-                      {activeDrop?.rowId === row.id && activeDrop.results.length > 0 && (
-                        <div className="np-dropdown">
-                          {activeDrop.results.slice(0, 8).map(p => (
-                            <div key={p.id} className="np-suggestion"
-                              onMouseDown={e => { e.preventDefault(); fillRow(row.id, p); }}>
-                              <strong style={{ fontFamily: 'monospace', color: '#3699ff', minWidth: 90, flexShrink: 0 }}>{p.item_code}</strong>
-                              <span style={{ flex: 1 }}>{descForProduct(p)}</span>
-                              <span style={{ color: '#5e6278', fontWeight: 700, minWidth: 64, textAlign: 'right', flexShrink: 0 }}>
-                                {parseFloat(p.purchase_rate || 0).toLocaleString()}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+
                     </td>
 
                     {/* Item Name */}

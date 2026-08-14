@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './NewPurchase.css';
 import { printPurchaseReturn, savePurchaseReturnPDF } from '../utils/printPurchaseReturn';
 import SuccessAnimation from './SuccessAnimation';
+import StockSearchModal from './StockSearchModal';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -41,6 +42,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   const [statusMsg, setStatusMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessAnim, setShowSuccessAnim] = useState(false);
+  const [stockSearchModalOpen, setStockSearchModalOpen] = useState(false);
   
   const [suppliersList, setSuppliersList] = useState([]);
   const [expenseAccounts, setExpenseAccounts] = useState([]);
@@ -313,8 +315,11 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
     if (e.key === 'Enter') {
       e.preventDefault();
       const drop = activeDrop?.rowId === rowId ? activeDrop.results : [];
-      if (drop.length > 0) fillRow(rowId, drop[0]);
-      else packetsRefs.current[rowId]?.focus();
+      const codeVal = rows[idx]?.itemCode?.trim().toLowerCase() || '';
+      if (drop.length > 0) {
+        const exact = drop.find(r => r.item_code.toLowerCase() === codeVal);
+        fillRow(rowId, exact || drop[0]);
+      } else packetsRefs.current[rowId]?.focus();
     }
     if (e.key === 'Escape') setActiveDrop(null);
     if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx+1]; if(n) codeRefs.current[n.id]?.focus(); }
@@ -527,12 +532,79 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
+      if (e.key === 'F8') { e.preventDefault(); setStockSearchModalOpen(true); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); handleSubmit(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); handlePrint(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isActive, items, supplierName, returnDate, discount, miscCharges, notes, isEditing]);
+
+  const focusItemCodeInput = () => {
+    setTimeout(() => {
+      const rows = itemsRef.current || [];
+      const emptyRow = rows.find(r => !r.itemCode && !r.description) || rows[rows.length - 1] || rows[0];
+      if (emptyRow && codeRefs.current[emptyRow.id]) {
+        codeRefs.current[emptyRow.id].focus();
+        codeRefs.current[emptyRow.id].select?.();
+      }
+    }, 50);
+  };
+
+  const handleCloseStockSearch = () => {
+    setStockSearchModalOpen(false);
+    focusItemCodeInput();
+  };
+
+  const handleSelectStockItem = (product) => {
+    if (!product) return;
+    setItems(prev => {
+      const emptyIdx = prev.findIndex(r => !r.itemCode && !r.description);
+      let targetRowId;
+      let nextItems;
+      if (emptyIdx !== -1) {
+        targetRowId = prev[emptyIdx].id;
+        nextItems = [...prev];
+      } else {
+        const nr = makeRow();
+        targetRowId = nr.id;
+        nextItems = [...prev, nr];
+      }
+
+      const pkts = product.packing_qty || 0;
+      const baseRate = parseFloat(product.purchase_rate) || 0;
+      let flatD = 0;
+      let pctD = 0;
+
+      if (supplierName && product.brand) {
+        const rule = mfgDiscounts.find(d =>
+          d.company_name.toLowerCase() === supplierName.toLowerCase() &&
+          d.brand_name.toLowerCase() === product.brand.toLowerCase()
+        );
+        if (rule) {
+          pctD = parseFloat(rule.purchase_discount_pct) || 0;
+          flatD = parseFloat(rule.discount_amount) || 0;
+        }
+      }
+
+      const updated = nextItems.map(r => r.id === targetRowId ? {
+        ...r,
+        itemCode: product.item_code,
+        description: descForProduct(product),
+        brand: product.brand || '',
+        packingQty: pkts,
+        currentStock: product.stock_packets !== undefined ? product.stock_packets : 0,
+        packets: String(pkts),
+        preDiscPrice: String(baseRate),
+        flatDiscount: flatD,
+        discPct: pctD
+      } : r);
+
+      setTimeout(() => packetsRefs.current[targetRowId]?.focus(), 50);
+      return updated;
+    });
+    setStockSearchModalOpen(false);
+  };
 
   return (
     <div className="new-purchase-page">
@@ -561,6 +633,9 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
               style={{ padding: '4px 8px', fontSize: '0.85rem', width: 100, height: 28 }}
             />
           </div>
+          <button type="button" onClick={() => setStockSearchModalOpen(true)} className="btn btn-secondary sm" style={{ background: '#0284c7', color: 'white', borderColor: '#0284c7', padding: '2px 8px', fontSize: '0.75rem', height: 26, lineHeight: '20px' }}>
+            🔍 Search (F8)
+          </button>
           <button type="button" onClick={handlePrint} className="btn btn-secondary sm" style={{ background: '#3b82f6', color: 'white', borderColor: '#3b82f6' }}>
             🖨️ Print (Ctrl+P)
           </button>
@@ -740,20 +815,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                               className="form-input fast-entry"
                               style={{ padding: '2px 6px', fontSize: '0.85rem' }}
                             />
-                            {activeDrop?.rowId === row.id && activeDrop.results.length > 0 && (
-                              <div className="np-dropdown" style={{ zIndex: 100 }}>
-                                {activeDrop.results.slice(0, 8).map(p => (
-                                  <div key={p.id} className="np-suggestion"
-                                    onMouseDown={e => { e.preventDefault(); fillRow(row.id, p); }}>
-                                    <strong style={{ fontFamily: 'monospace', color: '#ef4444', minWidth: 90, flexShrink: 0 }}>{p.item_code}</strong>
-                                    <span style={{ flex: 1 }}>{descForProduct(p)}</span>
-                                    <span style={{ color: '#5e6278', fontWeight: 700, minWidth: 64, textAlign: 'right', flexShrink: 0 }}>
-                                      {parseFloat(p.purchase_rate || 0).toLocaleString()}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+
                           </td>
 
                           <td style={{ padding: '0 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0 }}>
@@ -920,6 +982,12 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
           setIsSubmitting(false);
           onSaveSuccess?.();
         }}
+      />
+      <StockSearchModal
+        isOpen={stockSearchModalOpen}
+        onClose={handleCloseStockSearch}
+        onSelectItem={handleSelectStockItem}
+        title="Purchase Return Stock Search"
       />
     </div>
   );

@@ -16,7 +16,9 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     let balText = '';
     if (showSupplierBalance && balance !== undefined) {
       const netBal = balance - (sup.totalValue || 0);
-      balText = ` | Sup Bal: ${fmt2(Math.abs(balance))} ${balance >= 0 ? 'Cr' : 'Dr'} | Net Bal: ${fmt2(Math.abs(netBal))} ${netBal >= 0 ? 'Cr' : 'Dr'}`;
+      const supBalLabel = balance > 0 ? 'Cr (Dene Hain)' : balance < 0 ? 'Dr (Lene Hain)' : 'Nil';
+      const netBalLabel = netBal > 0 ? 'Cr (Dene Hain)' : netBal < 0 ? 'Dr (Lene Hain)' : 'Nil';
+      balText = ` | Sup Bal: ${fmt2(Math.abs(balance))} ${supBalLabel} | Stock in Hand: ${fmt2(Math.abs(netBal))} ${netBalLabel}`;
     }
 
     let categoriesHtml = '';
@@ -86,13 +88,21 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
       .sort((a, b) => a[0].localeCompare(b[0]));
 
     if (filteredBals.length > 0) {
-      const rowsHtml = filteredBals.map(([name, bal]) => `
+      const totalPayable = filteredBals.filter(([, b]) => (parseFloat(b) || 0) > 0).reduce((sum, [, b]) => sum + (parseFloat(b) || 0), 0);
+      const totalReceivable = filteredBals.filter(([, b]) => (parseFloat(b) || 0) < 0).reduce((sum, [, b]) => sum + Math.abs(parseFloat(b) || 0), 0);
+      const netBal = totalPayable - totalReceivable;
+
+      const rowsHtml = filteredBals.map(([name, bal]) => {
+        const typeLabel = bal > 0 ? 'Dene Hain (Cr)' : bal < 0 ? 'Lene Hain (Dr)' : 'Nil';
+        const amtLabel = bal > 0 ? 'Cr (Dene Hain)' : bal < 0 ? 'Dr (Lene Hain)' : 'Nil';
+        return `
         <tr>
           <td style="border: 1px solid #000; padding: 6px 8px; font-size: 13.5px; font-weight: 600; text-transform: uppercase;">${(name || '').toUpperCase()}</td>
-          <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 13.5px; font-weight: bold;">${bal >= 0 ? 'Cr' : 'Dr'}</td>
-          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: 900; font-size: 14px;">${fmt2(Math.abs(bal))}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 13.5px; font-weight: bold;">${typeLabel}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: 900; font-size: 14px;">${fmt2(Math.abs(bal))} ${amtLabel}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
 
       supplierBalancesSummaryHtml = `
         <div style="margin-top: 20px; page-break-inside: avoid;">
@@ -103,13 +113,27 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
             <thead>
               <tr style="background: #f1f5f9; font-weight: 900; font-size: 13.5px;">
                 <th style="border: 1px solid #000; padding: 6px; text-align: left;">Supplier Name</th>
-                <th style="border: 1px solid #000; padding: 6px; width: 100px; text-align: center;">Type</th>
-                <th style="border: 1px solid #000; padding: 6px; width: 130px; text-align: right;">Net Balance</th>
+                <th style="border: 1px solid #000; padding: 6px; width: 140px; text-align: center;">Balance Type</th>
+                <th style="border: 1px solid #000; padding: 6px; width: 180px; text-align: right;">Stock in Hand / Balance</th>
               </tr>
             </thead>
             <tbody>
               ${rowsHtml}
             </tbody>
+            <tfoot>
+              <tr style="background: #f1f5f9; font-weight: 900; font-size: 13.5px;">
+                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">TOTAL PAYABLE — DENE HAIN (Cr):</td>
+                <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; color: #15803d;">${fmt2(totalPayable)} Cr</td>
+              </tr>
+              <tr style="background: #f1f5f9; font-weight: 900; font-size: 13.5px;">
+                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">TOTAL RECEIVABLE / ADVANCE — LENE HAIN (Dr):</td>
+                <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; color: #dc2626;">${fmt2(totalReceivable)} Dr</td>
+              </tr>
+              <tr style="background: #e2e8f0; font-weight: 900; font-size: 14px;">
+                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">STOCK IN HAND (${netBal >= 0 ? 'TOTAL PAYABLE — DENE HAIN' : 'TOTAL RECEIVABLE — LENE HAIN'}):</td>
+                <td style="border: 1px solid #000; padding: 6px 8px; text-align: right;">${fmt2(Math.abs(netBal))} ${netBal >= 0 ? 'Cr (Dene Hain)' : 'Dr (Lene Hain)'}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       `;

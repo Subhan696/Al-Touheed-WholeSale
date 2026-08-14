@@ -905,68 +905,80 @@ function Reports({ currentUser, isActive }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {userReport.map((user, idx) => (
-                                <React.Fragment key={idx}>
-                                    <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedUser(expandedUser === user.user ? null : user.user)}>
-                                        <td style={{ fontWeight: 'bold' }}>{user.user}</td>
-                                        <td>{user.invoices_count}</td>
-                                        <td>{user.items_sold}</td>
-                                        <td style={{ color: '#10b981', fontWeight: 'bold' }}>{fmt(user.total_sales)}</td>
-                                        <td style={{ color: '#ef4444' }}>{fmt(user.total_returns)}</td>
-                                        <td style={{ fontWeight: 'bold' }}>{fmt(user.net_sales)}</td>
-                                        <td>{fmt(user.cash_sales)}</td>
-                                        <td>{fmt(user.digital_sales)}</td>
-                                        <td><button className="btn-icon">{expandedUser === user.user ? '▲' : '▼'}</button></td>
-                                    </tr>
-                                    {expandedUser === user.user && (
-                                        <tr>
-                                            <td colSpan="9" style={{ padding: '15px', background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
-                                                {/* User Digital Breakdown */}
-                                                <div style={{ marginBottom: '15px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                                                    {Object.entries(user.digital_breakdown || {}).map(([method, data], i) => (
-                                                        <div key={i} style={{ background: 'white', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                                                                <div>
-                                                                    <span style={{ fontSize: '10px', color: '#6b7280', display: 'block' }}>{method}</span>
-                                                                    <span style={{ fontWeight: 'bold', color: '#7c3aed' }}>{fmt(data.amount)}</span>
-                                                                </div>
-                                                                <span style={{ fontSize: '12px', color: '#6b7280', background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>
-                                                                    {data.count} payments
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                    {(!user.digital_breakdown || Object.keys(user.digital_breakdown).length === 0) && (
-                                                        <div style={{ color: '#9ca3af', fontSize: '12px', fontStyle: 'italic' }}>No digital payments recorded.</div>
-                                                    )}
-                                                </div>
-
-                                                <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', background: 'white' }}>
-                                                    <table style={{ width: '100%', fontSize: '0.9rem' }}>
-                                                        <thead>
-                                                            <tr style={{ background: '#e5e7eb' }}>
-                                                                <th>Time</th><th>Invoice #</th><th>Items</th><th>Amount</th><th>Method</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {user.invoices_list.map((inv, i) => (
-                                                                <tr key={i}>
-                                                                    <td>{fmtTime(inv.created_at)}</td>
-                                                                    <td>{inv.invoice_no}</td>
-                                                                    <td>{inv.total_quantity}</td>
-                                                                    <td>{fmt(inv.total_amount)}</td>
-                                                                    <td>{inv.payment_method}</td>
-                                                                </tr>
-                                                            ))}
-                                                            {user.invoices_list.length === 0 && <tr><td colSpan="5" style={{ textAlign: 'center', color: '#9ca3af' }}>No invoices found.</td></tr>}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </td>
+                            {(!userReport || userReport.length === 0) ? (
+                                <tr>
+                                    <td colSpan="9" style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: '0.95rem' }}>
+                                        No user performance data found for the selected date range.
+                                    </td>
+                                </tr>
+                            ) : (
+                                userReport.map((user, idx) => (
+                                    <React.Fragment key={idx}>
+                                        <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedUser(expandedUser === (user.user || user.username) ? null : (user.user || user.username))}>
+                                            <td style={{ fontWeight: 'bold' }}>{user.user || user.username}</td>
+                                            <td>{user.invoices_count ?? user.invoiceCount ?? 0}</td>
+                                            <td>{user.items_sold ?? user.itemCount ?? 0}</td>
+                                            <td style={{ color: '#10b981', fontWeight: 'bold' }}>{fmt(user.total_sales ?? user.totalSales)}</td>
+                                            <td style={{ color: '#ef4444' }}>{fmt(user.total_returns ?? user.totalReturned)}</td>
+                                            <td style={{ fontWeight: 'bold' }}>{fmt(user.net_sales ?? (user.total_sales - user.total_returns))}</td>
+                                            <td>{fmt(user.cash_sales ?? user.cashSales)}</td>
+                                            <td>{fmt(user.digital_sales ?? user.digitalSales)}</td>
+                                            <td><button className="btn-icon">{expandedUser === (user.user || user.username) ? '▲' : '▼'}</button></td>
                                         </tr>
-                                    )}
-                                </React.Fragment>
-                            ))}
+                                        {expandedUser === (user.user || user.username) && (
+                                            <tr>
+                                                <td colSpan="9" style={{ padding: '15px', background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                                                    {/* User Digital Breakdown */}
+                                                    <div style={{ marginBottom: '15px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                                        {Object.entries(user.digital_breakdown || {}).map(([method, data], i) => (
+                                                            <div key={i} style={{ background: 'white', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                                                                    <div>
+                                                                        <span style={{ fontSize: '10px', color: '#6b7280', display: 'block' }}>{method}</span>
+                                                                        <span style={{ fontWeight: 'bold', color: '#7c3aed' }}>{fmt(typeof data === 'object' ? data.amount : data)}</span>
+                                                                    </div>
+                                                                    {typeof data === 'object' && data.count !== undefined && (
+                                                                        <span style={{ fontSize: '12px', color: '#6b7280', background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>
+                                                                            {data.count} payments
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                        {(!user.digital_breakdown || Object.keys(user.digital_breakdown).length === 0) && (
+                                                            <div style={{ color: '#9ca3af', fontSize: '12px', fontStyle: 'italic' }}>No digital payments recorded.</div>
+                                                        )}
+                                                    </div>
+
+                                                    <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', background: 'white' }}>
+                                                        <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                                                            <thead>
+                                                                <tr style={{ background: '#e5e7eb' }}>
+                                                                    <th>Time</th><th>Invoice #</th><th>Items</th><th>Amount</th><th>Method</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(user.invoices_list || user.invoices || []).map((inv, i) => (
+                                                                    <tr key={i}>
+                                                                        <td>{fmtTime(inv.created_at)}</td>
+                                                                        <td>{inv.invoice_no}</td>
+                                                                        <td>{inv.total_quantity || inv.total_packets || 0}</td>
+                                                                        <td>{fmt(inv.total_amount)}</td>
+                                                                        <td>{inv.payment_method || 'Cash'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                                {(!user.invoices_list || (user.invoices_list || user.invoices || []).length === 0) && (
+                                                                    <tr><td colSpan="5" style={{ textAlign: 'center', color: '#9ca3af' }}>No invoices found.</td></tr>
+                                                                )}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 )}

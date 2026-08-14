@@ -55,30 +55,42 @@ function PurchaseReturnList({ currentUser, onEditReturn, isActive }) {
   };
 
   const filtered = returns.filter(r =>
-    !search || r.supplier_name?.toLowerCase().includes(search.toLowerCase()) || r.return_no?.toString().includes(search)
+    !search ||
+    r.supplier_name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.return_no?.toString().includes(search) ||
+    r.blt_number?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '2px solid #e4e6ef', marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>Purchase Returns ({filtered.length})</h2>
-        <input placeholder="Search supplier or return #..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', width: 260, fontFamily: 'inherit' }} />
+        <input placeholder="Search supplier, return # or BLT #..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, fontSize: '0.9rem', width: 280, fontFamily: 'inherit' }} />
       </div>
       <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e4e6ef', borderRadius: 8, background: '#fff' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
           <thead style={{ position: 'sticky', top: 0, background: '#f5f7fa', zIndex: 10 }}>
             <tr>
-              <th style={th}>Return No</th><th style={th}>Date</th><th style={th}>Supplier</th>
-              <th style={{ ...th, textAlign: 'right' }}>Total</th><th style={{ ...th, textAlign: 'center' }}>Actions</th>
+              <th style={th}>Return No</th>
+              <th style={th}>Date</th>
+              <th style={th}>Supplier</th>
+              <th style={th}>BLT No</th>
+              <th style={{ ...th, textAlign: 'center' }}>CTN Qty</th>
+              <th style={{ ...th, textAlign: 'center' }}>Total Qty</th>
+              <th style={{ ...th, textAlign: 'right' }}>Total Amount</th>
+              <th style={{ ...th, textAlign: 'center' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td colSpan={5} style={{ padding: 60, textAlign: 'center', color: '#aaa' }}>No returns found</td></tr>
+            {filtered.length === 0 ? <tr><td colSpan={8} style={{ padding: 60, textAlign: 'center', color: '#aaa' }}>No returns found</td></tr>
               : filtered.map(r => (
                 <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><span style={{ fontWeight: 700, color: '#f64e60' }}>#{r.return_no ? r.return_no.toString().replace(/^PR-/, '') : ''}</span></td>
                   <td style={td}>{formatDateDMY(r.return_date || r.created_at)}</td>
                   <td style={td}>{r.supplier_name}</td>
+                  <td style={td}>{r.blt_number || '—'}</td>
+                  <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{r.ctn_qty || 0}</td>
+                  <td style={{ ...td, textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>{r.total_qty || 0}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>PKR {parseFloat(r.total_amount).toLocaleString()}</td>
                   <td style={{ ...td, textAlign: 'center' }}>
                     <button onClick={() => handlePrintRow(r)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, marginRight: 4 }} title="Print Purchase Return">🖨️ Print</button>

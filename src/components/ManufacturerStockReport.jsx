@@ -48,15 +48,15 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           <th className="ssr-val" style={{ width: 140 }}>
             {hasBal ? (
               <span style={{ color: rawBalance > 0 ? '#15803d' : rawBalance < 0 ? '#dc2626' : '#e2e8f0', fontWeight: 800 }}>
-                Sup Bal: {fmt2(Math.abs(rawBalance))} {rawBalance >= 0 ? 'Cr' : 'Dr'}
+                Sup Bal: {fmt2(Math.abs(rawBalance))} {rawBalance > 0 ? 'Cr (Dene Hain)' : rawBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
               </span>
             ) : ''}
           </th>
           <th className="ssr-val" style={{ width: 110 }}>Value: {fmt(sup.totalValue)}</th>
-          <th className="ssr-val" style={{ width: 140 }}>
+          <th className="ssr-val" style={{ width: 160 }}>
             {hasBal ? (
               <span style={{ color: netBalance > 0 ? '#15803d' : netBalance < 0 ? '#dc2626' : '#e2e8f0', fontWeight: 800 }}>
-                Net Bal: {fmt2(Math.abs(netBalance))} {netBalance >= 0 ? 'Cr' : 'Dr'}
+                Stock in Hand: {fmt2(Math.abs(netBalance))} {netBalance > 0 ? 'Cr (Dene Hain)' : netBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
               </span>
             ) : ''}
           </th>
@@ -83,15 +83,15 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
             <td className="ssr-val" style={{ width: 140 }}>
               {hasBal ? (
                 <span style={{ color: rawBalance > 0 ? '#15803d' : rawBalance < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
-                  Sup Bal: {fmt2(Math.abs(rawBalance))} {rawBalance >= 0 ? 'Cr' : 'Dr'}
+                  Sup Bal: {fmt2(Math.abs(rawBalance))} {rawBalance > 0 ? 'Cr (Dene Hain)' : rawBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                 </span>
               ) : ''}
             </td>
             <td className="ssr-val" style={{ width: 110 }}>{fmt(sup.totalValue)}</td>
-            <td className="ssr-val" style={{ width: 140 }}>
+            <td className="ssr-val" style={{ width: 160 }}>
               {hasBal ? (
                 <span style={{ color: netBalance > 0 ? '#15803d' : netBalance < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
-                  Net Bal: {fmt2(Math.abs(netBalance))} {netBalance >= 0 ? 'Cr' : 'Dr'}
+                  Stock in Hand: {fmt2(Math.abs(netBalance))} {netBalance > 0 ? 'Cr (Dene Hain)' : netBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                 </span>
               ) : ''}
             </td>
@@ -415,8 +415,23 @@ function SupplierStockReport() {
 
   const totalSupplierBalance = useMemo(() => {
     if (!showSupplierBalance || filteredSupplierBalances.length === 0) return 0;
-    return filteredSupplierBalances.reduce((sum, [, bal]) => sum + bal, 0);
+    return filteredSupplierBalances.reduce((sum, [, bal]) => sum + (parseFloat(bal) || 0), 0);
   }, [showSupplierBalance, filteredSupplierBalances]);
+
+  const { totalPayable, totalReceivable, netSupplierBalance } = useMemo(() => {
+    let payable = 0;
+    let receivable = 0;
+    filteredSupplierBalances.forEach(([, bal]) => {
+      const num = parseFloat(bal) || 0;
+      if (num > 0) payable += num;
+      else if (num < 0) receivable += Math.abs(num);
+    });
+    return {
+      totalPayable: payable,
+      totalReceivable: receivable,
+      netSupplierBalance: payable - receivable
+    };
+  }, [filteredSupplierBalances]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12, overflowY: 'auto' }}>
@@ -743,15 +758,15 @@ function SupplierStockReport() {
                   <td className="ssr-val" style={{ width: 140 }}>
                     {showSupplierBalance && filteredSupplierBalances.length > 0 ? (
                       <span style={{ color: totalSupplierBalance > 0 ? '#86efac' : totalSupplierBalance < 0 ? '#fca5a5' : '#e2e8f0', fontWeight: 800 }}>
-                        Sup Bal: {fmt2(Math.abs(totalSupplierBalance))} {totalSupplierBalance >= 0 ? 'Cr' : 'Dr'}
+                        Sup Bal: {fmt2(Math.abs(totalSupplierBalance))} {totalSupplierBalance > 0 ? 'Cr (Dene Hain)' : totalSupplierBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                       </span>
                     ) : ''}
                   </td>
                   <td className="ssr-val" style={{ width: 110 }}>{fmt(grandValue)}</td>
-                  <td className="ssr-val" style={{ width: 140 }}>
+                  <td className="ssr-val" style={{ width: 160 }}>
                     {showSupplierBalance && filteredSupplierBalances.length > 0 ? (
                       <span style={{ color: (totalSupplierBalance - grandValue) > 0 ? '#86efac' : (totalSupplierBalance - grandValue) < 0 ? '#fca5a5' : '#e2e8f0', fontWeight: 800 }}>
-                        Net Bal: {fmt2(Math.abs(totalSupplierBalance - grandValue))} ${(totalSupplierBalance - grandValue) >= 0 ? 'Cr' : 'Dr'}
+                        Stock in Hand: {fmt2(Math.abs(totalSupplierBalance - grandValue))} ${(totalSupplierBalance - grandValue) > 0 ? 'Cr (Dene Hain)' : (totalSupplierBalance - grandValue) < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                       </span>
                     ) : ''}
                   </td>
@@ -784,15 +799,41 @@ function SupplierStockReport() {
                           background: balance > 0 ? '#dcfce7' : balance < 0 ? '#fee2e2' : '#f1f5f9',
                           color: balance > 0 ? '#15803d' : balance < 0 ? '#b91c1c' : '#475569'
                         }}>
-                          {balance > 0 ? 'Cr (Payable)' : balance < 0 ? 'Dr (Advance)' : 'Nil'}
+                          {balance > 0 ? 'Dene Hain (Cr)' : balance < 0 ? 'Lene Hain (Dr)' : 'Nil'}
                         </span>
                       </td>
                       <td className="ssr-val" colSpan={4} style={{ fontWeight: 800, color: balance > 0 ? '#15803d' : balance < 0 ? '#dc2626' : '#475569' }}>
-                        {fmt2(Math.abs(balance))} {balance >= 0 ? 'Cr' : 'Dr'}
+                        {fmt2(Math.abs(balance))} {balance > 0 ? 'Cr (Dene Hain)' : balance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr style={{ background: '#f8fafc', fontWeight: 800, borderTop: '2px solid #cbd5e1' }}>
+                    <td colSpan={2} style={{ textAlign: 'right', fontSize: '0.9rem' }}>
+                      TOTAL PAYABLE — DENE HAIN (Cr):
+                    </td>
+                    <td className="ssr-val" colSpan={4} style={{ color: '#15803d', fontSize: '0.95rem', fontWeight: 900 }}>
+                      {fmt2(totalPayable)} Cr
+                    </td>
+                  </tr>
+                  <tr style={{ background: '#f8fafc', fontWeight: 800 }}>
+                    <td colSpan={2} style={{ textAlign: 'right', fontSize: '0.9rem' }}>
+                      TOTAL RECEIVABLE — LENE HAIN (Dr):
+                    </td>
+                    <td className="ssr-val" colSpan={4} style={{ color: '#dc2626', fontSize: '0.95rem', fontWeight: 900 }}>
+                      {fmt2(totalReceivable)} Dr
+                    </td>
+                  </tr>
+                  <tr style={{ background: '#1e293b', color: '#fff', fontWeight: 900 }}>
+                    <td colSpan={2} style={{ textAlign: 'right', fontSize: '0.95rem' }}>
+                      STOCK IN HAND ({netSupplierBalance >= 0 ? 'TOTAL PAYABLE — DENE HAIN' : 'TOTAL RECEIVABLE — LENE HAIN'}):
+                    </td>
+                    <td className="ssr-val" colSpan={4} style={{ color: netSupplierBalance >= 0 ? '#86efac' : '#fca5a5', fontSize: '1rem', fontWeight: 900 }}>
+                      {fmt2(Math.abs(netSupplierBalance))} {netSupplierBalance >= 0 ? 'Cr (Dene Hain)' : 'Dr (Lene Hain)'}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             )}
           </div>

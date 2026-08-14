@@ -447,6 +447,8 @@ async function initDatabase() {
       invoice_no TEXT,
       customer_name TEXT,
       total_amount NUMERIC(12,2) DEFAULT 0,
+      discount NUMERIC(10,2) DEFAULT 0,
+      misc_charges NUMERIC(10,2) DEFAULT 0,
       notes TEXT,
       is_posted INTEGER DEFAULT 0,
       user_id INTEGER,
@@ -462,6 +464,7 @@ async function initDatabase() {
       item_description TEXT,
       packets INTEGER DEFAULT 0,
       price NUMERIC(10,2) DEFAULT 0,
+      discount NUMERIC(10,2) DEFAULT 0,
       amount NUMERIC(12,2) DEFAULT 0
     )
   `);
@@ -714,6 +717,9 @@ async function initDatabase() {
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS misc_charges NUMERIC(10,2) DEFAULT 0');
 
+  await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS misc_charges NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE sales_return_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
   await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS pre_disc_price NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS flat_discount NUMERIC(10,2) DEFAULT 0');
@@ -2635,7 +2641,16 @@ async function handleIPC(channel, ...args) {
       return nextNo;
     }
     case 'get-purchase-returns': {
-      const r = await query('SELECT * FROM purchase_returns ORDER BY id DESC');
+      const r = await query(`
+        SELECT pr.*, 
+          COALESCE((
+            SELECT SUM(pri.packets) 
+            FROM purchase_return_items pri 
+            WHERE pri.return_id = pr.id
+          ), 0) AS total_qty
+        FROM purchase_returns pr 
+        ORDER BY pr.id DESC
+      `);
       return r.rows;
     }
     case 'get-purchase-return-items': {
@@ -3318,37 +3333,45 @@ async function handleIPC(channel, ...args) {
 
     // ─── SALES RETURNS ────────────────────────────────────────────────────────
     case 'save-sales-return': {
-      const { returnDate, invoiceNo, customerName, items, notes, userId } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0);
+      const { returnDate, invoiceNo, customerName, items, discount, miscCharges, notes, userId } = data;
+      const subTotal = items.reduce((s, i) => s + i.amount, 0);
+      const total = subTotal - (discount || 0) + (miscCharges || 0);
       const maxNo = await query("SELECT MAX(CAST(return_no AS INTEGER)) FROM sales_returns WHERE return_no ~ '^[0-9]+$'");
       const nextNo = String((parseInt(maxNo.rows[0].max) || 0) + 1);
       const rr = await query(
-        'INSERT INTO sales_returns (return_date, return_no, invoice_no, customer_name, total_amount, notes, is_posted, user_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7) RETURNING id',
-        [returnDate, nextNo, invoiceNo || null, customerName || null, total, notes || null, userId || null]
+        'INSERT INTO sales_returns (return_date, return_no, invoice_no, customer_name, total_amount, discount, misc_charges, notes, is_posted, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9) RETURNING id',
+        [returnDate, nextNo, invoiceNo || null, customerName || null, total, discount || 0, miscCharges || 0, notes || null, userId || null]
       );
       const returnId = rr.rows[0].id;
       for (const item of items) {
-        await query('INSERT INTO sales_return_items (return_id, item_code, item_description, packets, price, amount) VALUES ($1,$2,$3,$4,$5,$6)',
-          [returnId, item.itemCode, item.itemDescription, item.packets, item.price, item.amount]);
+        await query('INSERT INTO sales_return_items (return_id, item_code, item_description, packets, price, discount, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [returnId, item.itemCode, item.itemDescription, item.packets, item.price, item.discount || 0, item.amount]);
       }
       broadcast('sales-returns'); broadcast('stock');
       return { success: true, id: returnId, returnNo: nextNo };
     }
     case 'update-sales-return': {
-      const { id, returnDate, invoiceNo, customerName, items, notes } = data;
-      const total = items.reduce((s, i) => s + i.amount, 0);
-      await query('UPDATE sales_returns SET return_date=$1, invoice_no=$2, customer_name=$3, total_amount=$4, notes=$5 WHERE id=$6',
-        [returnDate, invoiceNo || null, customerName || null, total, notes || null, id]);
+      const { id, returnDate, invoiceNo, customerName, items, discount, miscCharges, notes } = data;
+      const subTotal = items.reduce((s, i) => s + i.amount, 0);
+      const total = subTotal - (discount || 0) + (miscCharges || 0);
+      await query('UPDATE sales_returns SET return_date=$1, invoice_no=$2, customer_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7 WHERE id=$8',
+        [returnDate, invoiceNo || null, customerName || null, total, discount || 0, miscCharges || 0, notes || null, id]);
       await query('DELETE FROM sales_return_items WHERE return_id=$1', [id]);
       for (const item of items) {
-        await query('INSERT INTO sales_return_items (return_id, item_code, item_description, packets, price, amount) VALUES ($1,$2,$3,$4,$5,$6)',
-          [id, item.itemCode, item.itemDescription, item.packets, item.price, item.amount]);
+        await query('INSERT INTO sales_return_items (return_id, item_code, item_description, packets, price, discount, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [id, item.itemCode, item.itemDescription, item.packets, item.price, item.discount || 0, item.amount]);
       }
       broadcast('sales-returns'); broadcast('stock');
       return { success: true };
     }
     case 'get-sales-returns': {
-      const r = await query('SELECT * FROM sales_returns ORDER BY id DESC');
+      const r = await query(`
+        SELECT sr.*, users.username,
+          COALESCE((SELECT SUM(sri.packets) FROM sales_return_items sri WHERE sri.return_id = sr.id), 0) AS total_packets
+        FROM sales_returns sr
+        LEFT JOIN users ON sr.user_id = users.id
+        ORDER BY sr.id DESC
+      `);
       return r.rows;
     }
     case 'get-sales-return-items': {
@@ -4127,12 +4150,16 @@ async function handleIPC(channel, ...args) {
           }
         }
 
+        let srUserClause = '';
+        if (userId && userId !== 'all') {
+          srUserClause = ` AND sales_returns.user_id = $${params.length}`;
+        }
         const returnsRes = await query(`
           SELECT id, return_no, invoice_no, return_date, created_at, customer_name, total_amount
           FROM sales_returns
-          WHERE return_date::date BETWEEN $1 AND $2
+          WHERE return_date::date BETWEEN $1 AND $2${srUserClause}
           ORDER BY return_date ASC, created_at ASC
-        `, [start, end]);
+        `, params);
         const returns = returnsRes.rows;
 
         const enrichedReturns = [];
@@ -4201,44 +4228,74 @@ async function handleIPC(channel, ...args) {
         const { startDate, endDate } = data || {};
         const start = (startDate && typeof startDate === 'string' && startDate.trim()) ? startDate.trim() : '2000-01-01';
         const end = (endDate && typeof endDate === 'string' && endDate.trim()) ? endDate.trim() : '2099-12-31';
-        const usersRes = await query('SELECT id, username FROM users');
+
+        const usersRes = await query('SELECT id, username FROM users ORDER BY id ASC');
         const users = usersRes.rows;
 
-        const report = [];
-        for (const user of users) {
-          const sRes = await query(`
-            SELECT 
-                COUNT(id) as invoice_count,
-                SUM(total_packets) as item_count,
-                SUM(total_amount) as total_sales
-            FROM sales
-            WHERE user_id = $1 AND sale_date::date BETWEEN $2 AND $3
-          `, [user.id, start, end]);
-          const salesStats = sRes.rows[0] || {};
+        const glResUser = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
+        const userBankNames = glResUser.rows.map(r => (r.account_name || '').toLowerCase().trim());
 
+        const report = [];
+
+        const unassignedRes = await query(`
+          SELECT COUNT(id) as count FROM sales WHERE (user_id IS NULL OR user_id NOT IN (SELECT id FROM users)) AND sale_date::date BETWEEN $1 AND $2
+        `, [start, end]);
+        const hasUnassigned = parseInt(unassignedRes.rows[0]?.count) > 0;
+
+        let userListToProcess = [...users];
+        if (hasUnassigned) {
+          userListToProcess.push({ id: null, username: 'Admin / Unassigned' });
+        }
+
+        for (const user of userListToProcess) {
+          const salesWhere = user.id === null 
+            ? `(sales.user_id IS NULL OR sales.user_id NOT IN (SELECT id FROM users))` 
+            : `sales.user_id = $1`;
+          const srWhere = user.id === null 
+            ? `(sales_returns.user_id IS NULL OR sales_returns.user_id NOT IN (SELECT id FROM users))` 
+            : `sales_returns.user_id = $1`;
+          const queryParams = user.id === null ? [start, end] : [user.id, start, end];
+          const dateParamIdx1 = user.id === null ? '$1' : '$2';
+          const dateParamIdx2 = user.id === null ? '$2' : '$3';
+
+          // 1. Dedicated Sales Returns (matching Daily Report)
           const rRes = await query(`
             SELECT 
                 COUNT(id) as return_count,
-                SUM(total_amount) as total_returned
+                COALESCE(SUM(total_amount), 0) as total_returned
             FROM sales_returns
-            WHERE user_id = $1 AND return_date::date BETWEEN $2 AND $3
-          `, [user.id, startDate, endDate]);
-          const returnStats = rRes.rows[0] || {};
+            WHERE ${srWhere} AND return_date::date BETWEEN ${dateParamIdx1} AND ${dateParamIdx2}
+          `, queryParams);
+          const dedicatedReturnStats = rRes.rows[0] || {};
+          let dedicatedReturnsAmt = parseFloat(dedicatedReturnStats.total_returned) || 0;
 
+          // 2. Invoices (matching Daily Report partition)
           const iRes = await query(`
             SELECT 
-                sale_date, created_at, invoice_no, total_packets as total_quantity, total_amount, discount, misc_charges, payment_method
+                sales.id, sales.sale_date, sales.created_at, sales.invoice_no, sales.total_packets as total_quantity, sales.total_amount, sales.discount, sales.misc_charges, sales.payment_method
             FROM sales 
-            WHERE user_id = $1 AND sale_date::date BETWEEN $2 AND $3
-            ORDER BY created_at DESC
-          `, [user.id, startDate, endDate]);
-
-          const glResUser = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
-          const userBankNames = glResUser.rows.map(r => (r.account_name || '').toLowerCase().trim());
+            WHERE ${salesWhere} AND sales.sale_date::date BETWEEN ${dateParamIdx1} AND ${dateParamIdx2}
+            ORDER BY sales.created_at DESC
+          `, queryParams);
 
           let userCash = 0, userDigital = 0;
+          let grossSalesAmt = 0;
+          let inInvoiceReturnsAmt = 0;
+          let grossItemsSold = 0;
           const userDigitalBreakdown = {};
-          iRes.rows.forEach(row => {
+
+          for (const row of iRes.rows) {
+            const billAmt = parseFloat(row.total_amount) || 0;
+            const isReturnInvoice = billAmt < 0 || (row.payment_method && row.payment_method.toLowerCase().includes('return'));
+
+            if (isReturnInvoice) {
+              inInvoiceReturnsAmt += Math.abs(billAmt);
+            } else {
+              grossSalesAmt += billAmt;
+              grossItemsSold += Math.max(0, parseInt(row.total_quantity) || 0);
+            }
+
+            // Payment method calculation (matching Daily Report)
             let digital = 0;
             if (row.payment_method) {
               const parts = row.payment_method.split(',');
@@ -4249,26 +4306,37 @@ async function handleIPC(channel, ...args) {
                 const amt = parseFloat(part.slice(colonIdx + 1).trim()) || 0;
                 if (isBankOrDigitalPayment(fullMethod, userBankNames)) {
                   digital += amt;
-                  userDigitalBreakdown[fullMethod] = (userDigitalBreakdown[fullMethod] || 0) + amt;
+                  if (!userDigitalBreakdown[fullMethod]) {
+                    userDigitalBreakdown[fullMethod] = { amount: 0, count: 0 };
+                  }
+                  userDigitalBreakdown[fullMethod].amount += amt;
+                  userDigitalBreakdown[fullMethod].count += 1;
                 }
               }
             }
             userDigital += digital;
-            const billAmt = (parseFloat(row.total_amount) || 0) + (parseFloat(row.misc_charges) || 0) - (parseFloat(row.discount) || 0);
-            userCash += Math.max(0, billAmt - digital);
-          });
+            if (!isReturnInvoice) {
+              userCash += Math.max(0, billAmt - digital);
+            }
+          }
 
-          if (parseInt(salesStats.invoice_count) > 0 || parseInt(returnStats.return_count) > 0) {
+          const totalSales = grossSalesAmt;
+          const totalReturns = dedicatedReturnsAmt + inInvoiceReturnsAmt;
+          const invoiceCount = iRes.rows.length;
+
+          if (invoiceCount > 0 || totalReturns > 0) {
             report.push({
+              user: user.username,
               username: user.username,
-              invoiceCount: parseInt(salesStats.invoice_count) || 0,
-              itemCount: parseInt(salesStats.item_count) || 0,
-              totalSales: parseFloat(salesStats.total_sales) || 0,
-              returnCount: parseInt(returnStats.return_count) || 0,
-              totalReturned: parseFloat(returnStats.total_returned) || 0,
-              cashSales: userCash,
-              digitalSales: userDigital,
+              invoices_count: invoiceCount,
+              items_sold: grossItemsSold,
+              total_sales: totalSales,
+              total_returns: totalReturns,
+              net_sales: totalSales - totalReturns,
+              cash_sales: userCash,
+              digital_sales: userDigital,
               digital_breakdown: userDigitalBreakdown,
+              invoices_list: iRes.rows,
               invoices: iRes.rows
             });
           }

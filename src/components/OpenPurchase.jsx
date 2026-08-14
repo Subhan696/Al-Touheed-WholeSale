@@ -269,7 +269,9 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
       e.preventDefault();
       const drop = activeDrop?.rowId === rowId ? activeDrop.results : [];
       if (drop.length > 0) {
-        fillRow(rowId, drop[0]);
+        const codeVal = rows[idx]?.itemCode?.trim().toLowerCase() || '';
+        const exact = drop.find(r => r.item_code.toLowerCase() === codeVal);
+        fillRow(rowId, exact || drop[0]);
       } else {
         packetsRefs.current[rowId]?.focus();
       }
@@ -613,6 +615,7 @@ function OpenPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit
           <button type="button" onClick={handleImportPDFStock} className="btn btn-secondary sm" disabled={isSubmitting || importingSession} style={{ background: '#3b82f6', color: 'white', borderColor: '#3b82f6' }}>
             📄 Import PDF Data
           </button>
+
           <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting || isEditing || importingSession} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
             📦 Import Session
           </button>

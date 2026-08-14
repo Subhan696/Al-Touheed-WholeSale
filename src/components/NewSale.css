@@ -39,10 +39,8 @@
   color: #000000 !important;
   font-weight: 900 !important;
   padding: 6px 30px;
-  /* Bigger size */
   border-radius: 99px;
   font-size: 1.1rem;
-  /* Bigger font */
   text-transform: uppercase;
   letter-spacing: 1px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -54,6 +52,15 @@
 .topbar-title.yellow {
   background: #73cbfb;
   border-color: #2d9efb;
+}
+
+.topbar-title.transparent {
+  background: transparent;
+  border-color: #0284c7;
+  color: #0284c7 !important;
+  padding: 3px 16px;
+  font-size: 0.95rem;
+  box-shadow: none;
 }
 
 .topbar-title.pink {

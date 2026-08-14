@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { TableVirtuoso } from 'react-virtuoso';
 import SuccessAnimation from './SuccessAnimation';
+import StockSearchModal from './StockSearchModal';
 import './NewPurchase.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -62,6 +63,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const [purchaseExpenses, setPurchaseExpenses] = useState([]);
   const [purchaseExpenseTotal, setPurchaseExpenseTotal] = useState('');
   const [showExpensesModal, setShowExpensesModal] = useState(false);
+  const [stockSearchModalOpen, setStockSearchModalOpen] = useState(false);
   const [isAdjOpen, setIsAdjOpen] = useState(false);
   const [activeDrop, setActiveDrop] = useState(null);
 
@@ -258,14 +260,27 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
 
   const handleDateChange = (e) => {
     let val = e.target.value;
+
+    // Auto-insert hyphen
+    val = val.replace(/[^0-9-]/g, '');
+
+    // Handle in-place day replacement: D-MM-YYYY → 0D-MM-YYYY
+    const dayReplace = val.match(/^(\d)-(\d{2}-\d{4})$/);
+    if (dayReplace && parseInt(dayReplace[1]) >= 4) {
+      setSupplierDate('0' + dayReplace[1] + '-' + dayReplace[2]);
+      return;
+    }
+
     // Allow user to delete back
     if (val.length < supplierDate.length) {
       setSupplierDate(val);
       return;
     }
 
-    // Auto-insert hyphen
-    val = val.replace(/[^0-9-]/g, '');
+    // Smart day formatting: single digit 4-9 auto-pads with 0 and adds hyphen
+    if (val.length === 1 && parseInt(val) >= 4) {
+      val = '0' + val + '-';
+    }
 
     // If 2 digits and no hyphen, add hyphen (after day)
     if (val.length === 2 && !val.includes('-')) val += '-';
@@ -281,6 +296,12 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
 
     // Limit length to DD-MM-YYYY (10 chars)
     if (val.length <= 10) setSupplierDate(val);
+  };
+
+  const handleDateBlur = () => {
+    // Auto-pad single digit day on blur: "6-08-2026" → "06-08-2026"
+    const m = supplierDate.match(/^(\d)-(\d{1,2}-\d{4})$/);
+    if (m) setSupplierDate('0' + m[1] + '-' + m[2]);
   };
 
   const handleHeaderKD = (e, field) => {
@@ -485,8 +506,11 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         return;
       }
       const drop = activeDrop?.rowId === rowId ? activeDrop.results : [];
-      if (drop.length > 0) fillRow(rowId, drop[0]);
-      else packetsRefs.current[rowId]?.focus();
+      const codeVal = rows[idx]?.itemCode?.trim().toLowerCase() || '';
+      if (drop.length > 0) {
+        const exact = drop.find(r => r.item_code.toLowerCase() === codeVal);
+        fillRow(rowId, exact || drop[0]);
+      } else packetsRefs.current[rowId]?.focus();
     }
     if (e.key === 'Escape') setActiveDrop(null);
     if (e.key === 'ArrowDown') { e.preventDefault(); focusInput(idx + 1, codeRefs); }
@@ -649,9 +673,9 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
     try {
       // DD-MM-YYYY → YYYY-MM-DD for DB
       let dbSupplierDate = null;
-      if (supplierDate && supplierDate.match(/^\d{2}-\d{2}-\d{4}$/)) {
+      if (supplierDate && supplierDate.match(/^\d{1,2}-\d{1,2}-\d{4}$/)) {
         const [d, m, y] = supplierDate.split('-');
-        dbSupplierDate = `${y}-${m}-${d}`;
+        dbSupplierDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
       }
       console.log('[FRONTEND] supplierDate input:', supplierDate, '→ dbSupplierDate:', dbSupplierDate);
       // For new purchases, use today's date for purchase_date (created_at will track actual save time)
@@ -746,11 +770,79 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   useEffect(() => {
     const handler = (e) => {
       if (!isActive) return;
+      if (e.key === 'F8') { e.preventDefault(); setStockSearchModalOpen(true); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); handleInitiateSave(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isActive, items, supplierName, purchaseDate, discount, miscCharges, notes, isEditing, showExpensesModal, showAuth, purchaseExpenseTotal, purchaseExpenses, authPass]);
+
+  const focusItemCodeInput = () => {
+    setTimeout(() => {
+      const rows = itemsRef.current || [];
+      const emptyRow = rows.find(r => !r.itemCode && !r.description) || rows[rows.length - 1] || rows[0];
+      if (emptyRow && codeRefs.current[emptyRow.id]) {
+        codeRefs.current[emptyRow.id].focus();
+        codeRefs.current[emptyRow.id].select?.();
+      }
+    }, 50);
+  };
+
+  const handleCloseStockSearch = () => {
+    setStockSearchModalOpen(false);
+    focusItemCodeInput();
+  };
+
+  const handleSelectStockItem = (product) => {
+    if (!product) return;
+    setItems(prev => {
+      const emptyIdx = prev.findIndex(r => !r.itemCode && !r.description);
+      let targetRowId;
+      let nextItems;
+      if (emptyIdx !== -1) {
+        targetRowId = prev[emptyIdx].id;
+        nextItems = [...prev];
+      } else {
+        const nr = makeRow();
+        targetRowId = nr.id;
+        nextItems = [...prev, nr];
+      }
+
+      const pkts = product.packing_qty || 0;
+      let baseRate = parseFloat(product.purchase_rate) || 0;
+      let flatD = 0;
+      let pctD = 0;
+
+      if (supplierName && product.brand) {
+        const rule = mfgDiscounts.find(d => d.company_name.toLowerCase() === supplierName.toLowerCase() && d.brand_name.toLowerCase() === product.brand.toLowerCase());
+        if (rule) {
+          pctD = parseFloat(rule.purchase_discount_pct) || 0;
+          flatD = parseFloat(rule.discount_amount) || 0;
+        }
+      }
+
+      const updated = nextItems.map(r => r.id === targetRowId ? {
+        ...r,
+        itemCode: product.item_code,
+        description: descForProduct(product),
+        baseDescription: product.description || '',
+        category: product.category || '',
+        size_range: product.size_range || '',
+        gender: product.gender || '',
+        originalGender: product.gender || '',
+        brand: product.brand || '',
+        packingQty: pkts,
+        packets: String(pkts),
+        preDiscPrice: String(baseRate),
+        flatDiscount: flatD,
+        discPct: pctD
+      } : r);
+
+      setTimeout(() => packetsRefs.current[targetRowId]?.focus(), 50);
+      return updated;
+    });
+    setStockSearchModalOpen(false);
+  };
 
   const loadSessions = async (showAll = showAllSessions) => {
     try {
@@ -883,6 +975,9 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           >
             ⚡ {autoMode ? 'Auto ON' : 'Auto OFF'}
           </button>
+          <button type="button" onClick={() => setStockSearchModalOpen(true)} className="btn btn-secondary sm" style={{ background: '#0284c7', color: 'white', borderColor: '#0284c7', padding: '2px 8px', fontSize: '0.75rem', height: 26, lineHeight: '20px' }}>
+            🔍 Search (F8)
+          </button>
           <button type="button" onClick={openSessionModal} className="btn btn-secondary sm" disabled={isSubmitting || isEditing} style={{ background: '#f59e0b', color: 'white', borderColor: '#f59e0b' }}>
             📦 Import Session
           </button>
@@ -909,7 +1004,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
             </div>
             <div className="form-group" style={{ width: 100 }}>
               <label style={{ fontSize: '0.75rem' }}>Supplier Date</label>
-              <input ref={dateRef} type="text" value={supplierDate} onChange={handleDateChange} onKeyDown={e => handleHeaderKD(e, 'date')} placeholder="DD-MM-YYYY" className="form-input center-text" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
+              <input ref={dateRef} type="text" value={supplierDate} onChange={handleDateChange} onKeyDown={e => handleHeaderKD(e, 'date')} onFocus={e => e.target.setSelectionRange(0, 2)} onBlur={handleDateBlur} placeholder="DD-MM-YYYY" className="form-input center-text" style={{ padding: '4px 8px', fontSize: '0.85rem' }} />
             </div>
             <div className="form-group flex-grow" style={{ minWidth: 200 }}>
               <label style={{ fontSize: '0.75rem' }}>Supplier Name *</label>
@@ -1012,20 +1107,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
                         className="form-input"
                         style={{ padding: '2px 4px', fontSize: '0.95rem', height: 28, borderRadius: 2, ...(row.locked ? { background: '#f1f5f9', color: '#64748b', cursor: 'default' } : {}) }}
                       />
-                      {activeDrop?.rowId === row.id && activeDrop.results.length > 0 && (
-                        <div className="np-dropdown">
-                          {activeDrop.results.slice(0, 8).map(p => (
-                            <div key={p.id} className="np-suggestion"
-                              onMouseDown={e => { e.preventDefault(); fillRow(row.id, p); }}>
-                              <strong style={{ fontFamily: 'monospace', color: '#3699ff', minWidth: 90, flexShrink: 0 }}>{p.item_code}</strong>
-                              <span style={{ flex: 1 }}>{descForProduct(p)}</span>
-                              <span style={{ color: '#5e6278', fontWeight: 700, minWidth: 64, textAlign: 'right', flexShrink: 0 }}>
-                                {parseFloat(p.purchase_rate || 0).toLocaleString()}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+
                     </td>
 
                     {/* Item Name */}
@@ -1631,6 +1713,13 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
           setIsSubmitting(false);
           onSaveSuccess?.();
         }}
+      />
+
+      <StockSearchModal
+        isOpen={stockSearchModalOpen}
+        onClose={handleCloseStockSearch}
+        onSelectItem={handleSelectStockItem}
+        title="Purchase Stock Search"
       />
 
     </div>

@@ -69,9 +69,15 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
     <SalesReturn currentUser={currentUser} returnToEdit={win.returnToEdit}
       onSaveSuccess={() => { closeTopWindow(); openWindow('sales-return-list'); }}
       onExit={closeTopWindow} isActive={isActive}
+      onViewReturnsList={() => openWindow('sales-return-list')}
       onNewReturn={() => openWindow('sales-return', { forceNewInstance: true })} />
   );
-  if (tabKey === 'sales-return-list') return <SalesReturnList onEditReturn={handleEditSalesReturn} currentUser={currentUser} isActive={isActive} />;
+  if (tabKey === 'sales-return-list') return (
+    <SalesReturnList onEditReturn={handleEditSalesReturn} 
+      onNewReturn={() => openWindow('sales-return', { forceNewInstance: true })}
+      onExit={closeTopWindow}
+      currentUser={currentUser} isActive={isActive} />
+  );
 
   if (tabKey === 'barcode-print') return <BarcodePrint isActive={isActive} />;
 
