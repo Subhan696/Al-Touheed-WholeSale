@@ -52,23 +52,23 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
               </span>
             ) : ''}
           </th>
-          <th className="ssr-val" style={{ width: 110 }}>Value: {fmt(sup.totalValue)}</th>
+          <th className="ssr-val" style={{ width: 120 }}>Stock In Hand <br />Amount: {fmt(sup.totalValue)}</th>
           <th className="ssr-val" style={{ width: 160 }}>
             {hasBal ? (
               <span style={{ color: netBalance > 0 ? '#15803d' : netBalance < 0 ? '#dc2626' : '#e2e8f0', fontWeight: 800 }}>
-                Stock in Hand: {fmt2(Math.abs(netBalance))} {netBalance > 0 ? 'Cr (Dene Hain)' : netBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
+                {fmt2(Math.abs(netBalance))} <br />{netBalance > 0 ? 'Cr (Dene Hain)' : netBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
               </span>
             ) : ''}
           </th>
         </tr>
         {!isCollapsed && (
           <tr>
-            <th style={{ width: 140 }}>Item Code</th>
+            <th style={{ width: 90 }}>Item Code</th>
             <th>Description / Brand</th>
-            <th className="ssr-val" style={{ width: 80 }}>Qty</th>
-            <th className="ssr-val" style={{ width: 140 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
-            <th className="ssr-val" style={{ width: 110 }}>Sale Price</th>
-            <th className="ssr-val" style={{ width: 140 }}>Value</th>
+            <th className="ssr-val" style={{ width: 60 }}>Qty</th>
+            <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
+            <th className="ssr-val" style={{ width: 95 }}>Sale Price</th>
+            <th className="ssr-val" style={{ width: 110 }}>Amount</th>
           </tr>
         )}
       </thead>
@@ -91,7 +91,7 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
             <td className="ssr-val" style={{ width: 160 }}>
               {hasBal ? (
                 <span style={{ color: netBalance > 0 ? '#15803d' : netBalance < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
-                  Stock in Hand: {fmt2(Math.abs(netBalance))} {netBalance > 0 ? 'Cr (Dene Hain)' : netBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
+                  {fmt2(Math.abs(netBalance))} <br />{netBalance > 0 ? 'Cr (Dene Hain)' : netBalance < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                 </span>
               ) : ''}
             </td>
@@ -105,6 +105,7 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
 function SupplierStockReport() {
   const [reportData, setReportData] = useState([]);
   const [supplierBalances, setSupplierBalances] = useState({});
+  const [registeredSuppliers, setRegisteredSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Filters — explicit Sets of currently-selected values. Always initialized
@@ -112,6 +113,7 @@ function SupplierStockReport() {
   // visible state rather than an implicit null.
   const [priceMode, setPriceMode] = useState('actual'); // 'list' | 'actual'
   const [showSupplierBalance, setShowSupplierBalance] = useState(true);
+  const [includeZeroStock, setIncludeZeroStock] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedSuppliers, setSelectedSuppliers] = useState(new Set());
@@ -160,6 +162,9 @@ function SupplierStockReport() {
       const rows = Array.isArray(stockData) ? stockData : [];
       setReportData(rows);
 
+      const registered = (ledgerData || []).map(s => s.name).filter(Boolean);
+      setRegisteredSuppliers(registered);
+
       // Filters default to NO suppliers selected by default on initial load for instant performance.
       setSelectedSuppliers(new Set());
       setSelectedCategories(new Set(rows.map(r => r.category || 'Uncategorized')));
@@ -197,9 +202,15 @@ function SupplierStockReport() {
 
   // Unique filter option lists derived from the data itself
   const allSuppliers = useMemo(() => {
-    const set = new Set(reportData.map(r => r.supplier_name || 'Unassigned'));
+    const set = new Set();
+    reportData.forEach(r => {
+      if (r.supplier_name) set.add(r.supplier_name);
+    });
+    registeredSuppliers.forEach(name => {
+      if (name) set.add(name);
+    });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [reportData]);
+  }, [reportData, registeredSuppliers]);
 
   const allCategories = useMemo(() => {
     const set = new Set(reportData.map(r => r.category || 'Uncategorized'));
@@ -244,6 +255,8 @@ function SupplierStockReport() {
       const supplier = r.supplier_name || 'Unassigned';
       const category = r.category || 'Uncategorized';
       const itemYear = r.year ? String(r.year).trim() : 'Unspecified';
+      const stockQty = parseInt(r.stock_packets) || 0;
+      if (!includeZeroStock && stockQty <= 0) return false;
       if (selectedSuppliers.size > 0) {
         if (!selectedSuppliers.has(supplier)) return false;
       } else if (!q) {
@@ -288,6 +301,14 @@ function SupplierStockReport() {
       gQty += qty;
       gVal += value;
     });
+
+    if (selectedSuppliers.size > 0 && !q) {
+      selectedSuppliers.forEach(supName => {
+        if (!bySupplier[supName]) {
+          bySupplier[supName] = { name: supName, totalQty: 0, totalValue: 0, categories: {} };
+        }
+      });
+    }
 
     const groupList = Object.values(bySupplier)
       .map(sup => {
@@ -346,7 +367,7 @@ function SupplierStockReport() {
       });
 
     return { groups: groupList, grandQty: gQty, grandValue: gVal };
-  }, [reportData, priceMode, debouncedSearch, selectedSuppliers, selectedCategories, selectedYears, sortField, sortDirection]);
+  }, [reportData, priceMode, debouncedSearch, selectedSuppliers, selectedCategories, selectedYears, sortField, sortDirection, includeZeroStock]);
 
   const toggleCollapsed = useCallback((name) => setCollapsed(prev => ({ ...prev, [name]: !prev[name] })), []);
 
@@ -684,6 +705,19 @@ function SupplierStockReport() {
           )}
         </div>
 
+        {/* Toggle Zero Stock Items */}
+        <button
+          onClick={() => setIncludeZeroStock(prev => !prev)}
+          style={{
+            padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+            border: `1px solid ${includeZeroStock ? '#047857' : '#cbd5e1'}`,
+            background: includeZeroStock ? '#ecfdf5' : '#fff', color: includeZeroStock ? '#047857' : '#334155'
+          }}
+          title="Toggle whether to show products & suppliers with 0 stock in hand"
+        >
+          {includeZeroStock ? '📦 Zero Stock: Shown' : '📦 Zero Stock: Hidden'}
+        </button>
+
         <div style={{ width: 1, alignSelf: 'stretch', background: '#e2e8f0', margin: '0 2px' }} />
 
         {/* Search */}
@@ -766,7 +800,7 @@ function SupplierStockReport() {
                   <td className="ssr-val" style={{ width: 160 }}>
                     {showSupplierBalance && filteredSupplierBalances.length > 0 ? (
                       <span style={{ color: (totalSupplierBalance - grandValue) > 0 ? '#86efac' : (totalSupplierBalance - grandValue) < 0 ? '#fca5a5' : '#e2e8f0', fontWeight: 800 }}>
-                        Stock in Hand: {fmt2(Math.abs(totalSupplierBalance - grandValue))} ${(totalSupplierBalance - grandValue) > 0 ? 'Cr (Dene Hain)' : (totalSupplierBalance - grandValue) < 0 ? 'Dr (Lene Hain)' : 'Nil'}
+                        Stock in Hand: {fmt2(Math.abs(totalSupplierBalance - grandValue))} {(totalSupplierBalance - grandValue) > 0 ? 'Cr (Dene Hain)' : (totalSupplierBalance - grandValue) < 0 ? 'Dr (Lene Hain)' : 'Nil'}
                       </span>
                     ) : ''}
                   </td>

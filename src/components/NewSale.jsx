@@ -3833,7 +3833,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                   receivedList.map((p, pIdx) => (
                     <div key={pIdx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f3f4f6' }}>
                       <span style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e293b' }}>{p.method}</span>
-                      <span style={{ fontWeight: 800, fontSize: '1.4rem', color: '#0f172a' }}>PKR {Math.round(p.amount || 0).toLocaleString()}</span>
+                      <span style={{ fontWeight: 800, fontSize: '1.4rem', color: '#0f172a' }}>{Math.round(p.amount || 0).toLocaleString()}</span>
                     </div>
                   ))
                 ) : (
@@ -3843,14 +3843,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '2px solid #e5e7eb' }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Total Received</span>
                   <span style={{ fontWeight: 900, color: '#4f46e5', fontSize: '1.4rem' }}>
-                    PKR {Math.round(totalReceived).toLocaleString()}
+                    {Math.round(totalReceived).toLocaleString()}
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '1px dashed #e5e7eb' }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Current Bill</span>
                   <span style={{ fontWeight: 900, fontSize: '1.3rem', color: '#0f172a' }}>
-                    PKR {Math.round(totals.grandTotal).toLocaleString()}
+                    {Math.round(totals.grandTotal).toLocaleString()}
                   </span>
                 </div>
 
@@ -3858,7 +3858,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0 0', marginTop: '6px', borderTop: '1px dashed #e5e7eb' }}>
                     <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Previous Balance</span>
                     <span style={{ fontWeight: 900, fontSize: '1.2rem', color: prevBal > 0 ? '#dc2626' : '#16a34a' }}>
-                      {prevBal > 0 ? '+' : ''} PKR {Math.round(prevBal).toLocaleString()}
+                      {prevBal > 0 ? '+' : ''} {Math.round(prevBal).toLocaleString()}
                     </span>
                   </div>
                 )}
@@ -3870,7 +3870,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                     fontSize: '1.3rem',
                     color: Math.round(remBalance) > 0 ? '#dc2626' : '#16a34a'
                   }}>
-                    PKR {Math.round(remBalance).toLocaleString()}
+                    {Math.round(remBalance).toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -3912,7 +3912,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
             {focusedItem
 
-              ? <strong style={{ fontSize: '1rem' }}>PKR {focusedItem.purchaseRate != null && !isNaN(focusedItem.purchaseRate) ? (Math.round(parseFloat(focusedItem.purchaseRate) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '—'}</strong>
+              ? <strong style={{ fontSize: '1rem' }}>{focusedItem.purchaseRate != null && !isNaN(focusedItem.purchaseRate) ? (Math.round(parseFloat(focusedItem.purchaseRate) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '—'}</strong>
 
               : <span className="footer-placeholder">—</span>}
 

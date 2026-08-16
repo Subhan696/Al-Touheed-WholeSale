@@ -26,14 +26,14 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     sup.categories.forEach(cat => {
       let itemsHtml = cat.items.map(item => `
         <tr>
-          <td style="border: 1px solid #000; padding: 5px 6px; font-weight: 900; text-align: center; font-size: 15px; color: #000;">${item.item_code}</td>
-          <td style="border: 1px solid #000; padding: 5px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; font-size: 13.5px; font-weight: 600;">
+          <td style="border: 1px solid #000; padding: 4px 5px; font-weight: 900; text-align: center; font-size: 13px; color: #000;">${item.item_code}</td>
+          <td style="border: 1px solid #000; padding: 4px 5px; font-size: 13px; font-weight: 600; white-space: normal; word-break: break-word;">
             ${`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim()}
           </td>
-          <td style="border: 1px solid #000; padding: 5px 6px; text-align: center; font-weight: 900; font-size: 14px;">${fmt(item.qty)}</td>
-          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-size: 13.5px; font-weight: bold;">${fmt2(Math.round((item.rate || 0) * 100) / 100)}</td>
-          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-weight: 900; font-size: 15px; color: #000;">${fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
-          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-weight: 900; font-size: 14px;">${fmt(item.value)}</td>
+          <td style="border: 1px solid #000; padding: 4px 5px; text-align: center; font-weight: 900; font-size: 13.5px;">${fmt(item.qty)}</td>
+          <td style="border: 1px solid #000; padding: 4px 5px; text-align: right; font-size: 13px; font-weight: bold;">${fmt2(Math.round((item.rate || 0) * 100) / 100)}</td>
+          <td style="border: 1px solid #000; padding: 4px 5px; text-align: right; font-weight: 900; font-size: 13px; color: #000;">${fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
+          <td style="border: 1px solid #000; padding: 4px 5px; text-align: right; font-weight: 900; font-size: 13.5px;">${fmt(item.value)}</td>
         </tr>
       `).join('');
 
@@ -53,17 +53,17 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
       <div style="margin-bottom: 20px;">
         <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 8px 12px; font-weight: 900; font-size: 14.5px; display: flex; justify-content: space-between; page-break-after: avoid; break-after: avoid;">
           <span>SUPPLIER: ${sup.name}${balText}</span>
-          <span>Total Qty: ${fmt(sup.totalQty)} | Total Value: PKR ${fmt(sup.totalValue)}</span>
+          <span>Total Qty: ${fmt(sup.totalQty)} | Total Amount: PKR ${fmt(sup.totalValue)}</span>
         </div>
         <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: -1px;">
           <thead>
-            <tr style="background: #f1f5f9; font-weight: 900; border: 1px solid #000; font-size: 13.5px;">
-              <th style="border: 1px solid #000; padding: 6px; width: 150px; text-align: center;">Item Code</th>
-              <th style="border: 1px solid #000; padding: 6px; text-align: left;">Description / Brand</th>
-              <th style="border: 1px solid #000; padding: 6px; width: 70px; text-align: center;">Qty</th>
-              <th style="border: 1px solid #000; padding: 6px; width: 95px; text-align: right;">Cost Rate</th>
-              <th style="border: 1px solid #000; padding: 6px; width: 95px; text-align: right;">Sale Rate</th>
-              <th style="border: 1px solid #000; padding: 6px; width: 115px; text-align: right;">Total Value</th>
+            <tr style="background: #f1f5f9; font-weight: 900; border: 1px solid #000; font-size: 13px;">
+              <th style="border: 1px solid #000; padding: 5px; width: 70px; text-align: center;">Item Code</th>
+              <th style="border: 1px solid #000; padding: 5px; text-align: left;">Description / Brand</th>
+              <th style="border: 1px solid #000; padding: 5px; width: 45px; text-align: center;">Qty</th>
+              <th style="border: 1px solid #000; padding: 5px; width: 65px; text-align: right;">Cost Rate</th>
+              <th style="border: 1px solid #000; padding: 5px; width: 65px; text-align: right;">Sale Rate</th>
+              <th style="border: 1px solid #000; padding: 5px; width: 80px; text-align: right;">Amount</th>
             </tr>
           </thead>
           <tbody>

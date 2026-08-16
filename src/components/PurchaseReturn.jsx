@@ -10,7 +10,7 @@ let _rowId = Date.now();
 const nextId = () => ++_rowId;
 
 function makeRow() {
-  return { id: nextId(), itemCode: '', description: '', brand: '', packingQty: 0, currentStock: 0, packets: '', preDiscPrice: '', flatDiscount: 0, discPct: 0 };
+  return { id: nextId(), itemCode: '', description: '', brand: '', packingQty: 0, currentStock: 0, saleRate: 0, packets: '', preDiscPrice: '', flatDiscount: 0, discPct: 0 };
 }
 
 function descForProduct(p) {
@@ -43,7 +43,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessAnim, setShowSuccessAnim] = useState(false);
   const [stockSearchModalOpen, setStockSearchModalOpen] = useState(false);
-  
+
   const [suppliersList, setSuppliersList] = useState([]);
   const [expenseAccounts, setExpenseAccounts] = useState([]);
   const [mfgDiscounts, setMfgDiscounts] = useState([]);
@@ -116,6 +116,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
           brand: row.brand || '',
           packingQty: row.packing_qty || 0,
           currentStock: row.stock_packets !== undefined ? row.stock_packets : (row.packing_qty || 0),
+          saleRate: row.sale_rate || 0,
           packets: String(row.packets),
           preDiscPrice: String(parseFloat(row.pre_disc_price || row.rate)),
           flatDiscount: parseFloat(row.flat_discount || 0),
@@ -191,10 +192,14 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   useEffect(() => {
     if (!activeRowId) return;
     const item = items.find(r => r.id === activeRowId);
-    if (item && item.itemCode && (item.currentStock === undefined || item.currentStock === 0)) {
+    if (item && item.itemCode && (item.currentStock === undefined || item.currentStock === 0 || !item.saleRate)) {
       ipcRenderer.invoke('get-product-by-code', item.itemCode).then(p => {
-        if (p && p.stock_packets !== undefined) {
-          setItems(prev => prev.map(r => r.id === activeRowId ? { ...r, currentStock: p.stock_packets } : r));
+        if (p) {
+          setItems(prev => prev.map(r => r.id === activeRowId ? {
+            ...r,
+            currentStock: p.stock_packets !== undefined ? p.stock_packets : r.currentStock,
+            saleRate: p.sale_rate !== undefined ? p.sale_rate : r.saleRate
+          } : r));
         }
       }).catch(console.error);
     }
@@ -212,7 +217,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
   const handleCodeChange = async (rowId, val) => {
     setActiveRowId(rowId);
     setItems(prev => prev.map(r =>
-      r.id === rowId ? { ...r, itemCode: val, description: '', brand: '', packingQty: 0, currentStock: 0, preDiscPrice: '', flatDiscount: 0, discPct: 0 } : r
+      r.id === rowId ? { ...r, itemCode: val, description: '', brand: '', packingQty: 0, currentStock: 0, saleRate: 0, preDiscPrice: '', flatDiscount: 0, discPct: 0 } : r
     ));
     if (!val.trim()) { setActiveDrop(null); return; }
     const results = await ipcRenderer.invoke('search-products', val);
@@ -245,6 +250,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
         brand: product.brand || '',
         packingQty: pkts,
         currentStock: product.stock_packets !== undefined ? product.stock_packets : 0,
+        saleRate: product.sale_rate !== undefined ? product.sale_rate : 0,
         packets: String(pkts),
         preDiscPrice: String(baseRate),
         flatDiscount: flatD,
@@ -322,9 +328,9 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
       } else packetsRefs.current[rowId]?.focus();
     }
     if (e.key === 'Escape') setActiveDrop(null);
-    if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx+1]; if(n) codeRefs.current[n.id]?.focus(); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); const n = rows[idx-1]; if(n) codeRefs.current[n.id]?.focus(); }
-    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
+    if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx + 1]; if (n) codeRefs.current[n.id]?.focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); const n = rows[idx - 1]; if (n) codeRefs.current[n.id]?.focus(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
   };
 
   const handlePktsKD = (e, rowId, idx) => {
@@ -332,11 +338,11 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
     if (e.key === 'Enter') {
       e.preventDefault();
       if (idx >= rows.length - 1) addEmptyRow();
-      else codeRefs.current[rows[idx+1].id]?.focus();
+      else codeRefs.current[rows[idx + 1].id]?.focus();
     }
-    if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx+1]; if(n) packetsRefs.current[n.id]?.focus(); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); const n = rows[idx-1]; if(n) packetsRefs.current[n.id]?.focus(); }
-    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
+    if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx + 1]; if (n) packetsRefs.current[n.id]?.focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); const n = rows[idx - 1]; if (n) packetsRefs.current[n.id]?.focus(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
   };
 
   const handleRateKD = (e, rowId, idx) => {
@@ -344,11 +350,11 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
     if (e.key === 'Enter') {
       e.preventDefault();
       if (idx >= rows.length - 1) addEmptyRow();
-      else codeRefs.current[rows[idx+1].id]?.focus();
+      else codeRefs.current[rows[idx + 1].id]?.focus();
     }
-    if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx+1]; if(n) rateRefs.current[n.id]?.focus(); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); const n = rows[idx-1]; if(n) rateRefs.current[n.id]?.focus(); }
-    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
+    if (e.key === 'ArrowDown') { e.preventDefault(); const n = rows[idx + 1]; if (n) rateRefs.current[n.id]?.focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); const n = rows[idx - 1]; if (n) rateRefs.current[n.id]?.focus(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') ctrlD(e, idx);
   };
 
   const resetForm = () => {
@@ -594,6 +600,7 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
         brand: product.brand || '',
         packingQty: pkts,
         currentStock: product.stock_packets !== undefined ? product.stock_packets : 0,
+        saleRate: product.sale_rate !== undefined ? product.sale_rate : 0,
         packets: String(pkts),
         preDiscPrice: String(baseRate),
         flatDiscount: flatD,
@@ -757,8 +764,8 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
             <section className="form-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
               <div className="card-header" style={{ padding: '8px 14px', borderBottom: '1px solid #ebedf3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 className="card-title" style={{ margin: 0, color: '#ef4444' }}>Return Items ({totals.count})</h3>
-                
-                {/* Available Stock & Purchase Rate Info Boxes */}
+
+                {/* Available Stock, Purchase Rate & Sale Rate Info Boxes */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 6 }}>
                     <span style={{ fontSize: '0.78rem', color: '#047857', fontWeight: 700 }}>Available Stock:</span>
@@ -770,7 +777,14 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6 }}>
                     <span style={{ fontSize: '0.78rem', color: '#0369a1', fontWeight: 700 }}>Purchase Rate:</span>
                     <strong style={{ fontSize: '0.92rem', color: '#075985', fontWeight: 800 }}>
-                      {activeItem?.preDiscPrice && parseFloat(activeItem.preDiscPrice) > 0 ? `PKR ${parseFloat(activeItem.preDiscPrice).toLocaleString()}` : '—'}
+                      {activeItem?.preDiscPrice && parseFloat(activeItem.preDiscPrice) > 0 ? `${parseFloat(activeItem.preDiscPrice).toLocaleString()}` : '—'}
+                    </strong>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#fefce8', border: '1px solid #fef08a', borderRadius: 6 }}>
+                    <span style={{ fontSize: '0.78rem', color: '#a16207', fontWeight: 700 }}>Sale Rate:</span>
+                    <strong style={{ fontSize: '0.92rem', color: '#854d0e', fontWeight: 800 }}>
+                      {activeItem?.saleRate && parseFloat(activeItem.saleRate) > 0 ? `${parseFloat(activeItem.saleRate).toLocaleString()}` : '—'}
                     </strong>
                   </div>
                 </div>

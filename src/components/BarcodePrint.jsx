@@ -9,12 +9,13 @@ function BarcodePrint({ isActive }) {
   const [mode, setMode] = useState('manual'); // 'manual' or 'purchase'
   const [purchases, setPurchases] = useState([]);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
-  
+
   // Unified items list for printing
   const [items, setItems] = useState([]);
   const [draftCode, setDraftCode] = useState('');
   const [message, setMessage] = useState('');
   const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [showQtyColumn, setShowQtyColumn] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(null);
 
@@ -23,7 +24,7 @@ function BarcodePrint({ isActive }) {
   useEffect(() => {
     if (isActive) {
       loadPurchases();
-      
+
       // Check if there are fast purchase barcode items
       const fastPurchaseItems = sessionStorage.getItem('fastPurchaseBarcodeItems');
       if (fastPurchaseItems) {
@@ -44,7 +45,7 @@ function BarcodePrint({ isActive }) {
     if (isActive && !showPrintPreview) {
       setTimeout(() => {
         inputRef.current?.focus();
-        
+
         // Auto-scroll the table wrap exactly like NewSale
         const tableWrap = document.querySelector('.sale-table-wrap');
         if (tableWrap) {
@@ -107,7 +108,7 @@ function BarcodePrint({ isActive }) {
 
   const addFromDraft = async () => {
     if (!draftCode.trim()) return;
-    
+
     const cleanedCode = draftCode.trim().toUpperCase();
     setIsLoading(true);
     try {
@@ -201,12 +202,12 @@ function BarcodePrint({ isActive }) {
         behavior: 'smooth'
       });
     }
-    
+
     if (isActive && !showPrintPreview) {
       // ONLY steal focus if NOT currently editing a quantity field
       const activeEl = document.activeElement;
       const isEditingQty = activeEl?.classList.contains('qty-field');
-      
+
       if (!isEditingQty) {
         inputRef.current?.focus();
       }
@@ -265,14 +266,14 @@ function BarcodePrint({ isActive }) {
             <div className="topbar-left">
               <span className="topbar-title blue">Manual Barcode Printing</span>
               <div className="mode-tabs-container">
-                <button 
+                <button
                   className={`topbar-btn ${mode === 'manual' ? 'topbar-btn-primary' : 'topbar-btn-secondary'}`}
                   onClick={() => { setMode('manual'); resetList(); }}
                   style={{ padding: '4px 12px', fontSize: '0.8rem' }}
                 >
                   Manual / Scan
                 </button>
-                <button 
+                <button
                   className={`topbar-btn ${mode === 'purchase' ? 'topbar-btn-primary' : 'topbar-btn-secondary'}`}
                   onClick={() => { setMode('purchase'); resetList(); }}
                   style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: '5px' }}
@@ -282,9 +283,16 @@ function BarcodePrint({ isActive }) {
               </div>
             </div>
             <div className="topbar-right">
+              <button
+                className="topbar-btn topbar-btn-tertiary"
+                onClick={() => setShowQtyColumn(prev => !prev)}
+                style={{ marginRight: '5px' }}
+              >
+                {showQtyColumn ? ' Hide Qty' : ' Show Qty'}
+              </button>
               <button className="topbar-btn topbar-btn-tertiary" onClick={resetList}>Reset List</button>
-              <button 
-                className="topbar-btn topbar-btn-primary" 
+              <button
+                className="topbar-btn topbar-btn-primary"
                 onClick={handlePrint}
                 disabled={items.length === 0}
               >
@@ -302,8 +310,8 @@ function BarcodePrint({ isActive }) {
                   <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#6b7280', textTransform: 'uppercase' }}>Select Purchase</span>
                   <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {purchases.map(p => (
-                      <div 
-                        key={p.id} 
+                      <div
+                        key={p.id}
                         className={`purchase-item-card ${selectedPurchase?.id === p.id ? 'active' : ''} ${!p.is_posted ? 'unposted' : ''}`}
                         onClick={() => handleSelectPurchase(p)}
                         style={{
@@ -318,10 +326,10 @@ function BarcodePrint({ isActive }) {
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <strong style={{ fontSize: '0.9rem' }}>#{p.id}</strong>
-                            <span style={{ 
-                              fontSize: '0.6rem', 
-                              padding: '2px 6px', 
-                              borderRadius: '4px', 
+                            <span style={{
+                              fontSize: '0.6rem',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
                               background: '#e1ffeb',
                               color: '#1bc5bd',
                               fontWeight: 'bold',
@@ -337,47 +345,49 @@ function BarcodePrint({ isActive }) {
                     ))}
                   </div>
                 </div>
-                
+
                 <div className="sale-table-wrap" style={{ flex: 1 }}>
-                   <table className="sale-table">
-                     <thead>
-                       <tr>
-                         <th>#</th>
-                         <th className="center">Item Code</th>
-                         <th>Description</th>
-                         <th className="center">Qty to Print</th>
-                         <th className="right">Rate</th>
-                       </tr>
-                     </thead>
-                     <tbody>
-                       {items.map((item, idx) => (
-                         <tr key={idx}>
-                           <td className="center" style={{ color: '#000', fontWeight: 'bold' }}>{idx + 1}</td>
-                           <td className="center">
-                              <span className="code-field">{item.item_code}</span>
-                           </td>
-                           <td><span className="desc-main" style={{ fontWeight: '700' }}>{item.item_name}</span></td>
-                           <td className="center">
-                             <input 
-                               type="number" 
-                               className="qty-field center"
-                               style={{ width: '8ch', minWidth: '8ch', fontSize: '1.2rem', fontWeight: 'bold', background: '#f3f6f9', color: '#6b7280', border: 'none' }}
-                               value={item.quantity}
-                               readOnly
-                               tabIndex="-1"
-                               min="0"
-                             />
-                           </td>
-                           <td className="right">
-                              <span className="rate-field">{item.sale_rate}</span>
-                           </td>
-                         </tr>
-                       ))}
-                     </tbody>
-                   </table>
-                   {items.length === 0 && (
-                     <div className="empty">Select a purchase from the left to load items</div>
-                   )}
+                  <table className="sale-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th className="center">Item Code</th>
+                        <th>Description</th>
+                        {showQtyColumn && <th className="center">Qty to Print</th>}
+                        <th className="right">Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="center" style={{ color: '#000', fontWeight: 'bold' }}>{idx + 1}</td>
+                          <td className="center">
+                            <span className="code-field">{item.item_code}</span>
+                          </td>
+                          <td><span className="desc-main" style={{ fontWeight: '700' }}>{item.item_name}</span></td>
+                          {showQtyColumn && (
+                            <td className="center">
+                              <input
+                                type="number"
+                                className="qty-field center"
+                                style={{ width: '8ch', minWidth: '8ch', fontSize: '1.2rem', fontWeight: 'bold', background: '#f3f6f9', color: '#6b7280', border: 'none' }}
+                                value={item.quantity}
+                                readOnly
+                                tabIndex="-1"
+                                min="0"
+                              />
+                            </td>
+                          )}
+                          <td className="right">
+                            <span className="rate-field">{item.sale_rate}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {items.length === 0 && (
+                    <div className="empty">Select a purchase from the left to load items</div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -388,7 +398,7 @@ function BarcodePrint({ isActive }) {
                       <th width="60">#</th>
                       <th width="180" className="center">Item Code</th>
                       <th>Description</th>
-                      <th width="150" className="center">Qty to Print</th>
+                      {showQtyColumn && <th width="150" className="center">Qty to Print</th>}
                       <th width="180" className="right">Rate</th>
                       <th width="80" className="center">Action</th>
                     </tr>
@@ -398,24 +408,26 @@ function BarcodePrint({ isActive }) {
                       <tr key={idx} className={focusedIndex === idx ? 'row-active' : ''}>
                         <td className="center" style={{ color: '#000', fontWeight: 'bold' }}>{idx + 1}</td>
                         <td className="center">
-                           <span className="code-field">{item.item_code}</span>
+                          <span className="code-field">{item.item_code}</span>
                         </td>
                         <td><span className="desc-main" style={{ fontWeight: '700' }}>{item.item_description || item.item_name}</span></td>
-                        <td className="center">
-                          <input 
-                            type="number" 
-                            className="qty-field center"
-                            style={{ width: '8ch', minWidth: '8ch', fontSize: '1.2rem', fontWeight: 'bold' }}
-                            value={item.quantity}
-                            onChange={(e) => updateItemQty(idx, e.target.value)}
-                            onKeyDown={(e) => handleQtyKeyDown(e, idx)}
-                            onFocus={(e) => { e.target.select(); setFocusedIndex(idx); }}
-                            onBlur={() => setFocusedIndex(null)}
-                            min="1"
-                          />
-                        </td>
+                        {showQtyColumn && (
+                          <td className="center">
+                            <input
+                              type="number"
+                              className="qty-field center"
+                              style={{ width: '8ch', minWidth: '8ch', fontSize: '1.2rem', fontWeight: 'bold' }}
+                              value={item.quantity}
+                              onChange={(e) => updateItemQty(idx, e.target.value)}
+                              onKeyDown={(e) => handleQtyKeyDown(e, idx)}
+                              onFocus={(e) => { e.target.select(); setFocusedIndex(idx); }}
+                              onBlur={() => setFocusedIndex(null)}
+                              min="1"
+                            />
+                          </td>
+                        )}
                         <td className="right">
-                           <span className="rate-field">{item.sale_rate}</span>
+                          <span className="rate-field">{item.sale_rate}</span>
                         </td>
                         <td className="center">
                           <button className="btn-icon" onClick={() => removeItem(idx)} tabIndex="-1">✖</button>
@@ -424,12 +436,12 @@ function BarcodePrint({ isActive }) {
                     ))}
                     {items.length === 0 && (
                       <tr>
-                        <td colSpan="6" className="empty">Scan or type an item code to add to the print list.</td>
+                        <td colSpan={showQtyColumn ? "6" : "5"} className="empty">Scan or type an item code to add to the print list.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
-                
+
                 {/* EXACT CLONE OF scan-entry row */}
                 <div className="scan-entry" style={{ border: '1px solid #1e40af', borderTop: 'none', borderRadius: '0 0 6px 6px' }}>
                   <div className="scan-cell" style={{ width: '250px' }}>
@@ -468,14 +480,14 @@ function BarcodePrint({ isActive }) {
 
           <footer className="sale-footer">
             <div className="footer-left-group">
-               <div className="footer-stock-box">
-                  <span className="footer-box-label">Items Count</span>
-                  <strong>{items.length} Unique Items</strong>
-               </div>
+              <div className="footer-stock-box">
+                <span className="footer-box-label">Items Count</span>
+                <strong>{items.length} Unique Items</strong>
+              </div>
             </div>
             <div className="footer-grand" style={{ marginLeft: 'auto' }}>
-               <span>TOTAL LABELS</span>
-               <strong>{totalLabels}</strong>
+              <span>TOTAL LABELS</span>
+              <strong>{totalLabels}</strong>
             </div>
           </footer>
         </>

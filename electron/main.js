@@ -4356,10 +4356,9 @@ async function handleIPC(channel, ...args) {
         const glResSummary = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
         const summaryBankNames = glResSummary.rows.map(r => (r.account_name || '').toLowerCase().trim());
 
-        const res = await query(`
+        const salesRes = await query(`
           SELECT sale_date::date as day,
                  SUM(total_amount) as total_sales,
-                 SUM(total_packets) as total_items,
                  STRING_AGG(payment_method || ':' || total_amount, ',') as payment_breakdown
           FROM sales
           WHERE sale_date::date BETWEEN $1 AND $2
@@ -4367,7 +4366,21 @@ async function handleIPC(channel, ...args) {
           ORDER BY day ASC
         `, [start, end]);
 
-        return res.rows.map(row => {
+        const returnsRes = await query(`
+          SELECT sr.return_date::date as day,
+                 SUM(sr.total_amount) as return_amount,
+                 COALESCE(SUM(sri.packets), 0) as return_items
+          FROM sales_returns sr
+          LEFT JOIN sales_return_items sri ON sri.return_id = sr.id
+          WHERE sr.return_date::date BETWEEN $1 AND $2
+          GROUP BY sr.return_date::date
+        `, [start, end]);
+
+        const dateMap = {};
+
+        salesRes.rows.forEach(row => {
+          const dayStr = row.day ? String(row.day).slice(0, 10) : '';
+          if (!dayStr) return;
           let cash = 0, digital = 0;
           if (row.payment_breakdown) {
             row.payment_breakdown.split(',').forEach(part => {
@@ -4383,14 +4396,36 @@ async function handleIPC(channel, ...args) {
               }
             });
           }
-          return {
-            date: row.day,
-            total_sales: parseFloat(row.total_sales) || 0,
-            items_sold: parseInt(row.total_items) || 0,
-            cash_sales: cash,
-            digital_sales: digital
-          };
+          if (!dateMap[dayStr]) {
+            dateMap[dayStr] = { day: dayStr, totalSales: 0, returnAmount: 0, returnItems: 0, totalCash: 0, totalDigital: 0 };
+          }
+          dateMap[dayStr].totalSales = parseFloat(row.total_sales) || 0;
+          dateMap[dayStr].totalCash = cash;
+          dateMap[dayStr].totalDigital = digital;
         });
+
+        returnsRes.rows.forEach(row => {
+          const dayStr = row.day ? String(row.day).slice(0, 10) : '';
+          if (!dayStr) return;
+          if (!dateMap[dayStr]) {
+            dateMap[dayStr] = { day: dayStr, totalSales: 0, returnAmount: 0, returnItems: 0, totalCash: 0, totalDigital: 0 };
+          }
+          dateMap[dayStr].returnAmount = parseFloat(row.return_amount) || 0;
+          dateMap[dayStr].returnItems = parseInt(row.return_items) || 0;
+        });
+
+        const rows = Object.values(dateMap).sort((a, b) => a.day.localeCompare(b.day));
+
+        const totals = rows.reduce((acc, r) => {
+          acc.totalSales += r.totalSales;
+          acc.returnAmount += r.returnAmount;
+          acc.returnItems += r.returnItems;
+          acc.totalCash += r.totalCash;
+          acc.totalDigital += r.totalDigital;
+          return acc;
+        }, { totalSales: 0, returnAmount: 0, returnItems: 0, totalCash: 0, totalDigital: 0 });
+
+        return { rows, totals };
       } catch (err) {
         console.error('Error in get-date-summary:', err);
         return { error: err.message };
@@ -4513,7 +4548,7 @@ async function handleIPC(channel, ...args) {
               WHERE rn = 1
             ) latest_purchase ON latest_purchase.item_code = p.item_code
           ) stock_data
-          WHERE stock_packets > 0
+          WHERE stock_packets >= 0
           ORDER BY supplier_name, category, item_code
         `);
         return res.rows;
