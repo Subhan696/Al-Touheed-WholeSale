@@ -24,12 +24,15 @@ export function buildPurchaseReturnHTML(header, items) {
   const discount = parseFloat(header.discount || 0);
 
   let totalQty = 0;
+  let totalPackets = 0;
   let grossSub = 0;
   let totalItemDisc = 0;
   let netSub = 0;
 
   const rowsHtml = items.map((item, idx) => {
     const q = parseInt(item.packets || item.qty || item.stock_packets) || 0;
+    const packing = parseInt(item.packingQty || item.packing_qty) || 1;
+    const pckts = Math.floor(q / packing);
     const base = parseFloat(item.preDiscPrice || item.pre_disc_price || item.rate) || 0;
     const flat = parseFloat(item.flatDiscount || item.flat_discount) || 0;
     const dPct = parseFloat(item.discPct || item.disc_pct) || 0;
@@ -38,6 +41,7 @@ export function buildPurchaseReturnHTML(header, items) {
     const amt = netRate * q;
 
     totalQty += q;
+    totalPackets += pckts;
     grossSub += base * q;
     totalItemDisc += (flat + rDisc) * q;
     netSub += amt;
@@ -49,6 +53,7 @@ export function buildPurchaseReturnHTML(header, items) {
       <tr>
         <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: bold;">${idx + 1}</td>
         <td style="border: 1px solid #000; padding: 5px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;">${desc}</td>
+        <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #b45309;">${pckts}</td>
         <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #000;">${code}</td>
         <td style="text-align: center; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #000;">${q}</td>
         <td style="text-align: right; border: 1px solid #000; padding: 5px 6px; font-weight: 800; font-size: 13px; color: #000;">${base > 0 ? Math.round(base).toLocaleString() : ''}</td>
@@ -176,11 +181,12 @@ export function buildPurchaseReturnHTML(header, items) {
     <table class="items-table">
       <thead>
         <tr>
-          <th style="width: 30px;">#</th>
+          <th style="width: 28px;">#</th>
           <th>Description</th>
-          <th style="width: 90px;">Item Code</th>
-          <th style="width: 55px;">Qty</th>
-          <th style="width: 115px;">Purchase Rate</th>
+          <th style="width: 45px;">Pckts</th>
+          <th style="width: 85px;">Item Code</th>
+          <th style="width: 50px;">Qty</th>
+          <th style="width: 110px;">Purchase Rate</th>
         </tr>
       </thead>
       <tbody>
@@ -188,18 +194,21 @@ export function buildPurchaseReturnHTML(header, items) {
       </tbody>
       <tfoot>
         <tr style="border-top: 1.5px solid #000; font-weight: bold; background: #fff;">
-          <td colSpan="3" style="border: 1px solid #000; padding: 5px 8px; font-weight: 900; text-align: right;">Total / Subtotal:</td>
-          <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 900; font-size: 14px;">${totalQty}</td>
-          <td style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-weight: 900; font-size: 14px;">${grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: center;"></td>
+          <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 900; text-align: center ; font-size: 13px;">Total Packets: ${totalPackets}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: center; font-weight: 900; font-size: 14px; color: #b45309;">${totalPackets}</td>
+          <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 900; text-align: right; font-size: 13px;">Total Qty / Subtotal:</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: center; font-weight: 900; font-size: 14px;">${totalQty}</td>
+          <td style="border: 1px solid #000; padding: 5px 6px; text-align: right; font-weight: 900; font-size: 14px;">${grossSub.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
         </tr>
         ${overallDiscount > 0 ? `
         <tr style="font-weight: bold; background: #fff;">
-          <td colSpan="4" style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-size: 14px;">${discLabel}</td>
+          <td colSpan="5" style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-size: 14px;">${discLabel}</td>
           <td style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-size: 14px; font-weight: 900; color: #000;">-${overallDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
         </tr>
         ` : ''}
         <tr style="background: #f0f0f0; font-weight: 900;">
-          <td colSpan="4" style="border: 1.5px solid #000; padding: 6px 8px; font-size: 15px; text-align: right;">Grand Total:</td>
+          <td colSpan="5" style="border: 1.5px solid #000; padding: 6px 8px; font-size: 15px; text-align: right;">Grand Total:</td>
           <td style="border: 1.5px solid #000; padding: 6px 8px; font-size: 17px; text-align: right; font-weight: 900;">${Math.round(grandTotal).toLocaleString()}</td>
         </tr>
       </tfoot>

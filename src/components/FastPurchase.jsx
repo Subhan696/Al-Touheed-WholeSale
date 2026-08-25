@@ -149,20 +149,24 @@ function FastPurchase({ currentUser, isActive, onClose }) {
         const [comps, mfg, sess] = await Promise.all([
           ipcRenderer.invoke('get-manufacturers').catch(() => []),
           ipcRenderer.invoke('get-raw-manufacturer-brands').catch(() => []),
-          ipcRenderer.invoke('get-item-sessions').catch(() => [])
+          ipcRenderer.invoke('get-item-sessions', { showAll: true }).catch(() => [])
         ]);
         const compNames = (comps || []).map(c => c.name);
         setCompanies(compNames);
         const mfgData = mfg || [];
         setMfgDiscounts(mfgData);
 
-        // Auto-select supplier of the last session's brand
+        // Auto-select supplier of the last session's brand (including merged item sessions)
         let hasAutoSupplier = false;
-        if (sess && sess.length > 0 && sess[0].brand) {
-          const autoSupplier = getSupplierForBrand(sess[0].brand, mfgData, compNames);
-          if (autoSupplier) {
-            setSupplierName(autoSupplier);
-            hasAutoSupplier = true;
+        if (sess && sess.length > 0) {
+          const sessionWithBrand = sess.find(s => s.brand && s.brand.trim());
+          const targetBrand = sessionWithBrand ? sessionWithBrand.brand : (sess[0]?.brand || '');
+          if (targetBrand) {
+            const autoSupplier = getSupplierForBrand(targetBrand, mfgData, compNames);
+            if (autoSupplier) {
+              setSupplierName(autoSupplier);
+              hasAutoSupplier = true;
+            }
           }
         }
         if (hasAutoSupplier) {
@@ -290,7 +294,7 @@ function FastPurchase({ currentUser, isActive, onClose }) {
 
   const autoImportLastSession = async () => {
     try {
-      const sess = await ipcRenderer.invoke('get-item-sessions');
+      const sess = await ipcRenderer.invoke('get-item-sessions', { showAll: true });
       if (!sess || sess.length === 0) {
         setStatusMsg('No sessions found for today');
         setTimeout(() => setStatusMsg(''), 3000);
@@ -304,7 +308,7 @@ function FastPurchase({ currentUser, isActive, onClose }) {
 
       const products = await ipcRenderer.invoke('get-products-by-session-range', { from: fromId, to: toId });
       if (products && products.length > 0) {
-        const sessionBrand = products[0]?.brand || sess[0]?.brand || '';
+        const sessionBrand = products.find(p => p.brand && p.brand.trim())?.brand || sess[0]?.brand || '';
         let targetSupplier = supplierName;
         if (!targetSupplier && sessionBrand) {
           targetSupplier = getSupplierForBrand(sessionBrand, mfgDiscounts, companies);

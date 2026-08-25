@@ -428,6 +428,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       setDiscount(s.discount || 0);
 
+      setExtraDiscountPct(s.extra_discount_pct ? String(s.extra_discount_pct) : '');
+
       setMiscCharges(s.misc_charges || 0);
 
       setNotes(s.notes || '');
@@ -1957,9 +1959,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       }),
 
-      discount: (totals.totalDiscountAmt - totals.itemDiscounts) || 0,
+      discount: parseFloat(discount) || 0,
+
+      extraDiscountPct: parseFloat(extraDiscountPct) || 0,
 
       miscCharges: parseFloat(miscCharges) || 0,
+
+      grandTotal: totals.grandTotal,
 
       paymentMethod: paymentMethodStr, notes,
 
@@ -2166,41 +2172,31 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
   const [isPrintingFromPreview, setIsPrintingFromPreview] = useState(false);
 
   const handlePrintFromPreview = async () => {
-
     if (isPrintingFromPreview) return; // prevent double-click
-
     setIsPrintingFromPreview(true);
 
     const html = generateInvoiceHTML({ payments: receivedPayments, cashAccountNames });
 
     try {
-
       const result = await ipcRenderer.invoke('print-receipt', html);
-
       if (!result.success) {
-
         setMessage('Print failed: ' + result.error);
-
       } else {
-
         setMessage('Print successful');
-
       }
-
       setTimeout(() => setMessage(''), 3000);
-
     } catch (err) {
-
       setMessage('Error during printing');
-
       setTimeout(() => setMessage(''), 3000);
-
     } finally {
-
       setIsPrintingFromPreview(false);
-
+      setShowReceiptPreview(false);
+      if (!isEditing && onNewSale) {
+        onNewSale();
+      } else if (isEditing && onSaveSuccess) {
+        onSaveSuccess?.();
+      }
     }
-
   };
 
 
@@ -2269,13 +2265,27 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
 
-    const formatAmt = (num) => parseFloat(num).toFixed(2).replace(/\.00$/, '');
-
-
+    const formatAmt = (num) => {
+      const val = parseFloat(num) || 0;
+      const isNegative = val < 0;
+      const parts = Math.abs(val).toFixed(2).split('.');
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      const formatted = parts[1] === '00' ? parts[0] : parts.join('.');
+      return isNegative ? '-' + formatted : formatted;
+    };
 
     const visibleItems = items.filter(item => item.itemCode || item.itemDescription);
 
-
+    let nonReturnSeq = 0;
+    const itemsWithSNo = visibleItems.map(item => {
+      const isRet = !!(item.isReturn || (parseFloat(item.packets) < 0) || (parseFloat(item.amount) < 0));
+      if (isRet) {
+        return { ...item, isReturn: true, displaySNo: '' };
+      } else {
+        nonReturnSeq++;
+        return { ...item, displaySNo: nonReturnSeq };
+      }
+    });
 
     // hasItemDiscount: controls the per-item Disc column — only shown when
 
@@ -2335,7 +2345,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     const chunks = [];
 
-    let remainingItems = [...visibleItems];
+    let remainingItems = [...itemsWithSNo];
 
 
 
@@ -2447,7 +2457,9 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       const disc = parseFloat(item.discount) || 0;
 
-      const isRet = item.isReturn;
+      const isRet = item.isReturn || (parseFloat(item.packets) < 0) || (parseFloat(item.amount) < 0);
+
+      const serialNo = isRet ? '' : (item.displaySNo !== undefined ? item.displaySNo : globalIndex + 1);
 
       const rowStyle = isRet ? ' style="background-color: #e5e7eb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"' : '';
 
@@ -2455,7 +2467,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
         <tr${rowStyle}>
 
-          <td>${globalIndex + 1}</td>
+          <td>${serialNo}</td>
 
           <td class="left item-name">
 
@@ -2706,14 +2718,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
               ${hasAnyDiscount ? `
                 <div style="display: flex; justify-content: space-between;">
                   <span style="white-space: nowrap;"><strong>Total Discount:</strong></span>
-                  <span>${formatAmt(totals.totalDiscountAmt)}</span>
+                  <span><span style="font-weight: 900;">(-)</span> ${formatAmt(Math.abs(totals.totalDiscountAmt))}</span>
                 </div>
               ` : ''}
               ${(totals.totalReturnQty > 0 || totals.totalReturnAmount > 0) ? `
                 <div style="margin-top: 4px; text-align: right;">
                   <span style="background-color: #d1d5db; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">
                     <span style="margin-right: 15px;"><strong>Total Return Qty:</strong> ${totals.totalReturnQty}</span>
-                    <span><strong>Return Amount:</strong> -${formatAmt(totals.totalReturnAmount)}</span>
+                    <span><strong>Return Amount:</strong> <span style="font-weight: 900;">(-)</span> ${formatAmt(Math.abs(totals.totalReturnAmount))}</span>
                   </span>
                 </div>
               ` : ''}
@@ -2730,7 +2742,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
             <div class="net-total" style="margin-bottom: 0;">
               <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
                 <span style="white-space: nowrap;"><strong>Previous Balance:</strong></span>
-                <span>${customerPrevBalance > 0 ? '+' : '-'}${formatAmt(Math.abs(parseFloat(customerPrevBalance)))}</span>
+                <span><span style="font-weight: 900;">(${parseFloat(customerPrevBalance) >= 0 ? '+' : '-'})</span> ${formatAmt(Math.abs(parseFloat(customerPrevBalance)))}</span>
               </div>
             </div>
             <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: none; padding: 3px 6px; margin-top: 2px;">
@@ -2752,14 +2764,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
             <div class="net-total" style="margin-bottom: 0;">
               <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
                 <span style="white-space: nowrap;"><strong>Cash Received:</strong></span>
-                <span>${formatAmt(cashReceived)}</span>
+                <span><span style="font-weight: 900;">(-)</span> ${formatAmt(Math.abs(cashReceived))}</span>
               </div>
             </div>
             ${bankReceived > 0 ? `
               <div class="net-total" style="margin-bottom: 0;">
                 <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
                   <span style="white-space: nowrap;"><strong>Bank / Online Received:</strong></span>
-                  <span>${formatAmt(bankReceived)}</span>
+                  <span><span style="font-weight: 900;">(-)</span> ${formatAmt(Math.abs(bankReceived))}</span>
                 </div>
               </div>
             ` : ''}
@@ -3444,7 +3456,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
                 <th>Description</th>
 
-                <th className="center" style={{ width: '9%' }}>Packing</th>
+                <th className="center" style={{ width: '9%' }}>Qty</th>
 
                 <th className="right" style={{ width: '10%' }}>Rate</th>
 
@@ -3663,6 +3675,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
                       onFocus={e => { setFocusedItemIdx(idx); e.target.select(); }}
 
+                      onClick={e => e.target.select()}
+
                       className="qty-field center packing-input"
 
                     />
@@ -3691,6 +3705,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
                       onFocus={e => { setFocusedItemIdx(idx); e.target.select(); }}
 
+                      onClick={e => e.target.select()}
+
                       className="rate-field right sale-rate-input"
 
                     />
@@ -3718,6 +3734,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
                       onKeyDown={e => handleRowKD(e, idx, 'discount')}
 
                       onFocus={e => { setFocusedItemIdx(idx); e.target.select(); }}
+
+                      onClick={e => e.target.select()}
 
                       className="rate-field right discount-input"
 
@@ -3936,7 +3954,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <input type="number" className="discount-input" value={miscCharges}
 
-            onChange={e => setMiscCharges(e.target.value)} placeholder="+"
+            onChange={e => setMiscCharges(e.target.value)}
+
+            onFocus={e => e.target.select()}
+
+            onClick={e => e.target.select()}
+
+            placeholder="+"
 
             style={{ color: '#059669', borderColor: '#059669' }} />
 
@@ -3948,7 +3972,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <input type="number" className="discount-input" value={discount}
 
-            onChange={e => setDiscount(e.target.value)} placeholder="-" />
+            onChange={e => setDiscount(e.target.value)}
+
+            onFocus={e => e.target.select()}
+
+            onClick={e => e.target.select()}
+
+            placeholder="-" />
 
         </div>
 
@@ -3958,7 +3988,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <input type="number" className="discount-input" value={extraDiscountPct}
 
-            onChange={e => setExtraDiscountPct(e.target.value)} placeholder="%" />
+            onChange={e => setExtraDiscountPct(e.target.value)}
+
+            onFocus={e => e.target.select()}
+
+            onClick={e => e.target.select()}
+
+            placeholder="%" />
 
         </div>
 
@@ -4593,7 +4629,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>Flat Discount Amount (same for every item)</label>
 
-              <input type="number" placeholder="Leave empty to not use a flat amount" value={modalDiscounts.flatAmount} onChange={e => setModalDiscounts(p => ({ ...p, flatAmount: e.target.value }))} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
+              <input type="number" placeholder="Leave empty to not use a flat amount" value={modalDiscounts.flatAmount} onChange={e => setModalDiscounts(p => ({ ...p, flatAmount: e.target.value }))} onFocus={e => e.target.select()} onClick={e => e.target.select()} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
 
               <div style={{ fontSize: '0.75rem', color: '#7e8299', marginTop: 4 }}>Applies this exact discount amount to every item on the invoice, regardless of rate or brand. Overrides the % settings below when set.</div>
 
@@ -4605,7 +4641,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>Overall Invoice Discount %</label>
 
-              <input type="number" placeholder="Leave empty for no overall override" value={modalDiscounts.overallPct} onChange={e => setModalDiscounts(p => ({ ...p, overallPct: e.target.value }))} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
+              <input type="number" placeholder="Leave empty for no overall override" value={modalDiscounts.overallPct} onChange={e => setModalDiscounts(p => ({ ...p, overallPct: e.target.value }))} onFocus={e => e.target.select()} onClick={e => e.target.select()} style={{ width: '100%', padding: '8px 12px', border: '1px solid #e4e6ef', borderRadius: 6, outline: 'none' }} />
 
               <div style={{ fontSize: '0.75rem', color: '#7e8299', marginTop: 4 }}>Applies to all items unless a brand override is set below.</div>
 

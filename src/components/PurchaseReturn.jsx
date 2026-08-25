@@ -17,6 +17,18 @@ function descForProduct(p) {
   return `${p.description || ''} ${p.category || ''} ${p.size_range || ''} ${p.gender || ''}`.replace(/\s+/g, ' ').trim();
 }
 
+function calcTotalPackets(items) {
+  let total = 0;
+  items.forEach(r => {
+    const qty = parseInt(r.packets) || 0;
+    const packing = parseInt(r.packingQty) || 1;
+    if (r.description && qty > 0) {
+      total += Math.floor(qty / packing);
+    }
+  });
+  return total;
+}
+
 function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit, isActive }) {
   const isEditing = !!returnToEdit;
 
@@ -797,6 +809,8 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                       <th style={{ width: 24, textAlign: 'center', padding: '0 2px' }}>No.</th>
                       <th style={{ width: 135, padding: '0 4px' }}>Item Code</th>
                       <th style={{ padding: '0 4px', textAlign: 'left' }}>Description</th>
+                      <th style={{ width: 45, textAlign: 'center', padding: '0 2px' }}>Packing</th>
+                      <th style={{ width: 45, textAlign: 'center', padding: '0 2px' }}>Pckts</th>
                       <th style={{ width: 50, textAlign: 'center', padding: '0 2px' }}>Qty</th>
                       <th style={{ width: 70, textAlign: 'right', padding: '0 4px' }}>Pre-Disc</th>
                       <th style={{ width: 50, textAlign: 'right', padding: '0 4px' }}>Disc%</th>
@@ -836,6 +850,14 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                             <span style={{ fontSize: '0.84rem', color: '#3f4254', whiteSpace: 'nowrap' }}>
                               {row.description || <span style={{ color: '#d1d5db' }}>—</span>}
                             </span>
+                          </td>
+
+                          <td style={{ textAlign: 'center', padding: '0 2px', fontWeight: 600, color: '#475569', fontSize: '0.85rem' }}>
+                            {row.description ? (row.packingQty || 1) : ''}
+                          </td>
+
+                          <td style={{ textAlign: 'center', padding: '0 2px', fontWeight: 700, color: '#b45309', fontSize: '0.88rem' }}>
+                            {row.description && parseInt(row.packets) > 0 ? Math.floor(parseInt(row.packets) / (parseInt(row.packingQty) || 1)) : ''}
                           </td>
 
                           <td style={{ textAlign: 'center', padding: '0 2px' }}>
@@ -918,7 +940,13 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
                   </tbody>
                   <tfoot style={{ position: 'sticky', bottom: 0, background: '#fff5f5', borderTop: '2px solid #fca5a5', zIndex: 10 }}>
                     <tr style={{ height: 30, fontSize: '0.85rem' }}>
-                      <td colSpan={3} style={{ textAlign: 'right', fontWeight: 800, color: '#991b1b', padding: '0 6px' }}>Total Pcs:</td>
+                      <td colSpan={3} style={{ textAlign: 'right', fontWeight: 800, color: '#991b1b', padding: '0 6px' }}>Total Pckts / Qty:</td>
+                      <td></td>
+                      <td style={{ textAlign: 'center', padding: '0 2px', fontSize: '0.95rem' }}>
+                        <span style={{ background: '#fef9c3', border: '1px solid #fbbf24', borderRadius: 4, color: '#78350f', padding: '1px 4px', fontWeight: 900 }}>
+                          {calcTotalPackets(items)}
+                        </span>
+                      </td>
                       <td style={{ textAlign: 'center', fontWeight: 900, color: '#991b1b', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 2px' }}>{totals.pkts}</td>
                       <td colSpan={5} style={{ textAlign: 'right', fontWeight: 800, color: '#991b1b', padding: '0 6px' }}>Net Subtotal:</td>
                       <td style={{ textAlign: 'right', fontWeight: 900, color: '#991b1b', padding: '0 4px' }}>

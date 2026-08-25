@@ -1,6 +1,6 @@
 const { ipcRenderer } = window.require('electron');
 
-export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances = {}, showSupplierBalance = true) {
+export function buildManufacturerStockHTML(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances = {}, showSupplierBalance = true) {
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
   const priceModeText = priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price';
@@ -24,22 +24,28 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
     let categoriesHtml = '';
 
     sup.categories.forEach(cat => {
-      let itemsHtml = cat.items.map(item => `
+      let itemsHtml = cat.items.map(item => {
+        const packing = parseInt(item.packing_qty) || 1;
+        const pkts = Math.floor((item.qty || 0) / packing);
+        return `
         <tr>
           <td style="border: 1px solid #000; padding: 4px 5px; font-weight: 900; text-align: center; font-size: 13px; color: #000;">${item.item_code}</td>
           <td style="border: 1px solid #000; padding: 4px 5px; font-size: 13px; font-weight: 600; white-space: normal; word-break: break-word;">
             ${`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim()}
           </td>
+          <td style="border: 1px solid #000; padding: 4px 5px; text-align: center; font-weight: 900; font-size: 13.5px; color: #b45309;">${fmt(pkts)}</td>
           <td style="border: 1px solid #000; padding: 4px 5px; text-align: center; font-weight: 900; font-size: 13.5px;">${fmt(item.qty)}</td>
           <td style="border: 1px solid #000; padding: 4px 5px; text-align: right; font-size: 13px; font-weight: bold;">${fmt2(Math.round((item.rate || 0) * 100) / 100)}</td>
           <td style="border: 1px solid #000; padding: 4px 5px; text-align: right; font-weight: 900; font-size: 13px; color: #000;">${fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
           <td style="border: 1px solid #000; padding: 4px 5px; text-align: right; font-weight: 900; font-size: 13.5px;">${fmt(item.value)}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
 
       categoriesHtml += `
         <tr style="background: #f1f5f9; font-weight: 900; font-size: 14px;">
           <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px;">CATEGORY: ${cat.name}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; color: #0369a1;">${fmt(cat.totalPackets)}</td>
           <td style="border: 1px solid #000; padding: 6px 8px; text-align: center;">${fmt(cat.totalQty)}</td>
           <td style="border: 1px solid #000; padding: 6px 8px;"></td>
           <td style="border: 1px solid #000; padding: 6px 8px;"></td>
@@ -53,13 +59,14 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
       <div style="margin-bottom: 20px;">
         <div style="background: #e2e8f0; border: 1.5px solid #000; padding: 8px 12px; font-weight: 900; font-size: 14.5px; display: flex; justify-content: space-between; page-break-after: avoid; break-after: avoid;">
           <span>SUPPLIER: ${sup.name}${balText}</span>
-          <span>Total Qty: ${fmt(sup.totalQty)} | Total Amount: PKR ${fmt(sup.totalValue)}</span>
+          <span>Pckts: ${fmt(sup.totalPackets)} | Total Qty: ${fmt(sup.totalQty)} | Total Amount: PKR ${fmt(sup.totalValue)}</span>
         </div>
         <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: -1px;">
           <thead>
             <tr style="background: #f1f5f9; font-weight: 900; border: 1px solid #000; font-size: 13px;">
               <th style="border: 1px solid #000; padding: 5px; width: 70px; text-align: center;">Item Code</th>
               <th style="border: 1px solid #000; padding: 5px; text-align: left;">Description / Brand</th>
+              <th style="border: 1px solid #000; padding: 5px; width: 45px; text-align: center;">Pckts</th>
               <th style="border: 1px solid #000; padding: 5px; width: 45px; text-align: center;">Qty</th>
               <th style="border: 1px solid #000; padding: 5px; width: 65px; text-align: right;">Cost Rate</th>
               <th style="border: 1px solid #000; padding: 5px; width: 65px; text-align: right;">Sale Rate</th>
@@ -70,6 +77,7 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
             ${categoriesHtml}
             <tr style="background: #e2e8f0; font-weight: 900; font-size: 14px;">
               <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">Supplier Subtotal:</td>
+              <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; color: #b45309;">${fmt(sup.totalPackets)}</td>
               <td style="border: 1px solid #000; padding: 6px 8px; text-align: center;">${fmt(sup.totalQty)}</td>
               <td style="border: 1px solid #000; padding: 6px 8px;"></td>
               <td style="border: 1px solid #000; padding: 6px 8px;"></td>
@@ -207,10 +215,11 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
 
     <table class="summary-header">
       <tr style="background: #f8fafc;">
-        <td style="width: 25%;"><b>Report Date:</b> ${dateStr}</td>
-        <td style="width: 25%;"><b>Valuation:</b> ${priceModeText}</td>
-        <td style="width: 25%;"><b>Total Stock Qty:</b> ${fmt(grandQty)}</td>
-        <td style="width: 25%; font-size: 13px; font-weight: 900; text-align: right;"><b>Grand Total Value:</b> PKR ${fmt(grandValue)}</td>
+        <td style="width: 20%;"><b>Report Date:</b> ${dateStr}</td>
+        <td style="width: 20%;"><b>Valuation:</b> ${priceModeText}</td>
+        <td style="width: 18%;"><b>Total Pckts:</b> ${fmt(grandPackets)}</td>
+        <td style="width: 18%;"><b>Total Qty:</b> ${fmt(grandQty)}</td>
+        <td style="width: 24%; font-size: 13px; font-weight: 900; text-align: right;"><b>Grand Total Value:</b> PKR ${fmt(grandValue)}</td>
       </tr>
     </table>
 
@@ -221,8 +230,8 @@ export function buildManufacturerStockHTML(groups, grandQty, grandValue, priceMo
   `;
 }
 
-export async function printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance = true) {
-  const html = buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
+export async function printManufacturerStock(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances, showSupplierBalance = true) {
+  const html = buildManufacturerStockHTML(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances, showSupplierBalance);
   try {
     return await ipcRenderer.invoke('print-manufacturer-stock-html', { html });
   } catch (err) {
@@ -231,8 +240,8 @@ export async function printManufacturerStock(groups, grandQty, grandValue, price
   }
 }
 
-export async function saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance = true) {
-  const html = buildManufacturerStockHTML(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
+export async function saveManufacturerStockPDF(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances, showSupplierBalance = true) {
+  const html = buildManufacturerStockHTML(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances, showSupplierBalance);
   const filename = `Manufacturer_Stock_Report_${new Date().toISOString().split('T')[0]}.pdf`;
   try {
     return await ipcRenderer.invoke('save-manufacturer-stock-pdf', { html, filename });

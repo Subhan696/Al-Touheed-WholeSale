@@ -137,8 +137,9 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
       setInvoiceNo(r.invoice_no || '');
       setCustomerName(r.customer_name || '');
       setNotes(r.notes || '');
-      setDiscount(r.discount || '');
-      setMiscCharges(r.misc_charges || '');
+      setDiscount(r.discount != null && parseFloat(r.discount) !== 0 ? String(r.discount) : (r.discount === 0 || r.discount === '0' ? '0' : ''));
+      setExtraDiscountPct(r.extra_disc_pct != null && parseFloat(r.extra_disc_pct) !== 0 ? String(r.extra_disc_pct) : (r.extra_disc_pct === 0 || r.extra_disc_pct === '0' ? '0' : ''));
+      setMiscCharges(r.misc_charges != null && parseFloat(r.misc_charges) !== 0 ? String(r.misc_charges) : (r.misc_charges === 0 || r.misc_charges === '0' ? '0' : ''));
 
       ipcRenderer.invoke('get-sales-return-items', r.id).then(rows => {
         setItems(rows.map(row => ({
@@ -158,6 +159,9 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
     }
   }, [returnToEdit]);
 
+  const handleSubmitRef = useRef();
+  useEffect(() => { handleSubmitRef.current = handleSubmit; });
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handler = (e) => {
@@ -165,7 +169,7 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
       if (e.key === 'F8') { e.preventDefault(); setStockSearchModalOpen(true); }
       if (e.key === 'F4') { e.preventDefault(); setCustomerModalOpen(true); }
       if (e.key === 'F9' && onNewReturn) { e.preventDefault(); onNewReturn(); }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); handleSubmit(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (handleSubmitRef.current) handleSubmitRef.current(); }
       if (e.key === 'Escape') {
         if (showScanDrop) setShowScanDrop(false);
         else if (showCodeRowDrop) setShowCodeRowDrop(false);
@@ -174,7 +178,7 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, items, returnDate, returnNo, invoiceNo, customerName, notes, isEditing, stockSearchModalOpen, showScanDrop, showCodeRowDrop, customerModalOpen]);
+  }, [isActive, stockSearchModalOpen, showScanDrop, showCodeRowDrop, customerModalOpen, onNewReturn, onExit]);
 
   const focusedItem = focusedItemIdx !== null ? items[focusedItemIdx] : null;
 
@@ -276,7 +280,13 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
     setShowCodeRowDrop(false);
     setActiveCodeRow(null);
     setFocusedItemIdx(idx);
-    setTimeout(() => packetsRefs.current[idx]?.focus(), 30);
+    setTimeout(() => {
+      if (idx < itemsRef.current.length - 1) {
+        codeRefs.current[idx + 1]?.focus();
+      } else {
+        scanRef.current?.focus();
+      }
+    }, 30);
 
     ipcRenderer.invoke('get-stock-single', product.item_code)
       .then(st => setItems(prev => prev.map((item, i) => i === idx ? { ...item, stock: st } : item)))
@@ -292,7 +302,11 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
         fillRow(idx, exact || codeRowResults[0]);
         return;
       }
-      packetsRefs.current[idx]?.focus();
+      if (idx < itemsRef.current.length - 1) {
+        codeRefs.current[idx + 1]?.focus();
+      } else {
+        scanRef.current?.focus();
+      }
       return;
     }
     if (e.key === 'Escape') { setShowCodeRowDrop(false); return; }
@@ -425,12 +439,7 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
     setScanResults([]);
     setShowScanDrop(false);
     setTimeout(() => {
-      if (packetsRefs.current[insertIdx]) {
-        packetsRefs.current[insertIdx].focus();
-        packetsRefs.current[insertIdx].select?.();
-      } else {
-        scanRef.current?.focus();
-      }
+      scanRef.current?.focus();
     }, 60);
 
     ipcRenderer.invoke('get-stock-single', product.item_code)
@@ -485,7 +494,9 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
       returnDate: dStr,
       returnNo, invoiceNo, customerName, items: dbItems, notes, userId: currentUser?.id,
       discount: parseFloat(discount) || 0,
-      miscCharges: parseFloat(miscCharges) || 0
+      extraDiscountPct: parseFloat(extraDiscountPct) || 0,
+      miscCharges: parseFloat(miscCharges) || 0,
+      totalAmount: totals.grandTotal
     };
 
     try {
@@ -815,7 +826,7 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
                               <th style={{ width: 36 }}>#</th>
                               <th style={{ width: '13%' }}>Code</th>
                               <th>Description</th>
-                              <th className="center" style={{ width: '9%' }}>Packing</th>
+                              <th className="center" style={{ width: '9%' }}>Qty</th>
                               <th className="right" style={{ width: '10%' }}>Rate</th>
                               <th className="right" style={{ width: '10%' }}>Disc.</th>
                               <th className="right" style={{ width: '12%' }}>Amount</th>
@@ -839,16 +850,6 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
                                     className="code-field"
                                     placeholder="Code"
                                   />
-                                  {showCodeRowDrop && activeCodeRow === idx && codeRowResults.length > 0 && (
-                                    <div className="autocomplete-dropdown">
-                                      {codeRowResults.map(p => (
-                                        <div key={p.id} className="suggestion-item" onMouseDown={e => { e.preventDefault(); fillRow(idx, p); }}>
-                                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#4f46e5', marginRight: 8 }}>{p.item_code}</span>
-                                          {descForProduct(p)}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
                                 </td>
 
                                 <td><span className="desc-main">{item.itemDescription}</span></td>

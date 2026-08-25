@@ -70,6 +70,265 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
   const [duplicateItem, setDuplicateItem] = useState(null);
   const [pendingPayload, setPendingPayload] = useState(null);
 
+  // Security Lock Gate State
+  const [gateModal, setGateModal] = useState({
+    open: false, title: '', onSuccess: null, password: '', otp: '', step: 'password', error: '', info: '', loading: false
+  });
+
+  // System-wide Feature Lock State (Profit Sheet & Manage Lists)
+  const [featureLocks, setFeatureLocks] = useState({});
+  const [lockPromptModal, setLockPromptModal] = useState({
+    open: false,
+    mode: 'access', // 'access', 'lock', 'unlock'
+    featureName: '',
+    featureLabel: '',
+    lockedByUsername: '',
+    password: '',
+    error: '',
+    loading: false,
+    onSuccess: null
+  });
+
+  const fetchFeatureLocks = async () => {
+    try {
+      const locks = await ipcRenderer.invoke('get-feature-locks');
+      setFeatureLocks(locks || {});
+    } catch (e) {
+      console.error('Failed to fetch feature locks:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchFeatureLocks();
+    const handleLocksChanged = () => fetchFeatureLocks();
+    ipcRenderer.on('feature-locks', handleLocksChanged);
+    return () => {
+      ipcRenderer.removeListener('feature-locks', handleLocksChanged);
+    };
+  }, []);
+
+  const handleOpenProfitSheet = () => {
+    const lock = featureLocks.profit_sheet;
+    if (lock && lock.isLocked) {
+      setLockPromptModal({
+        open: true,
+        mode: 'access',
+        featureName: 'profit_sheet',
+        featureLabel: 'Profit Sheet',
+        lockedByUsername: lock.lockedByUsername || 'System Admin',
+        password: '',
+        error: '',
+        loading: false,
+        onSuccess: () => setShowProfitModal(true)
+      });
+    } else {
+      setShowProfitModal(true);
+    }
+  };
+
+  const handleOpenManageList = (type) => {
+    if (type === 'lock_toggle') {
+      const lock = featureLocks.manage_lists;
+      if (lock && lock.isLocked) {
+        handleInitiateUnlockFeature('manage_lists', 'Manage Lists', lock.lockedByUsername);
+      } else {
+        handleInitiateLockFeature('manage_lists', 'Manage Lists');
+      }
+      return;
+    }
+    const lock = featureLocks.manage_lists;
+    if (lock && lock.isLocked) {
+      setLockPromptModal({
+        open: true,
+        mode: 'access',
+        featureName: 'manage_lists',
+        featureLabel: 'Manage Lists',
+        lockedByUsername: lock.lockedByUsername || 'System Admin',
+        password: '',
+        error: '',
+        loading: false,
+        onSuccess: () => openListManager(type)
+      });
+    } else {
+      openListManager(type);
+    }
+  };
+
+  const handleInitiateLockFeature = (featureName, featureLabel) => {
+    if (currentUser?.role !== 'superadmin') {
+      ipcRenderer.invoke('alert-dialog', '🔒 Only a Super Admin can lock system features.');
+      return;
+    }
+    setLockPromptModal({
+      open: true,
+      mode: 'lock',
+      featureName,
+      featureLabel,
+      lockedByUsername: currentUser?.username || 'Super Admin',
+      password: '',
+      error: '',
+      loading: false,
+      onSuccess: null
+    });
+  };
+
+  const handleInitiateUnlockFeature = (featureName, featureLabel, lockedByUsername) => {
+    if (currentUser?.role !== 'superadmin') {
+      ipcRenderer.invoke('alert-dialog', '🔒 Only a Super Admin can unlock system features.');
+      return;
+    }
+    setLockPromptModal({
+      open: true,
+      mode: 'unlock',
+      featureName,
+      featureLabel,
+      lockedByUsername: lockedByUsername || 'Super Admin',
+      password: '',
+      error: '',
+      loading: false,
+      onSuccess: null
+    });
+  };
+
+  const handleLockPromptSubmit = async (e, overrideAction) => {
+    if (e) e.preventDefault();
+    const actionType = overrideAction || (lockPromptModal.mode === 'lock' ? 'lock_system' : lockPromptModal.mode === 'unlock' ? 'unlock_all' : 'access_once');
+    if (!lockPromptModal.password) {
+      setLockPromptModal(prev => ({ ...prev, error: 'Password is required' }));
+      return;
+    }
+    setLockPromptModal(prev => ({ ...prev, loading: true, error: '' }));
+
+    try {
+      if (actionType === 'lock_system') {
+        const res = await ipcRenderer.invoke('lock-feature', {
+          featureName: lockPromptModal.featureName,
+          userId: currentUser?.id,
+          username: currentUser?.username,
+          password: lockPromptModal.password
+        });
+        if (!res.success) {
+          setLockPromptModal(prev => ({ ...prev, loading: false, error: res.error || 'Incorrect password' }));
+          return;
+        }
+        await fetchFeatureLocks();
+        setLockPromptModal({ open: false, mode: 'access', featureName: '', featureLabel: '', lockedByUsername: '', password: '', error: '', loading: false, onSuccess: null });
+      } else if (actionType === 'unlock_all') {
+        const res = await ipcRenderer.invoke('unlock-feature', {
+          featureName: lockPromptModal.featureName,
+          userId: currentUser?.id,
+          password: lockPromptModal.password
+        });
+        if (!res.success) {
+          setLockPromptModal(prev => ({ ...prev, loading: false, error: res.error || 'Incorrect password' }));
+          return;
+        }
+        await fetchFeatureLocks();
+        const cb = lockPromptModal.onSuccess;
+        setLockPromptModal({ open: false, mode: 'access', featureName: '', featureLabel: '', lockedByUsername: '', password: '', error: '', loading: false, onSuccess: null });
+        if (cb) cb();
+      } else {
+        const res = await ipcRenderer.invoke('verify-feature-lock-access', {
+          featureName: lockPromptModal.featureName,
+          password: lockPromptModal.password
+        });
+        if (!res.success) {
+          setLockPromptModal(prev => ({ ...prev, loading: false, error: res.error || 'Incorrect password' }));
+          return;
+        }
+        const cb = lockPromptModal.onSuccess;
+        setLockPromptModal({ open: false, mode: 'access', featureName: '', featureLabel: '', lockedByUsername: '', password: '', error: '', loading: false, onSuccess: null });
+        if (cb) cb();
+      }
+    } catch (err) {
+      setLockPromptModal(prev => ({ ...prev, loading: false, error: err.message }));
+    }
+  };
+
+  const requestLockAuth = (permKey, title, actionCallback) => {
+    const perms = Array.isArray(currentUser?.permissions)
+      ? currentUser.permissions
+      : (typeof currentUser?.permissions === 'string' ? currentUser.permissions.split(',').filter(Boolean) : []);
+    const isLocked = perms.includes(permKey);
+    if (!isLocked) {
+      actionCallback();
+      return;
+    }
+    setGateModal({
+      open: true,
+      title,
+      onSuccess: () => actionCallback(),
+      password: '',
+      otp: '',
+      step: 'password',
+      error: '',
+      info: '',
+      loading: false
+    });
+  };
+
+  const handleGatePasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!gateModal.password) { setGateModal(prev => ({ ...prev, error: 'Password is required' })); return; }
+    setGateModal(prev => ({ ...prev, loading: true, error: '' }));
+    try {
+      const res = await ipcRenderer.invoke('verify-password', { userId: currentUser?.id, password: gateModal.password });
+      if (!res.success) {
+        setGateModal(prev => ({ ...prev, loading: false, error: res.error || 'Invalid password' }));
+        return;
+      }
+      if (res.otpEnabled) {
+        setGateModal(prev => ({ ...prev, loading: true, info: 'Sending OTP code...' }));
+        const otpRes = await ipcRenderer.invoke('send-otp', { userId: currentUser?.id });
+        if (!otpRes.success) {
+          setGateModal(prev => ({ ...prev, loading: false, error: otpRes.error || 'Failed to send OTP' }));
+          return;
+        }
+        setGateModal(prev => ({
+          ...prev, loading: false, step: 'otp', info: otpRes.message || 'OTP code sent to your email', otp: ''
+        }));
+      } else {
+        const cb = gateModal.onSuccess;
+        setGateModal({ open: false, title: '', onSuccess: null, password: '', otp: '', step: 'password', error: '', info: '', loading: false });
+        if (cb) cb();
+      }
+    } catch (err) {
+      setGateModal(prev => ({ ...prev, loading: false, error: err.message }));
+    }
+  };
+
+  const handleGateOtpSubmit = async (e) => {
+    e.preventDefault();
+    if (!gateModal.otp || gateModal.otp.length !== 6) { setGateModal(prev => ({ ...prev, error: 'Please enter 6-digit OTP' })); return; }
+    setGateModal(prev => ({ ...prev, loading: true, error: '' }));
+    try {
+      const res = await ipcRenderer.invoke('verify-otp', { userId: currentUser?.id, otp: gateModal.otp });
+      if (!res.success) {
+        setGateModal(prev => ({ ...prev, loading: false, error: res.error || 'Invalid or expired OTP' }));
+        return;
+      }
+      const cb = gateModal.onSuccess;
+      setGateModal({ open: false, title: '', onSuccess: null, password: '', otp: '', step: 'password', error: '', info: '', loading: false });
+      if (cb) cb();
+    } catch (err) {
+      setGateModal(prev => ({ ...prev, loading: false, error: err.message }));
+    }
+  };
+
+  const handleGateResendOtp = async () => {
+    setGateModal(prev => ({ ...prev, loading: true, error: '', info: 'Resending OTP...' }));
+    try {
+      const otpRes = await ipcRenderer.invoke('send-otp', { userId: currentUser?.id });
+      if (!otpRes.success) {
+        setGateModal(prev => ({ ...prev, loading: false, error: otpRes.error || 'Failed to resend OTP' }));
+        return;
+      }
+      setGateModal(prev => ({ ...prev, loading: false, info: otpRes.message || 'OTP re-sent to your email' }));
+    } catch (err) {
+      setGateModal(prev => ({ ...prev, loading: false, error: err.message }));
+    }
+  };
+
   // Session tracking
   const [sessionId, setSessionId] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
@@ -837,9 +1096,38 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
           <button type="button" onClick={() => setSpecialMode(!specialMode)} className="btn" style={{ background: specialMode ? '#6df166' : '#49f843ff', color: '#000', border: '1px solid #2af31f', fontWeight: 700 }}>
             {specialMode ? '⚡ Fast ON' : '⚡ Fast'}
           </button>
-          <button type="button" onClick={() => setShowProfitModal(true)} className="btn btn-secondary">📊 Profit Sheet</button>
-          <select value="" onChange={e => { if (e.target.value) openListManager(e.target.value); }} className="btn btn-secondary" style={{ appearance: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-            <option value="" disabled>⚙️ Manage Lists...</option>
+          <button
+            type="button"
+            onClick={handleOpenProfitSheet}
+            className="btn btn-secondary"
+            title={featureLocks.profit_sheet?.isLocked ? `🔒 Profit Sheet is locked by ${featureLocks.profit_sheet.lockedByUsername}` : 'Profit Sheet'}
+            style={{
+              whiteSpace: 'nowrap',
+              ...(featureLocks.profit_sheet?.isLocked ? { border: '1px solid #ef4444', color: '#dc2626', background: '#fef2f2', fontWeight: 700 } : {})
+            }}
+          >
+            {featureLocks.profit_sheet?.isLocked ? '🔒 Profit Sheet' : '📊 Profit Sheet'}
+          </button>
+          <select
+            value=""
+            onChange={e => {
+              const val = e.target.value;
+              if (val) handleOpenManageList(val);
+            }}
+            className="btn btn-secondary"
+            title={featureLocks.manage_lists?.isLocked ? `🔒 Manage Lists is locked by ${featureLocks.manage_lists.lockedByUsername}` : 'Manage Lists'}
+            style={{
+              appearance: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+              width: 140, maxWidth: 140, textOverflow: 'ellipsis', overflow: 'hidden',
+              ...(featureLocks.manage_lists?.isLocked ? { border: '1px solid #ef4444', color: '#dc2626', background: '#fef2f2', fontWeight: 700 } : {})
+            }}
+          >
+            <option value="" disabled>
+              {featureLocks.manage_lists?.isLocked ? '🔒 Manage Lists...' : '⚙️ Manage Lists...'}
+            </option>
+            <option value="lock_toggle" style={{ fontWeight: 700, color: featureLocks.manage_lists?.isLocked ? '#2563eb' : '#dc2626' }}>
+              {featureLocks.manage_lists?.isLocked ? '🔓 Unlock Lists' : '🔒 Lock Lists'}
+            </option>
             <option value="brands">🏢 Brands</option>
             <option value="genders">👔 Genders</option>
             <option value="categories">🏷️ Categories</option>
@@ -1255,6 +1543,23 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #e4e6ef', background: '#f8fafc', gap: 10 }}>
                 <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1rem', flexShrink: 0 }}>📊 Profit Sheet</h3>
+                {featureLocks.profit_sheet?.isLocked ? (
+                  <button
+                    type="button"
+                    onClick={() => handleInitiateUnlockFeature('profit_sheet', 'Profit Sheet', featureLocks.profit_sheet.lockedByUsername)}
+                    style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}
+                  >
+                    🔓 Locked by {featureLocks.profit_sheet.lockedByUsername} (Unlock)
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleInitiateLockFeature('profit_sheet', 'Profit Sheet')}
+                    style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}
+                  >
+                    🔒 Lock for All
+                  </button>
+                )}
                 {profitSavedMsg && (
                   <span style={{ padding: '4px 12px', borderRadius: 6, fontWeight: 700, fontSize: '0.82rem', background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', animation: 'fadeIn 0.2s' }}>{profitSavedMsg}</span>
                 )}
@@ -1540,7 +1845,26 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
         <div className="modal-overlay" onClick={() => { setShowManageModal(false); setEditingListItemId(null); setManageListSearchQuery(''); }}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <button className="modal-close" onClick={() => { setShowManageModal(false); setEditingListItemId(null); setManageListSearchQuery(''); }}>✕</button>
-            <h3 style={{ margin: "0 0 16px", fontSize: "1.1rem", fontWeight: 700, textTransform: "capitalize" }}>⚙️ Manage {manageListType.replace("_", " ")}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, textTransform: "capitalize" }}>⚙️ Manage {manageListType.replace("_", " ")}</h3>
+              {featureLocks.manage_lists?.isLocked ? (
+                <button
+                  type="button"
+                  onClick={() => handleInitiateUnlockFeature('manage_lists', 'Manage Lists', featureLocks.manage_lists.lockedByUsername)}
+                  style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, marginRight: 24 }}
+                >
+                  🔓 Locked by {featureLocks.manage_lists.lockedByUsername} (Unlock)
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleInitiateLockFeature('manage_lists', 'Manage Lists')}
+                  style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, marginRight: 24 }}
+                >
+                  🔒 Lock for All
+                </button>
+              )}
+            </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <input ref={el => refs.current.manageListInput = el} type={manageListType === "packings" ? "number" : "text"} value={newItemName}
                 onChange={e => setNewItemName(e.target.value)}
@@ -1762,6 +2086,206 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                 style={{ padding: '7px 16px', background: '#2563eb', color: '#fff', border: '1px solid #1d4ed8', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.84rem' }}
               >➕ Save as New</button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Password/OTP Security Gate Modal */}
+      {gateModal.open && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: 400, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1.1rem', color: '#1e293b' }}>
+                {gateModal.step === 'otp' ? '🔐 OTP Verification' : '🔒 Security Verification'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setGateModal({ open: false, title: '', onSuccess: null, password: '', otp: '', step: 'password', error: '', info: '', loading: false })}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#94a3b8' }}
+              >✕</button>
+            </div>
+
+            <p style={{ margin: '0 0 16px', color: '#64748b', fontSize: '0.85rem' }}>
+              <strong>{gateModal.title}</strong> requires authentication to proceed.
+            </p>
+
+            {gateModal.info && (
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '10px 12px', color: '#1e40af', fontSize: '0.82rem', marginBottom: 14 }}>
+                {gateModal.info}
+              </div>
+            )}
+
+            {gateModal.error && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '10px 12px', color: '#991b1b', fontSize: '0.82rem', marginBottom: 14, fontWeight: 600 }}>
+                ❌ {gateModal.error}
+              </div>
+            )}
+
+            {gateModal.step === 'password' ? (
+              <form onSubmit={handleGatePasswordSubmit}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#475569', marginBottom: 6, textTransform: 'uppercase' }}>
+                    Enter Account Password
+                  </label>
+                  <input
+                    type="password"
+                    autoFocus
+                    value={gateModal.password}
+                    onChange={e => setGateModal(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="••••••••"
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.95rem', boxSizing: 'border-box' }}
+                    disabled={gateModal.loading}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setGateModal({ open: false, title: '', onSuccess: null, password: '', otp: '', step: 'password', error: '', info: '', loading: false })}
+                    style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
+                  >Cancel</button>
+                  <button
+                    type="submit"
+                    disabled={gateModal.loading || !gateModal.password}
+                    style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+                  >
+                    {gateModal.loading ? 'Verifying...' : 'Verify Password'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleGateOtpSubmit}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#475569', marginBottom: 6, textTransform: 'uppercase' }}>
+                    Enter 6-Digit OTP Code
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    maxLength={6}
+                    value={gateModal.otp}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      setGateModal(prev => ({ ...prev, otp: val }));
+                    }}
+                    placeholder="000000"
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '1.3rem', letterSpacing: '6px', textAlign: 'center', fontWeight: 700, boxSizing: 'border-box' }}
+                    disabled={gateModal.loading}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <button
+                    type="button"
+                    onClick={handleGateResendOtp}
+                    disabled={gateModal.loading}
+                    style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, textDecoration: 'underline' }}
+                  >📧 Resend OTP</button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => setGateModal({ open: false, title: '', onSuccess: null, password: '', otp: '', step: 'password', error: '', info: '', loading: false })}
+                      style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
+                    >Cancel</button>
+                    <button
+                      type="submit"
+                      disabled={gateModal.loading || gateModal.otp.length !== 6}
+                      style={{ padding: '8px 20px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+                    >
+                      {gateModal.loading ? 'Verifying...' : 'Verify OTP'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* System Feature Lock Security Modal */}
+      {lockPromptModal.open && ReactDOM.createPortal(
+        <div className="modal-overlay" style={{ zIndex: 99999 }} onClick={() => setLockPromptModal(prev => ({ ...prev, open: false }))}>
+          <div className="modal-content" style={{ maxWidth: 440, width: '92%', padding: 24, borderRadius: 12 }} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>
+                {lockPromptModal.mode === 'lock' ? '🔒' : lockPromptModal.mode === 'unlock' ? '🔓' : '🔒'}
+              </div>
+              <h3 style={{ margin: '0 0 6px', fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>
+                {lockPromptModal.mode === 'lock' ? `Lock ${lockPromptModal.featureLabel}` : lockPromptModal.mode === 'unlock' ? `Unlock ${lockPromptModal.featureLabel}` : `${lockPromptModal.featureLabel} Locked`}
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.88rem', color: '#64748b', lineHeight: 1.4 }}>
+                {lockPromptModal.mode === 'lock'
+                  ? `Enter Super Admin password (${currentUser?.username || 'Super Admin'}) to lock ${lockPromptModal.featureLabel} system-wide.`
+                  : lockPromptModal.mode === 'unlock'
+                    ? `Enter Super Admin password to UNLOCK ${lockPromptModal.featureLabel} system-wide.`
+                    : `This feature is locked system-wide. Enter Super Admin password to access ${lockPromptModal.featureLabel}.`}
+              </p>
+            </div>
+
+            {lockPromptModal.error && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, fontSize: '0.84rem', fontWeight: 600, marginBottom: 14, textAlign: 'center' }}>
+                {lockPromptModal.error}
+              </div>
+            )}
+
+            <form onSubmit={e => handleLockPromptSubmit(e)}>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#475569', marginBottom: 6, textTransform: 'uppercase' }}>
+                  Super Admin Password
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  value={lockPromptModal.password}
+                  onChange={e => setLockPromptModal(prev => ({ ...prev, password: e.target.value, error: '' }))}
+                  placeholder="Enter password..."
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '1rem', outline: 'none', boxSizing: 'border-box' }}
+                  disabled={lockPromptModal.loading}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setLockPromptModal(prev => ({ ...prev, open: false }))}
+                  disabled={lockPromptModal.loading}
+                  style={{ padding: '9px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
+                >
+                  Cancel
+                </button>
+
+                {lockPromptModal.mode === 'access' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleLockPromptSubmit(null, 'access_once')}
+                      disabled={lockPromptModal.loading || !lockPromptModal.password}
+                      style={{ padding: '9px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+                    >
+                      {lockPromptModal.loading ? 'Verifying...' : '🔑 Access Once'}
+                    </button>
+                    {currentUser?.role === 'superadmin' && (
+                      <button
+                        type="button"
+                        onClick={() => handleLockPromptSubmit(null, 'unlock_all')}
+                        disabled={lockPromptModal.loading || !lockPromptModal.password}
+                        style={{ padding: '9px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+                      >
+                        🔓 Unlock for All
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={lockPromptModal.loading || !lockPromptModal.password}
+                    style={{ padding: '9px 20px', background: lockPromptModal.mode === 'lock' ? '#dc2626' : '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+                  >
+                    {lockPromptModal.loading ? 'Saving...' : lockPromptModal.mode === 'lock' ? 'Lock System-Wide' : 'Unlock System-Wide'}
+                  </button>
+                )}
+              </div>
+            </form>
           </div>
         </div>,
         document.body

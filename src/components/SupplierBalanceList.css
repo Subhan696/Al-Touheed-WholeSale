@@ -1,0 +1,309 @@
+.supplier-balance-list-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #f8fafc;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #1e293b;
+  overflow: hidden;
+}
+
+.sbl-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.sbl-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sbl-toolbar-left h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.sbl-count-badge {
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.sbl-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sbl-search-input {
+  padding: 7px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  width: 240px;
+  outline: none;
+}
+
+.sbl-select-input {
+  padding: 7px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  outline: none;
+  background: #f8fafc;
+}
+
+.sbl-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.sbl-btn-refresh {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.sbl-btn-refresh:hover {
+  background: #e2e8f0;
+}
+
+.sbl-btn-print {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.sbl-btn-print:hover {
+  background: #1d4ed8;
+}
+
+/* Paper Sheet Layout */
+.sbl-sheet-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: #f1f5f9;
+}
+
+.sbl-paper {
+  background: #ffffff;
+  width: 100%;
+  max-width: 940px;
+  height: auto;
+  min-height: max-content;
+  padding: 32px 40px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 40px;
+}
+
+.sbl-paper-header {
+  margin-bottom: 14px;
+}
+
+.sbl-paper-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 6px;
+}
+
+.sbl-paper-asof {
+  font-size: 0.78rem;
+  color: #475569;
+  font-family: 'Times New Roman', Times, serif;
+}
+
+.sbl-paper-main-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  font-family: 'Times New Roman', Times, serif;
+  text-decoration: underline;
+  letter-spacing: 0.5px;
+}
+
+.sbl-paper-page-num {
+  font-size: 0.78rem;
+  color: #475569;
+  font-family: 'Times New Roman', Times, serif;
+}
+
+.sbl-company-block {
+  text-align: center;
+  font-family: 'Times New Roman', Times, serif;
+  margin-bottom: 10px;
+}
+
+.sbl-company-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.sbl-company-address,
+.sbl-company-city {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-top: 2px;
+}
+
+.sbl-paper-sub-header {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #000000;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+  font-size: 0.82rem;
+  font-family: 'Times New Roman', Times, serif;
+}
+
+.sbl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.88rem;
+  margin-bottom: 20px;
+  border: 1px solid #000000;
+}
+
+.sbl-table th {
+  border: 1px solid #000000;
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 700;
+  color: #000000;
+  background: #f8fafc;
+}
+
+.sbl-table td {
+  border: 1px solid #000000;
+  padding: 5px 8px;
+  color: #000000;
+}
+
+.sbl-supp-name-cell {
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.sbl-val-box {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sbl-amount-num {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.dr-text {
+  color: #047857 !important; /* Bold Green for Debit / Lene Hain */
+}
+
+.cr-text {
+  color: #dc2626 !important; /* Bold Red for Credit / Dene Hain */
+}
+
+.sbl-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: 'Segoe UI', sans-serif;
+  white-space: nowrap;
+}
+
+.sbl-tag-dr {
+  background: #d1fae5;
+  color: #047857;
+  border: 1px solid #6ee7b7;
+}
+
+.sbl-tag-cr {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.sbl-tfoot-row td {
+  border: 1px solid #000000;
+  padding: 6px 8px;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 0.88rem;
+  background: #f8fafc;
+}
+
+.sbl-net-bal {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.sbl-empty-row {
+  text-align: center;
+  padding: 24px;
+  color: #64748b;
+  font-style: italic;
+}
+
+.sbl-loading {
+  text-align: center;
+  padding: 40px;
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+/* Print CSS */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .supplier-balance-list-page {
+    height: auto !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+  .sbl-sheet-container {
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+  .sbl-paper {
+    box-shadow: none !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    min-height: auto !important;
+    border: none !important;
+    margin-bottom: 0 !important;
+  }
+  .sbl-tag {
+    display: none !important;
+  }
+}

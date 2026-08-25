@@ -44,24 +44,35 @@ export default function GLVouchers() {
   const [viewDetails, setViewDetails] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
-  const [startDate, setStartDate] = useState(getLocalDateString);
-  const [endDate, setEndDate] = useState(getLocalDateString);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
-    fetchVouchers(startDate, endDate);
-    const handleUpdate = () => fetchVouchers(startDate, endDate);
+    fetchVouchers(startDate, endDate, search);
+    const handleUpdate = () => fetchVouchers(startDate, endDate, search);
     ipcRenderer.on('vouchers', handleUpdate);
     return () => ipcRenderer.removeListener('vouchers', handleUpdate);
   }, []);
 
-  const fetchVouchers = async (sDate = startDate, eDate = endDate) => {
+  const fetchVouchers = async (sDate = startDate, eDate = endDate, sTerm = search) => {
     try {
-      const res = await ipcRenderer.invoke('get-vouchers', { startDate: sDate, endDate: eDate });
+      const res = await ipcRenderer.invoke('get-vouchers', { startDate: sDate, endDate: eDate, searchTerm: sTerm });
       setVouchers(res || []);
     } catch (err) {
       console.error(err);
     }
   };
+
+  const filteredVouchers = useMemo(() => {
+    const s = search.toLowerCase().trim();
+    if (!s) return vouchers;
+    return vouchers.filter(v => {
+      const vNo = (v.voucher_no || '').toLowerCase();
+      const vType = (v.voucher_type || '').toLowerCase();
+      const vTypeName = (VOUCHER_TYPE_NAMES[v.voucher_type] || '').toLowerCase();
+      const vRemarks = (v.remarks || '').toLowerCase();
+      return vNo.includes(s) || vType.includes(s) || vTypeName.includes(s) || vRemarks.includes(s);
+    });
+  }, [vouchers, search]);
 
   const handleDelete = async (id) => {
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this transaction and all its details permanently?');
@@ -103,7 +114,7 @@ export default function GLVouchers() {
       <GLVoucherEntry
         voucherToEdit={editingVoucher}
         onCancel={() => { setShowEntry(false); setEditingVoucher(null); }}
-        onSuccess={() => { setShowEntry(false); setEditingVoucher(null); fetchVouchers(startDate, endDate); }}
+        onSuccess={() => { setShowEntry(false); setEditingVoucher(null); fetchVouchers(startDate, endDate, search); }}
       />
     );
   }
@@ -120,13 +131,32 @@ export default function GLVouchers() {
     <div className="p-4 bg-slate-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Transaction Entry</h1>
-        <button onClick={handleNewTransaction} className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700">
+        <button onClick={handleNewTransaction} className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 font-semibold">
           + New Transaction
         </button>
       </div>
 
       <div className="bg-white p-4 rounded shadow mb-6 border border-slate-200 flex flex-wrap gap-4 items-end justify-between">
         <div className="flex gap-4 items-end flex-wrap">
+          <div className="flex gap-2 items-end">
+            <div>
+              <label className="block text-sm font-semibold mb-1">Search Transactions</label>
+              <input
+                type="text"
+                placeholder="Voucher #, Remarks, or Account..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') fetchVouchers(startDate, endDate, search); }}
+                className="border p-2 rounded text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={() => fetchVouchers(startDate, endDate, search)}
+              className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 text-sm font-semibold flex items-center gap-1"
+            >
+              🔍 Search
+            </button>
+          </div>
           <div>
             <label className="block text-sm font-semibold mb-1">Start Date</label>
             <input
@@ -134,7 +164,7 @@ export default function GLVouchers() {
               value={startDate}
               onChange={e => {
                 setStartDate(e.target.value);
-                fetchVouchers(e.target.value, endDate);
+                fetchVouchers(e.target.value, endDate, search);
               }}
               className="border p-2 rounded text-sm"
             />
@@ -146,13 +176,13 @@ export default function GLVouchers() {
               value={endDate}
               onChange={e => {
                 setEndDate(e.target.value);
-                fetchVouchers(startDate, e.target.value);
+                fetchVouchers(startDate, e.target.value, search);
               }}
               className="border p-2 rounded text-sm"
             />
           </div>
           <button
-            onClick={() => fetchVouchers(startDate, endDate)}
+            onClick={() => fetchVouchers(startDate, endDate, search)}
             className="bg-slate-800 text-white px-4 py-2 rounded shadow hover:bg-slate-900 text-sm font-semibold"
           >
             🔍 Filter
@@ -165,7 +195,7 @@ export default function GLVouchers() {
               const today = getLocalDateString();
               setStartDate(today);
               setEndDate(today);
-              fetchVouchers(today, today);
+              fetchVouchers(today, today, search);
             }}
             className="bg-blue-50 text-blue-700 border border-blue-300 px-3 py-2 rounded text-xs font-bold hover:bg-blue-100"
           >
@@ -177,7 +207,7 @@ export default function GLVouchers() {
               const today = getLocalDateString();
               setStartDate(firstDay);
               setEndDate(today);
-              fetchVouchers(firstDay, today);
+              fetchVouchers(firstDay, today, search);
             }}
             className="bg-indigo-50 text-indigo-700 border border-indigo-300 px-3 py-2 rounded text-xs font-bold hover:bg-indigo-100"
           >
@@ -187,7 +217,8 @@ export default function GLVouchers() {
             onClick={() => {
               setStartDate('');
               setEndDate('');
-              fetchVouchers('', '');
+              setSearch('');
+              fetchVouchers('', '', '');
             }}
             className="bg-amber-50 text-amber-700 border border-amber-300 px-3 py-2 rounded text-xs font-bold hover:bg-amber-100"
           >
@@ -208,7 +239,7 @@ export default function GLVouchers() {
             </tr>
           </thead>
           <tbody>
-            {vouchers.map(v => (
+            {filteredVouchers.map(v => (
               <tr key={v.id} className="border-b hover:bg-slate-50">
                 <td className="py-2 px-4">{formatDateDMY(v.voucher_date)}</td>
                 <td className="py-2 px-4 font-semibold text-blue-700">{v.voucher_no}</td>
@@ -227,8 +258,8 @@ export default function GLVouchers() {
                 </td>
               </tr>
             ))}
-            {vouchers.length === 0 && (
-              <tr><td colSpan="5" className="text-center py-4 text-slate-500">No transactions found in this date range.</td></tr>
+            {filteredVouchers.length === 0 && (
+              <tr><td colSpan="5" className="text-center py-4 text-slate-500">No transactions found matching your search.</td></tr>
             )}
           </tbody>
         </table>

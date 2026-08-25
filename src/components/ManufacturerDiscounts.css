@@ -92,7 +92,16 @@
   border-collapse: collapse;
 }
 
+.md-grid-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
 .md-grid-table th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   background: #f1f5f9;
   padding: 12px;
   text-align: left;

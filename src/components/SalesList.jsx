@@ -27,14 +27,14 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
     try {
       const data = await ipcRenderer.invoke('get-sales');
       setRows(data || []);
-    } catch {}
+    } catch { }
     setLoading(false);
   };
 
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
     return rows.filter(r => {
-      const matchSearch = !search || 
+      const matchSearch = !search ||
         (r.invoice_no || '').toLowerCase().includes(s) ||
         (r.customer_name || '').toLowerCase().includes(s);
 
@@ -122,12 +122,12 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Invoice</th>
-                <th>Date & Time</th>
-                <th>Customer</th>
-                <th>User</th>
-                <th style={{ textAlign: 'center' }}>Total Qty</th>
-                <th style={{ textAlign: 'right' }}>Total Amount</th>
+                <th style={{ width: 60, fontWeight: 800 }}>Invoice</th>
+                <th style={{ width: 140, fontWeight: 800 }}>Date & Time</th>
+                <th style={{ width: 250, fontWeight: 800 }}>Customer</th>
+                <th style={{ width: 100, fontWeight: 800 }}>User</th>
+                <th style={{ textAlign: 'center', width: 80, fontWeight: 800 }}>Total Qty</th>
+                <th style={{ textAlign: 'right', width: 100, fontWeight: 800 }}>Total Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -140,26 +140,27 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
                   <tr
                     key={s.id}
                     ref={idx === selectedIndex ? selectedRowRef : null}
-                    onClick={() => onEditSale && onEditSale(s)}
+                    onClick={() => setSelectedIndex(idx)}
+                    onDoubleClick={() => onEditSale && onEditSale(s)}
                     className={`sales-row ${onEditSale ? 'clickable-row' : ''} ${idx === selectedIndex ? 'selected-row' : ''}`}
                   >
-                    <td className="font-bold">{s.invoice_no || `INV-${s.id}`}</td>
-                    <td>
+                    <td style={{ fontWeight: 800, color: '#1e293b' }}>{s.invoice_no || `INV-${s.id}`}</td>
+                    <td style={{ fontWeight: 600, color: '#475569', fontSize: '0.86rem' }}>
                       {isTimeAvailable
                         ? `${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}, ${saleDateTime.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`
                         : `${String(saleDateTime.getDate()).padStart(2, '0')}-${String(saleDateTime.getMonth() + 1).padStart(2, '0')}-${saleDateTime.getFullYear()}`}
                     </td>
-                    <td style={{ fontWeight: 600, color: '#1e40af' }}>{s.customer_name || 'Walk-in'}</td>
-                    <td>{s.username || '-'}</td>
-                    <td className="center-text">{totalQty}</td>
-                    <td className="right-text">PKR {Math.round(netAmount(s)).toLocaleString()}</td>
+                    <td style={{ fontWeight: 700, color: '#1e40af' }}>{s.customer_name || 'Walk-in'}</td>
+                    <td style={{ fontWeight: 600, color: '#475569' }}>{s.username || '-'}</td>
+                    <td className="center-text" style={{ fontWeight: 700 }}>{totalQty}</td>
+                    <td className="right-text" style={{ fontWeight: 800, color: '#047857', fontSize: '0.92rem' }}>{Math.round(netAmount(s)).toLocaleString()}</td>
                   </tr>
                 );
               })}
-              <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f8fafc' }}>
-                <td colSpan={4} className="right-text"><strong>Total Sales</strong></td>
-                <td className="center-text"><strong>{totalPackets}</strong></td>
-                <td className="right-text"><strong>PKR {Math.round(total).toLocaleString()}</strong></td>
+              <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
+                <td colSpan={4} className="right-text" style={{ fontWeight: 800 }}>Total Sales</td>
+                <td className="center-text" style={{ fontWeight: 900, fontSize: '0.98rem' }}>{totalPackets}</td>
+                <td className="right-text" style={{ fontWeight: 900, color: '#047857', fontSize: '1.02rem' }}>{Math.round(total).toLocaleString()}</td>
               </tr>
             </tbody>
           </table>

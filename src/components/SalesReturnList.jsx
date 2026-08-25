@@ -27,7 +27,7 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
     try {
       const data = await ipcRenderer.invoke('get-sales-returns');
       setRows(data || []);
-    } catch {}
+    } catch { }
     setLoading(false);
   };
 
@@ -130,13 +130,13 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
           <table className="data-table">
             <thead>
               <tr>
-                <th>Return #</th>
-                <th>Date & Time</th>
-                <th>Customer</th>
-                <th>User</th>
-                <th style={{ textAlign: 'center' }}>Total Qty</th>
-                <th style={{ textAlign: 'right' }}>Total Amount</th>
-                <th style={{ textAlign: 'center', width: 70 }}>Actions</th>
+                <th style={{ width: 60, fontWeight: 800 }}>Return #</th>
+                <th style={{ width: 140, fontWeight: 800 }}>Date & Time</th>
+                <th style={{ width: 250, fontWeight: 800 }}>Customer</th>
+                <th style={{ width: 80, fontWeight: 800 }}>User</th>
+                <th style={{ textAlign: 'center', width: 70, fontWeight: 800 }}>Total Qty</th>
+                <th style={{ textAlign: 'right', width: 100, fontWeight: 800 }}>Total Amount</th>
+                <th style={{ textAlign: 'center', width: 35, fontWeight: 800 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -149,19 +149,20 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
                   <tr
                     key={r.id}
                     ref={idx === selectedIndex ? selectedRowRef : null}
-                    onClick={() => onEditReturn && onEditReturn(r)}
+                    onClick={() => setSelectedIndex(idx)}
+                    onDoubleClick={() => onEditReturn && onEditReturn(r)}
                     className={`sales-row ${onEditReturn ? 'clickable-row' : ''} ${idx === selectedIndex ? 'selected-row' : ''}`}
                   >
-                    <td style={{ fontWeight: 700, color: '#dc2626', fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>{r.return_no || `RET-${r.id}`}</td>
-                    <td>
+                    <td style={{ fontWeight: 800, color: '#dc2626' }}>{r.return_no || `RET-${r.id}`}</td>
+                    <td style={{ fontWeight: 600, color: '#475569', fontSize: '0.86rem' }}>
                       {isTimeAvailable
                         ? `${String(returnDateTime.getDate()).padStart(2, '0')}-${String(returnDateTime.getMonth() + 1).padStart(2, '0')}-${returnDateTime.getFullYear()}, ${returnDateTime.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`
                         : `${String(returnDateTime.getDate()).padStart(2, '0')}-${String(returnDateTime.getMonth() + 1).padStart(2, '0')}-${returnDateTime.getFullYear()}`}
                     </td>
-                    <td style={{ fontWeight: 600, color: '#1e40af' }}>{r.customer_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>—</span>}</td>
-                    <td>{r.username || '-'}</td>
-                    <td className="center-text">{totalQty}</td>
-                    <td className="right-text" style={{ color: '#dc2626', fontWeight: 600 }}>PKR {Math.round(netAmount(r)).toLocaleString()}</td>
+                    <td style={{ fontWeight: 700, color: '#1e40af' }}>{r.customer_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>—</span>}</td>
+                    <td style={{ fontWeight: 600, color: '#475569' }}>{r.username || '-'}</td>
+                    <td className="center-text" style={{ fontWeight: 700 }}>{totalQty}</td>
+                    <td className="right-text" style={{ color: '#dc2626', fontWeight: 800, fontSize: '0.92rem' }}>{Math.round(netAmount(r)).toLocaleString()}</td>
                     <td className="center-text" onClick={e => e.stopPropagation()}>
                       <button className="btn-icon" onClick={e => handleDelete(r.id, e)} style={{ color: '#dc2626' }}>🗑️</button>
                     </td>
@@ -169,9 +170,9 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
                 );
               })}
               <tr style={{ borderTop: '2px solid #fecdd3', background: '#fff5f5' }}>
-                <td colSpan={4} className="right-text"><strong>Total Returns ({filtered.length})</strong></td>
-                <td className="center-text"><strong>{totalPackets}</strong></td>
-                <td className="right-text"><strong style={{ color: '#dc2626' }}>PKR {Math.round(total).toLocaleString()}</strong></td>
+                <td colSpan={4} className="right-text" style={{ fontWeight: 800 }}>Total Returns ({filtered.length})</td>
+                <td className="center-text" style={{ fontWeight: 900, fontSize: '0.98rem' }}>{totalPackets}</td>
+                <td className="right-text" style={{ fontWeight: 900, color: '#dc2626', fontSize: '1.02rem' }}>{Math.round(total).toLocaleString()}</td>
                 <td></td>
               </tr>
             </tbody>

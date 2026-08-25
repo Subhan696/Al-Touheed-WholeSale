@@ -29,14 +29,18 @@ import GLAccounts from './components/GLAccounts';
 import GLVouchers from './components/GLVouchers';
 import GLLedgerReport from './components/GLLedgerReport';
 import GLCashActivityReport from './components/GLCashActivityReport';
+import CustomerBalanceList from './components/CustomerBalanceList';
+import SupplierBalanceList from './components/SupplierBalanceList';
+import ItemAudit from './components/ItemAudit';
 import './App.css';
 
 const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWindow, hasPermission, handleEditProduct, handleEditPurchase, handleEditReturn, handleEditSale, handleEditSalesReturn, setShowLayoutTabs }) => {
   const tabKey = win.rootKey || win.key;
 
   if (tabKey === 'new-item') return <NewItemForm editItemData={win.editItemData} onClearEdit={closeTopWindow} isActive={isActive} currentUser={currentUser} openWindow={openWindow} />;
-  if (tabKey === 'products') return <ProductList onEditProduct={hasPermission('manage_products') ? handleEditProduct : undefined} currentUser={currentUser} isActive={isActive} />;
-  if (tabKey === 'stock') return <StockList isActive={isActive} currentUser={currentUser} />;
+  if (tabKey === 'products') return <ProductList onEditProduct={hasPermission('manage_products') ? handleEditProduct : undefined} currentUser={currentUser} isActive={isActive} onOpenAudit={(itemCode) => openWindow('item-audit', { initialItemCode: itemCode })} />;
+  if (tabKey === 'stock') return <StockList isActive={isActive} currentUser={currentUser} onOpenAudit={(itemCode) => openWindow('item-audit', { initialItemCode: itemCode })} />;
+  if (tabKey === 'item-audit') return <ItemAudit initialItemCode={win.initialItemCode} onExit={closeTopWindow} isActive={isActive} />;
 
   if (tabKey === 'new-purchase') return (
     <NewPurchase currentUser={currentUser} purchaseToEdit={win.purchaseToEdit}
@@ -86,6 +90,8 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
   if (tabKey === 'customers') return <Customers currentUser={currentUser} onSelectCustomerLedger={(c) => openWindow('ledgers', { initialTab: 'customer', initialCustomer: c })} />;
   if (tabKey === 'ledgers') return <Ledgers currentUser={currentUser} initialTab={win.initialTab || 'customer'} initialCustomer={win.initialCustomer} isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'customer-ledger') return <Ledgers currentUser={currentUser} initialTab="customer" initialCustomer={win.initialCustomer} isActive={isActive} hasPermission={hasPermission} />;
+  if (tabKey === 'customer-balance-list') return <CustomerBalanceList currentUser={currentUser} isActive={isActive} />;
+  if (tabKey === 'supplier-balance-list') return <SupplierBalanceList currentUser={currentUser} isActive={isActive} />;
   if (tabKey === 'cash-ledger') return <Ledgers currentUser={currentUser} initialTab="cash" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'bank-ledger') return <Ledgers currentUser={currentUser} initialTab="bank" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'supplier-ledger') return <Ledgers currentUser={currentUser} initialTab="supplier" isActive={isActive} hasPermission={hasPermission} />;
@@ -124,7 +130,7 @@ function App() {
 
   const hasPermission = (perm) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'superadmin' || currentUser.role === 'admin') return true;
     const perms = currentUser.permissions || [];
     if (perms.includes(perm)) return true;
     if ((perm === 'manage_sales_returns' || perm === 'manage_purchase_returns') && perms.includes('manage_returns')) return true;
@@ -155,6 +161,7 @@ function App() {
 
   const stockReportMenuOptions = [
     { label: 'Supp/Brand Stock', tab: 'manufacturer-stock', icon: '🏭', perm: 'view_reports' },
+    { label: 'Item History', tab: 'item-audit', icon: '🔍', perm: 'view_products' },
   ].filter(opt => hasPermission(opt.perm));
 
   const accountsMenuOptions = [
@@ -162,18 +169,20 @@ function App() {
     { label: 'Transaction Entry', tab: 'gl-vouchers', icon: '🧾', perm: 'view_reports' },
     { label: 'Account Ledger', tab: 'gl-ledger', icon: '📖', perm: 'view_reports' },
     { label: 'Cash Activity', tab: 'gl-cash-activity', icon: '💸', perm: 'view_reports' },
+    { label: 'Customer Balance List', tab: 'customer-balance-list', icon: '📋', perm: 'view_reports' },
+    { label: 'Supplier Balance List', tab: 'supplier-balance-list', icon: '📒', perm: 'view_reports' },
     { label: 'Ledgers', tab: 'ledgers', icon: '📒', always: true },
     { label: 'Customers', tab: 'customers', icon: '🧑‍🤝‍🧑', always: true },
     { label: 'Mfg Discounts', tab: 'manufacturer-discounts', icon: '🏭', admin: true },
     { label: 'Freight Expense', tab: 'expense-accounts', icon: '💰', admin: true },
-  ].filter(opt => opt.always || (opt.admin ? currentUser?.role === 'admin' : hasPermission(opt.perm)));
+  ].filter(opt => opt.always || (opt.admin ? (currentUser?.role === 'admin' || currentUser?.role === 'superadmin') : hasPermission(opt.perm)));
 
   const settingsMenuOptions = [
-    { label: 'Users', tab: 'users', icon: '👥', perm: 'manage_users' },
+    { label: 'User Management', tab: 'users', icon: '👥', adminOrSuper: true },
     { label: 'Backup', tab: 'backup', icon: '💾', admin: true },
     { label: 'Print Settings', tab: 'receipt-settings', icon: '🖨️', admin: true },
     { label: 'Network', tab: 'network-settings', icon: '🌐', admin: true },
-  ].filter(opt => opt.admin ? currentUser?.role === 'admin' : hasPermission(opt.perm));
+  ].filter(opt => opt.adminOrSuper ? (currentUser?.role === 'admin' || currentUser?.role === 'superadmin') : (opt.admin ? (currentUser?.role === 'admin' || currentUser?.role === 'superadmin') : hasPermission(opt.perm)));
 
   const handleLoginSuccess = (userId, username, password, role, permissions) => {
     setIsAuthenticated(true);

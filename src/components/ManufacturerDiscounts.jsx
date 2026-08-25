@@ -434,7 +434,7 @@ function ManufacturerDiscounts({ openWindow }) {
               <th style={{ width: '36%' }}>Supplier</th>
               <th style={{ width: '36%' }}>Brand (Check multiple!)</th>
               <th style={{ width: '14%' }}>Disc (%)</th>
-              <th style={{ width: '14%' }}>Disc Amount</th>
+              <th style={{ width: '14%' }}>Flat Discount</th>
               <th style={{ width: 60 }}>Act</th>
             </tr>
           </thead>

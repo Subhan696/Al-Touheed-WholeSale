@@ -5,7 +5,7 @@ import './ProductList.css';
 
 const { ipcRenderer } = window.require('electron');
 
-function StockList({ isActive, currentUser }) {
+function StockList({ isActive, currentUser, onOpenAudit }) {
   const [items, setItems] = useState([]);
   const [filters, setFilters] = useState({ search: '', brand: '', category: '', size: '' });
   const [debouncedFilters, setDebouncedFilters] = useState({ search: '', brand: '', category: '', size: '' });
@@ -124,14 +124,14 @@ function StockList({ isActive, currentUser }) {
               <th className="text-right">Sale Rate</th>
               <th className="text-center">Stock (Pcs)</th>
               <th className="text-right">Stock Value</th>
-              {canAdjust && <th className="text-center">Adjust</th>}
+              <th className="text-center">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={canAdjust ? 9 : 8} className="empty-state" style={{ padding: '40px 0' }}>Loading stock data...</td></tr>
+              <tr><td colSpan={9} className="empty-state" style={{ padding: '40px 0' }}>Loading stock data...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={canAdjust ? 9 : 8} className="empty-state">No items found</td></tr>
+              <tr><td colSpan={9} className="empty-state">No items found</td></tr>
             ) : filtered.slice(0, 100).map(p => (
               <tr key={p.id}>
                 <td><span className="badge badge-code">{p.item_code}</span></td>
@@ -146,11 +146,12 @@ function StockList({ isActive, currentUser }) {
                 <td className="text-right" style={{ fontWeight: 600 }}>
                   PKR {(p.stock_packets * (parseFloat(p.purchase_rate) || 0)).toLocaleString()}
                 </td>
-                {canAdjust && (
-                  <td className="text-center">
+                <td className="text-center" style={{ whiteSpace: 'nowrap' }}>
+                  <button onClick={() => onOpenAudit?.(p.item_code)} style={{ background: '#dbeafe', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, marginRight: 4 }}>🔍</button>
+                  {canAdjust && (
                     <button onClick={() => setAdjItem(p)} style={{ background: '#ffa800', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>± Adjust</button>
-                  </td>
-                )}
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

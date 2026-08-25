@@ -66,20 +66,21 @@
 .sales-list .data-table thead th {
   position: sticky;
   top: 0;
-  background: #f8fafc;
-  color: #374151;
-  font-weight: 600;
-  font-size: .85rem;
-  padding: 16px 20px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 0.88rem;
+  padding: 12px 14px;
   text-align: left;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 2px solid #cbd5e1;
   white-space: nowrap;
 }
 
 .sales-list .data-table td {
-  padding: 16px 20px;
-  border-bottom: 1px solid #f3f4f6;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
   vertical-align: middle;
+  font-size: 0.9rem;
 }
 
 .sales-list .data-table tbody tr:hover {
@@ -95,12 +96,15 @@
 }
 
 .selected-row {
-  background: #c7d2fe !important;
+  background: #93c5fd !important;
+  border-left: 4px solid #1d4ed8 !important;
 }
 
 .selected-row td {
-  background: #c7d2fe !important;
-  border-color: #4f46e5;
+  background: #93c5fd !important;
+  border-color: #3b82f6 !important;
+  color: #0f172a !important;
+  font-weight: 700;
 }
 
 .font-bold {

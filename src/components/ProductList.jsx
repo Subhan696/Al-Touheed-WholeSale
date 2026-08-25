@@ -6,7 +6,7 @@ const { ipcRenderer } = window.require('electron');
 
 const fmt = (n) => parseFloat(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 0 });
 
-const ProductRow = React.memo(({ p, idx, isSelected, selectedRef, canManage, onSelect, onEdit, onDelete }) => {
+const ProductRow = React.memo(({ p, idx, isSelected, selectedRef, canManage, onSelect, onEdit, onDelete, onOpenAudit }) => {
   const purchase = parseFloat(p.purchase_rate) || 0;
   const sale = parseFloat(p.sale_rate) || 0;
   const disc = parseFloat(p.discount) || 0;
@@ -70,7 +70,7 @@ const ProductRow = React.memo(({ p, idx, isSelected, selectedRef, canManage, onS
   );
 });
 
-function ProductList({ onEditProduct, currentUser, isActive }) {
+function ProductList({ onEditProduct, currentUser, isActive, onOpenAudit }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ search: '', brand: '', category: '', size: '' });

@@ -11,30 +11,36 @@ const CategorySection = memo(({ cat, priceMode, fmt, fmt2 }) => (
   <React.Fragment>
     <tr className="ssr-cat-row">
       <td colSpan={2}>{cat.name}</td>
+      <td className="ssr-val" style={{ fontWeight: 800, color: '#0369a1' }}>{fmt(cat.totalPackets)}</td>
       <td className="ssr-val">{fmt(cat.totalQty)}</td>
       <td className="ssr-val"></td>
       <td className="ssr-val"></td>
       <td className="ssr-val">{fmt(cat.totalValue)}</td>
     </tr>
-    {cat.items.map(item => (
-      <tr key={item.item_code}>
-        <td>{item.item_code}</td>
-        <td style={{ color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim() || '—'}
-        </td>
-        <td className="ssr-val">{fmt(item.qty)}</td>
-        <td className="ssr-val">{fmt2(Math.round((priceMode === 'actual' ? (item.latest_net_rate || item.actual_rate || 0) : (item.list_rate || 0)) * 100) / 100)}</td>
-        <td className="ssr-val">{fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
-        <td className="ssr-val">{fmt(item.value)}</td>
-      </tr>
-    ))}
+    {cat.items.map(item => {
+      const packing = parseInt(item.packing_qty) || 1;
+      const pkts = Math.floor((item.qty || 0) / packing);
+      return (
+        <tr key={item.item_code}>
+          <td>{item.item_code}</td>
+          <td style={{ color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {`${item.description || ''} ${item.category || ''} ${item.size_range || ''} ${item.gender || ''}`.replace(/\s+/g, ' ').trim() || '—'}
+          </td>
+          <td className="ssr-val" style={{ fontWeight: 700, color: '#b45309' }}>{fmt(pkts)}</td>
+          <td className="ssr-val">{fmt(item.qty)}</td>
+          <td className="ssr-val">{fmt2(Math.round((priceMode === 'actual' ? (item.latest_net_rate || item.actual_rate || 0) : (item.list_rate || 0)) * 100) / 100)}</td>
+          <td className="ssr-val">{fmt2(Math.round((item.sale_rate || 0) * 100) / 100)}</td>
+          <td className="ssr-val">{fmt(item.value)}</td>
+        </tr>
+      );
+    })}
   </React.Fragment>
 ));
 
 // Memoized supplier row component for better performance
 const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplierBalances, showSupplierBalance, fmt, fmt2 }) => {
   const isCollapsed = collapsed[sup.name] !== undefined ? !!collapsed[sup.name] : (sup._defaultCollapsed ?? false);
-  const balKey = sup.name.trim().toLowerCase();
+  const balKey = (sup.name || '').trim().toLowerCase();
   const rawBalance = supplierBalances[balKey];
   const hasBal = showSupplierBalance && rawBalance !== undefined;
   const netBalance = (rawBalance !== undefined ? rawBalance : 0) - (sup.totalValue || 0);
@@ -44,7 +50,8 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
       <thead>
         <tr className="ssr-supplier-row" onClick={() => toggleCollapsed(sup.name)}>
           <th colSpan={2}>{isCollapsed ? '▶' : '▼'} {sup.name}</th>
-          <th className="ssr-val" style={{ width: 80 }}>Qty: {fmt(sup.totalQty)}</th>
+          <th className="ssr-val" style={{ width: 70 }}>Pckts: {fmt(sup.totalPackets)}</th>
+          <th className="ssr-val" style={{ width: 70 }}>Qty: {fmt(sup.totalQty)}</th>
           <th className="ssr-val" style={{ width: 140 }}>
             {hasBal ? (
               <span style={{ color: rawBalance > 0 ? '#15803d' : rawBalance < 0 ? '#dc2626' : '#e2e8f0', fontWeight: 800 }}>
@@ -65,7 +72,8 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           <tr>
             <th style={{ width: 90 }}>Item Code</th>
             <th>Description / Brand</th>
-            <th className="ssr-val" style={{ width: 60 }}>Qty</th>
+            <th className="ssr-val" style={{ width: 60 }}>Packets</th>
+            <th className="ssr-val" style={{ width: 60 }}>Qty (Pcs)</th>
             <th className="ssr-val" style={{ width: 100 }}>{priceMode === 'actual' ? 'Actual Cost' : 'Purchase Price'}</th>
             <th className="ssr-val" style={{ width: 95 }}>Sale Price</th>
             <th className="ssr-val" style={{ width: 110 }}>Amount</th>
@@ -79,7 +87,8 @@ const SupplierRow = memo(({ sup, collapsed, toggleCollapsed, priceMode, supplier
           ))}
           <tr className="ssr-subtotal-row">
             <td colSpan={2} style={{ textAlign: 'right' }}>Supplier Total:</td>
-            <td className="ssr-val" style={{ width: 80 }}>{fmt(sup.totalQty)}</td>
+            <td className="ssr-val" style={{ width: 60, fontWeight: 800, color: '#b45309' }}>{fmt(sup.totalPackets)}</td>
+            <td className="ssr-val" style={{ width: 60 }}>{fmt(sup.totalQty)}</td>
             <td className="ssr-val" style={{ width: 140 }}>
               {hasBal ? (
                 <span style={{ color: rawBalance > 0 ? '#15803d' : rawBalance < 0 ? '#dc2626' : '#64748b', fontWeight: 700 }}>
@@ -186,11 +195,11 @@ function SupplierStockReport() {
   const [statusMsg, setStatusMsg] = useState('');
 
   const handlePrint = () => {
-    printManufacturerStock(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
+    printManufacturerStock(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances, showSupplierBalance);
   };
 
   const handleSavePDF = async () => {
-    const res = await saveManufacturerStockPDF(groups, grandQty, grandValue, priceMode, supplierBalances, showSupplierBalance);
+    const res = await saveManufacturerStockPDF(groups, grandQty, grandPackets, grandValue, priceMode, supplierBalances, showSupplierBalance);
     if (res?.success) {
       setStatusMsg(`✓ PDF saved!`);
       setTimeout(() => setStatusMsg(''), 3000);
@@ -249,7 +258,7 @@ function SupplierStockReport() {
   };
 
   // Filtered + grouped rows
-  const { groups, grandQty, grandValue } = useMemo(() => {
+  const { groups, grandQty, grandPackets, grandValue } = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
     const filtered = reportData.filter(r => {
       const supplier = r.supplier_name || 'Unassigned';
@@ -272,12 +281,15 @@ function SupplierStockReport() {
     });
 
     const bySupplier = {};
-    let gQty = 0, gVal = 0;
+    let gQty = 0, gVal = 0, gPackets = 0;
 
     filtered.forEach(r => {
       const supplier = r.supplier_name || 'Unassigned';
       const category = r.category || 'Uncategorized';
       const qty = parseInt(r.stock_packets) || 0;
+      const packingQty = parseInt(r.packing_qty) || 1;
+      const packets = Math.floor(qty / packingQty);
+
       const rate = priceMode === 'actual'
         ? (parseFloat(r.actual_rate) || 0)
         : (parseFloat(r.list_rate) || 0);
@@ -285,27 +297,30 @@ function SupplierStockReport() {
       const rank = getMatchRank(r, q);
 
       if (!bySupplier[supplier]) {
-        bySupplier[supplier] = { name: supplier, totalQty: 0, totalValue: 0, categories: {} };
+        bySupplier[supplier] = { name: supplier, totalQty: 0, totalPackets: 0, totalValue: 0, categories: {} };
       }
       const sup = bySupplier[supplier];
       if (!sup.categories[category]) {
-        sup.categories[category] = { name: category, totalQty: 0, totalValue: 0, items: [] };
+        sup.categories[category] = { name: category, totalQty: 0, totalPackets: 0, totalValue: 0, items: [] };
       }
       const cat = sup.categories[category];
 
       cat.items.push({ ...r, qty, rate, value, matchRank: rank });
       cat.totalQty += qty;
+      cat.totalPackets += packets;
       cat.totalValue += value;
       sup.totalQty += qty;
+      sup.totalPackets += packets;
       sup.totalValue += value;
       gQty += qty;
+      gPackets += packets;
       gVal += value;
     });
 
     if (selectedSuppliers.size > 0 && !q) {
       selectedSuppliers.forEach(supName => {
         if (!bySupplier[supName]) {
-          bySupplier[supName] = { name: supName, totalQty: 0, totalValue: 0, categories: {} };
+          bySupplier[supName] = { name: supName, totalQty: 0, totalPackets: 0, totalValue: 0, categories: {} };
         }
       });
     }
@@ -344,11 +359,13 @@ function SupplierStockReport() {
           })
         })).sort((a, b) => {
           if (q) {
-            const aMin = Math.min(...a.items.map(i => i.matchRank));
-            const bMin = Math.min(...b.items.map(i => i.matchRank));
+            const aRanks = (a.items || []).map(i => i.matchRank);
+            const bRanks = (b.items || []).map(i => i.matchRank);
+            const aMin = aRanks.length > 0 ? Math.min(...aRanks) : 999999;
+            const bMin = bRanks.length > 0 ? Math.min(...bRanks) : 999999;
             if (aMin !== bMin) return aMin - bMin;
           }
-          return a.name.localeCompare(b.name);
+          return (a.name || '').localeCompare(b.name || '');
         });
 
         return {
@@ -359,14 +376,16 @@ function SupplierStockReport() {
       })
       .sort((a, b) => {
         if (q) {
-          const aMin = Math.min(...a.categories.flatMap(c => c.items.map(i => i.matchRank)));
-          const bMin = Math.min(...b.categories.flatMap(c => c.items.map(i => i.matchRank)));
+          const aRanks = (a.categories || []).flatMap(c => (c.items || []).map(i => i.matchRank));
+          const bRanks = (b.categories || []).flatMap(c => (c.items || []).map(i => i.matchRank));
+          const aMin = aRanks.length > 0 ? Math.min(...aRanks) : 999999;
+          const bMin = bRanks.length > 0 ? Math.min(...bRanks) : 999999;
           if (aMin !== bMin) return aMin - bMin;
         }
-        return a.name.localeCompare(b.name);
+        return (a.name || '').localeCompare(b.name || '');
       });
 
-    return { groups: groupList, grandQty: gQty, grandValue: gVal };
+    return { groups: groupList, grandQty: gQty, grandPackets: gPackets, grandValue: gVal };
   }, [reportData, priceMode, debouncedSearch, selectedSuppliers, selectedCategories, selectedYears, sortField, sortDirection, includeZeroStock]);
 
   const toggleCollapsed = useCallback((name) => setCollapsed(prev => ({ ...prev, [name]: !prev[name] })), []);
@@ -788,7 +807,8 @@ function SupplierStockReport() {
               <tbody>
                 <tr className="ssr-grand-row">
                   <td colSpan={2} style={{ textAlign: 'right' }}>GRAND TOTAL:</td>
-                  <td className="ssr-val" style={{ width: 80 }}>{fmt(grandQty)}</td>
+                  <td className="ssr-val" style={{ width: 60, fontWeight: 900, color: '#fef08a' }}>{fmt(grandPackets)}</td>
+                  <td className="ssr-val" style={{ width: 60 }}>{fmt(grandQty)}</td>
                   <td className="ssr-val" style={{ width: 140 }}>
                     {showSupplierBalance && filteredSupplierBalances.length > 0 ? (
                       <span style={{ color: totalSupplierBalance > 0 ? '#86efac' : totalSupplierBalance < 0 ? '#fca5a5' : '#e2e8f0', fontWeight: 800 }}>

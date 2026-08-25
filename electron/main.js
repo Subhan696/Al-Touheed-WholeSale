@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 const Store = require('electron-store');
 const { Pool, types } = require('pg');
@@ -16,6 +17,7 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) { app.quit(); }
 
 const store = new Store();
+const otpStore = new Map(); // In-memory OTP store: userId -> { code, expires }
 const networkMode = store.get('networkMode', 'server');
 const isServerMode = networkMode === 'server';
 const isClientMode = networkMode === 'client';
@@ -330,9 +332,38 @@ async function initDatabase() {
       password_hash TEXT NOT NULL,
       role TEXT DEFAULT 'user',
       permissions TEXT DEFAULT '[]',
+      email TEXT DEFAULT '',
+      otp_enabled BOOLEAN DEFAULT false,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_enabled BOOLEAN DEFAULT false`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS feature_locks (
+      feature_name TEXT PRIMARY KEY,
+      is_locked BOOLEAN DEFAULT FALSE,
+      locked_by_user_id INTEGER,
+      locked_by_username TEXT,
+      locked_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  try {
+    const adminCheck = await query("SELECT id, role FROM users WHERE username = 'admin'");
+    if (adminCheck.rows.length) {
+      if (adminCheck.rows[0].role !== 'superadmin') {
+        await query("UPDATE users SET role = 'superadmin' WHERE username = 'admin'");
+      }
+    } else {
+      const defaultHash = await bcrypt.hash('admin', 10);
+      await query("INSERT INTO users (username, password_hash, role, permissions) VALUES ('admin', $1, 'superadmin', '[]')", [defaultHash]);
+    }
+  } catch (err) {
+    console.error('Error seeding default superadmin:', err);
+  }
 
   try {
     await query('ALTER TABLE products ADD COLUMN session_id INTEGER DEFAULT 0');
@@ -420,10 +451,13 @@ async function initDatabase() {
       notes TEXT,
       user_id INTEGER,
       customer_prev_balance NUMERIC(15,2) DEFAULT 0,
+      extra_discount_pct NUMERIC(10,2) DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS extra_discount_pct NUMERIC(10,2) DEFAULT 0`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -448,6 +482,9 @@ async function initDatabase() {
       customer_name TEXT,
       total_amount NUMERIC(12,2) DEFAULT 0,
       discount NUMERIC(10,2) DEFAULT 0,
+      extra_disc_pct NUMERIC(10,2) DEFAULT 0,
+      extra_disc_amount NUMERIC(10,2) DEFAULT 0,
+      item_discounts NUMERIC(10,2) DEFAULT 0,
       misc_charges NUMERIC(10,2) DEFAULT 0,
       notes TEXT,
       is_posted INTEGER DEFAULT 0,
@@ -455,6 +492,10 @@ async function initDatabase() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await query(`ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS extra_disc_pct NUMERIC(10,2) DEFAULT 0`);
+  await query(`ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS extra_disc_amount NUMERIC(10,2) DEFAULT 0`);
+  await query(`ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS item_discounts NUMERIC(10,2) DEFAULT 0`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS sales_return_items (
@@ -714,12 +755,33 @@ async function initDatabase() {
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS blt_number TEXT');
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS freight_account_name TEXT');
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS ctn_qty INTEGER DEFAULT 0');
+  await query('ALTER TABLE purchases ADD COLUMN IF NOT EXISTS user_id INTEGER');
+  await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS user_id INTEGER');
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS misc_charges NUMERIC(10,2) DEFAULT 0');
 
   await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS misc_charges NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS extra_disc_pct NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS extra_disc_amount NUMERIC(10,2) DEFAULT 0');
+  await query('ALTER TABLE sales_returns ADD COLUMN IF NOT EXISTS item_discounts NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE sales_return_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2) DEFAULT 0');
+
+  // Recalculate total_amount for existing sales returns so grand total accounts for item discounts, extra discount %, and misc charges
+  try {
+    await query(`
+      UPDATE sales_returns sr
+      SET total_amount = GREATEST(0, 
+        COALESCE((SELECT SUM(sri.packets * sri.price) FROM sales_return_items sri WHERE sri.return_id = sr.id), 0)
+        - COALESCE((SELECT SUM(sri.packets * sri.discount) FROM sales_return_items sri WHERE sri.return_id = sr.id), 0)
+        - COALESCE(sr.discount, 0)
+        - COALESCE(sr.extra_disc_amount, 0)
+        + COALESCE(sr.misc_charges, 0)
+      )
+    `);
+  } catch (err) {
+    console.error('Error recalculating legacy sales returns total_amount:', err);
+  }
   await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS packing_qty INTEGER NOT NULL DEFAULT 0');
   await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS pre_disc_price NUMERIC(10,2) DEFAULT 0');
   await query('ALTER TABLE purchase_return_items ADD COLUMN IF NOT EXISTS flat_discount NUMERIC(10,2) DEFAULT 0');
@@ -1245,7 +1307,6 @@ async function getCustomerStatementData({ customerName, customerId, startDate, e
   `, [name]);
 
   // Fetch Manual Vouchers for Customer GL account
-  console.log('[STMT] Fetching statement for customer:', name, 'cust.id:', cust?.id);
   const vouchersRes = await query(`
     SELECT v.id, v.voucher_no, v.voucher_date, v.voucher_type, v.remarks, vd.description, vd.reference_no, vd.debit, vd.credit, v.created_at,
            (
@@ -1263,8 +1324,6 @@ async function getCustomerStatementData({ customerName, customerId, startDate, e
     WHERE (LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) OR (g.account_type = 'Customer' AND g.reference_id = $2))
     ORDER BY v.voucher_date ASC, v.created_at ASC
   `, ['Customer - ' + name, cust?.id || 0]);
-
-  console.log('[STMT] Vouchers found count:', vouchersRes.rows.length);
 
   let seqCounter = 0;
   const txns = [];
@@ -1425,17 +1484,6 @@ async function getCustomerStatementData({ customerName, customerId, startDate, e
       }
     }
 
-    console.log('[STMT Voucher Processing]', {
-      voucher_id: v.id,
-      voucher_no: v.voucher_no,
-      voucher_type: v.voucher_type,
-      v_remarks: v.remarks,
-      vd_description: v.description,
-      bank_account_name: v.bank_account_name,
-      accHeadName,
-      computedRemark: remarkText
-    });
-
     txns.push({
       id: `vouch-${v.id}`,
       date: vDateStr,
@@ -1509,147 +1557,27 @@ async function getAccountClosingBalance({ accountId }) {
     let totalCredit = 0;
 
     if (atype === 'customer') {
-      let customerName = null;
+      let customerName = account_name.replace(/^Customer\s*-\s*/i, '').trim();
       let customerId = acc.reference_id || 0;
-      if (customerId && customerId > 0) {
-        const c = await query('SELECT name, initial_balance FROM customers WHERE id = $1', [customerId]);
-        if (c.rows && c.rows.length > 0) {
-          customerName = c.rows[0].name;
-          const custInitBal = parseFloat(c.rows[0].initial_balance) || 0;
-          const salesRows = await query(
-            `SELECT total_amount, payment_method FROM sales WHERE (LOWER(TRIM(customer_name)) = LOWER(TRIM($1)) OR customer_id = $2)`,
-            [customerName, customerId]
-          );
-          let saleTotal = 0, salePaid = 0;
-          salesRows.rows.forEach(s => {
-            const invTotal = parseFloat(s.total_amount) || 0;
-            if (invTotal === 0) return;
-            let paid = 0;
-            if (s.payment_method) {
-              s.payment_method.split(',').forEach(part => {
-                const colonIdx = part.lastIndexOf(':');
-                if (colonIdx !== -1) paid += parseFloat(part.slice(colonIdx + 1).trim()) || 0;
-              });
-            }
-            if (invTotal > 0) {
-              paid = Math.min(paid, invTotal);
-              saleTotal += invTotal;
-              salePaid += paid;
-            } else {
-              salePaid += Math.abs(invTotal);
-            }
-          });
-          const retSum = await query(
-            `SELECT COALESCE(SUM(total_amount),0) as s FROM sales_returns WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($1))`,
-            [customerName]
-          );
-          const vouchSum = await query(
-            `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) OR (g.account_type = 'Customer' AND g.reference_id = $2))`,
-            ['Customer - ' + customerName, customerId]
-          );
-          totalDebit = saleTotal + parseFloat(vouchSum.rows[0].td);
-          totalCredit = salePaid + parseFloat(retSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
-          let running = custInitBal + totalDebit - totalCredit;
-          const finalType = running >= 0 ? 'Dr' : 'Cr';
-          return {
-            signed_balance: running,
-            closing_balance: Math.abs(running),
-            balance_type: finalType,
-            account_name
-          };
-        }
-      }
-
-      customerName = account_name.replace(/^Customer\s*-\s*/i, '');
-      if (customerName) {
-        const custRow = await query('SELECT id, initial_balance FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [customerName]);
-        const custId = custRow.rows[0]?.id || 0;
-        const custInitBal = parseFloat(custRow.rows[0]?.initial_balance) || 0;
-        const salesRows = await query(
-          `SELECT total_amount, payment_method FROM sales WHERE (LOWER(TRIM(customer_name)) = LOWER(TRIM($1)) OR ($2 > 0 AND customer_id = $2))`,
-          [customerName, custId]
-        );
-        let saleTotal = 0, salePaid = 0;
-        salesRows.rows.forEach(s => {
-          saleTotal += parseFloat(s.total_amount) || 0;
-          if (s.payment_method) {
-            s.payment_method.split(',').forEach(part => {
-              const colonIdx = part.lastIndexOf(':');
-              if (colonIdx !== -1) salePaid += parseFloat(part.slice(colonIdx + 1).trim()) || 0;
-            });
-          }
-        });
-        const retSum = await query(
-          `SELECT COALESCE(SUM(total_amount),0) as s FROM sales_returns WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM($1))`,
-          [customerName]
-        );
-        const vouchSum = await query(
-          `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(g.account_name)) = LOWER(TRIM($1)) OR ($2 > 0 AND g.account_type = 'Customer' AND g.reference_id = $2))`,
-          ['Customer - ' + customerName, custId]
-        );
-        totalDebit = saleTotal + parseFloat(vouchSum.rows[0].td);
-        totalCredit = salePaid + parseFloat(retSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
-        let running = custInitBal + totalDebit - totalCredit;
-        const finalType = running >= 0 ? 'Dr' : 'Cr';
-        return {
-          signed_balance: running,
-          closing_balance: Math.abs(running),
-          balance_type: finalType,
-          account_name
-        };
-      }
+      const stmt = await getCustomerStatementData({ customerId, customerName });
+      return {
+        signed_balance: stmt.signed_balance,
+        closing_balance: stmt.final_balance,
+        balance_type: stmt.final_balance_type,
+        account_name
+      };
     }
 
     if (atype === 'supplier' || atype === 'accounts payable' || atype === 'vendor' || account_name.toLowerCase().startsWith('supplier -')) {
-      let supplierName = null;
+      let supplierName = account_name.replace(/^Supplier\s*-\s*/i, '').trim();
       let supplierId = acc.reference_id || 0;
-      if (supplierId && supplierId > 0) {
-        const s = await query('SELECT name, initial_balance FROM suppliers WHERE id = $1', [supplierId]);
-        if (s.rows && s.rows.length > 0) {
-          supplierName = s.rows[0].name;
-          const suppInitBal = parseFloat(s.rows[0].initial_balance) || 0;
-          const purSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchases WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
-          const prSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchase_returns WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
-          const paySum = await query(`SELECT COALESCE(SUM(amount),0) as s FROM supplier_payments WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1))`, [supplierName]);
-          const vouchSum = await query(
-            `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(replace(g.account_name, 'Supplier - ', ''))) = LOWER(TRIM($1)) OR (g.account_type = 'Supplier' AND g.reference_id = $2))`,
-            [supplierName, supplierId]
-          );
-          totalCredit = parseFloat(purSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
-          totalDebit = parseFloat(prSum.rows[0].s) + parseFloat(paySum.rows[0].s) + parseFloat(vouchSum.rows[0].td);
-          let running = suppInitBal + totalCredit - totalDebit;
-          const finalType = running >= 0 ? 'Cr' : 'Dr';
-          return {
-            signed_balance: -running,
-            closing_balance: Math.abs(running),
-            balance_type: finalType,
-            account_name
-          };
-        }
-      }
-      supplierName = account_name.replace(/^Supplier\s*-\s*/i, '').trim();
-      if (supplierName) {
-        const suppRow = await query('SELECT id, initial_balance FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [supplierName]);
-        const suppId = suppRow.rows[0]?.id || 0;
-        const suppInitBal = parseFloat(suppRow.rows[0]?.initial_balance) || 0;
-        const purSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchases WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
-        const prSum = await query(`SELECT COALESCE(SUM(total_amount),0) as s FROM purchase_returns WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_posted = 1`, [supplierName]);
-        const paySum = await query(`SELECT COALESCE(SUM(amount),0) as s FROM supplier_payments WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1))`, [supplierName]);
-        const vouchSum = await query(
-          `SELECT COALESCE(SUM(vd.debit),0) as td, COALESCE(SUM(vd.credit),0) as tc FROM voucher_details vd JOIN vouchers v ON vd.voucher_id = v.id JOIN gl_accounts g ON g.id = vd.account_id WHERE (LOWER(TRIM(replace(g.account_name, 'Supplier - ', ''))) = LOWER(TRIM($1)) OR ($2 > 0 AND g.account_type = 'Supplier' AND g.reference_id = $2))`,
-          [supplierName, suppId]
-        );
-        totalCredit = parseFloat(purSum.rows[0].s) + parseFloat(vouchSum.rows[0].tc);
-        totalDebit = parseFloat(prSum.rows[0].s) + parseFloat(paySum.rows[0].s) + parseFloat(vouchSum.rows[0].td);
-        let running = suppInitBal + totalCredit - totalDebit;
-        const finalType = running >= 0 ? 'Cr' : 'Dr';
-        return {
-          signed_balance: -running,
-          closing_balance: Math.abs(running),
-          balance_type: finalType,
-          account_name
-        };
-      }
+      const stmt = await getSupplierStatementData({ supplierId, supplierName });
+      return {
+        signed_balance: stmt.signed_balance,
+        closing_balance: stmt.final_balance,
+        balance_type: stmt.final_balance_type,
+        account_name
+      };
     }
 
     const vouchSum = await query(
@@ -1940,19 +1868,221 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
     case 'login': {
-      const { username, password } = data;
+      const { username, password, otp } = data;
       const r = await query('SELECT * FROM users WHERE username=$1', [username]);
       if (!r.rows.length) return { success: false, error: 'User not found' };
       const user = r.rows[0];
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) return { success: false, error: 'Invalid password' };
+
       let permissions = [];
       try {
         if (user.permissions) {
           permissions = user.permissions.startsWith('[') ? JSON.parse(user.permissions) : user.permissions.split(',').filter(Boolean);
         }
       } catch { }
-      return { success: true, userId: user.id, username: user.username, role: user.role, permissions };
+
+      // OTP flow
+      if (user.otp_enabled) {
+        if (!otp) {
+          // Send OTP and return requiresOtp
+          const code = String(Math.floor(100000 + Math.random() * 900000));
+          otpStore.set(user.id, { code, expires: Date.now() + 5 * 60 * 1000 });
+          const emailSettings = store.get('emailSettings', {});
+          if (emailSettings.gmailAddress && emailSettings.appPassword) {
+            try {
+              const transporter = nodemailer.createTransport({
+                service: 'gmail',
+                auth: { user: emailSettings.gmailAddress, pass: emailSettings.appPassword }
+              });
+              await transporter.sendMail({
+                from: emailSettings.gmailAddress,
+                to: user.email,
+                subject: 'Al-Touheed Login OTP',
+                text: `Your OTP code is: ${code}\n\nThis code expires in 5 minutes.`,
+                html: `<div style="font-family:Arial,sans-serif;padding:20px;"><h2 style="color:#3699ff;">Al-Touheed Wholesale</h2><p>Your OTP code is:</p><h1 style="color:#333;letter-spacing:8px;font-size:32px;">${code}</h1><p style="color:#888;">This code expires in 5 minutes.</p></div>`
+              });
+            } catch (emailErr) {
+              console.error('Failed to send OTP email:', emailErr.message);
+              return { success: false, error: 'Failed to send OTP email. Check Gmail settings.' };
+            }
+          } else {
+            return { success: false, error: 'Email settings not configured. Ask admin to set up Gmail SMTP.' };
+          }
+          return { success: false, requiresOtp: true, message: `OTP sent to ${user.email ? user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') : 'your email'}` };
+        } else {
+          // Verify OTP
+          const stored = otpStore.get(user.id);
+          if (!stored || stored.code !== otp || Date.now() > stored.expires) {
+            return { success: false, error: 'Invalid or expired OTP' };
+          }
+          otpStore.delete(user.id);
+        }
+      }
+
+      return { success: true, userId: user.id, username: user.username, role: user.role, permissions, otpEnabled: user.otp_enabled || false };
+    }
+    case 'verify-password': {
+      const { userId, password } = data;
+      const r = await query('SELECT password_hash, otp_enabled, email FROM users WHERE id=$1', [userId]);
+      if (!r.rows.length) return { success: false, error: 'User not found' };
+      const user = r.rows[0];
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) return { success: false, error: 'Invalid password' };
+      return { success: true, otpEnabled: user.otp_enabled || false };
+    }
+
+    // ─── SYSTEM FEATURE LOCKS (Profit Sheet & Manage Lists) ─────────
+    case 'get-feature-locks': {
+      const r = await query('SELECT * FROM feature_locks');
+      const lockMap = {};
+      r.rows.forEach(row => {
+        lockMap[row.feature_name] = {
+          isLocked: !!row.is_locked,
+          lockedByUserId: row.locked_by_user_id,
+          lockedByUsername: row.locked_by_username,
+          lockedAt: row.locked_at
+        };
+      });
+      return lockMap;
+    }
+    case 'lock-feature': {
+      const { featureName, userId, username, password } = data;
+      if (!featureName || !userId) return { success: false, error: 'Missing parameters' };
+      const userRes = await query('SELECT password_hash, username, role FROM users WHERE id=$1', [userId]);
+      if (!userRes.rows.length) return { success: false, error: 'User not found' };
+      const user = userRes.rows[0];
+      if (user.role !== 'superadmin') {
+        return { success: false, error: 'Only a Super Admin can lock system features.' };
+      }
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) return { success: false, error: 'Incorrect Super Admin password' };
+
+      await query(`
+        INSERT INTO feature_locks (feature_name, is_locked, locked_by_user_id, locked_by_username, locked_at)
+        VALUES ($1, TRUE, $2, $3, NOW())
+        ON CONFLICT (feature_name) DO UPDATE SET
+          is_locked = TRUE,
+          locked_by_user_id = EXCLUDED.locked_by_user_id,
+          locked_by_username = EXCLUDED.locked_by_username,
+          locked_at = NOW()
+      `, [featureName, userId, user.username || username]);
+
+      broadcast('feature-locks');
+      return { success: true };
+    }
+    case 'unlock-feature': {
+      const { featureName, password } = data;
+      if (!featureName) return { success: false, error: 'Feature name required' };
+      const lockRes = await query('SELECT * FROM feature_locks WHERE feature_name=$1 AND is_locked=TRUE', [featureName]);
+      if (!lockRes.rows.length || !lockRes.rows[0].is_locked) {
+        return { success: true, message: 'Feature is not locked' };
+      }
+      const lock = lockRes.rows[0];
+
+      let isValid = false;
+      const superAdmins = await query("SELECT password_hash FROM users WHERE role = 'superadmin'");
+      for (const sa of superAdmins.rows) {
+        if (await bcrypt.compare(password, sa.password_hash)) {
+          isValid = true;
+          break;
+        }
+      }
+
+      if (!isValid) {
+        return { success: false, error: 'Incorrect Super Admin password.' };
+      }
+
+      await query('UPDATE feature_locks SET is_locked=FALSE, locked_by_user_id=NULL, locked_by_username=NULL WHERE feature_name=$1', [featureName]);
+      broadcast('feature-locks');
+      return { success: true, unlockedBy: lock.locked_by_username };
+    }
+    case 'verify-feature-lock-access': {
+      const { featureName, password } = data;
+      if (!featureName) return { success: false, error: 'Feature name required' };
+      const lockRes = await query('SELECT * FROM feature_locks WHERE feature_name=$1 AND is_locked=TRUE', [featureName]);
+      if (!lockRes.rows.length || !lockRes.rows[0].is_locked) {
+        return { success: true, isLocked: false };
+      }
+      const lock = lockRes.rows[0];
+
+      let isValid = false;
+      const superAdmins = await query("SELECT password_hash FROM users WHERE role = 'superadmin'");
+      for (const sa of superAdmins.rows) {
+        if (await bcrypt.compare(password, sa.password_hash)) {
+          isValid = true;
+          break;
+        }
+      }
+
+      if (!isValid) {
+        return { success: false, isLocked: true, lockedByUsername: lock.locked_by_username, error: 'Incorrect Super Admin password.' };
+      }
+      return { success: true, isLocked: true, lockedByUsername: lock.locked_by_username };
+    }
+    case 'send-otp': {
+      const { userId } = data;
+      const r = await query('SELECT id, email, otp_enabled FROM users WHERE id=$1', [userId]);
+      if (!r.rows.length) return { success: false, error: 'User not found' };
+      const user = r.rows[0];
+      if (!user.email) return { success: false, error: 'No email configured for this user' };
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      otpStore.set(user.id, { code, expires: Date.now() + 5 * 60 * 1000 });
+      const emailSettings = store.get('emailSettings', {});
+      if (!emailSettings.gmailAddress || !emailSettings.appPassword) {
+        return { success: false, error: 'Email settings not configured' };
+      }
+      try {
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: { user: emailSettings.gmailAddress, pass: emailSettings.appPassword }
+        });
+        await transporter.sendMail({
+          from: emailSettings.gmailAddress,
+          to: user.email,
+          subject: 'Al-Touheed Verification OTP',
+          text: `Your OTP code is: ${code}\n\nThis code expires in 5 minutes.`,
+          html: `<div style="font-family:Arial,sans-serif;padding:20px;"><h2 style="color:#3699ff;">Al-Touheed Wholesale</h2><p>Your verification code is:</p><h1 style="color:#333;letter-spacing:8px;font-size:32px;">${code}</h1><p style="color:#888;">This code expires in 5 minutes.</p></div>`
+        });
+      } catch (emailErr) {
+        return { success: false, error: 'Failed to send OTP: ' + emailErr.message };
+      }
+      return { success: true, message: `OTP sent to ${user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3')}` };
+    }
+    case 'verify-otp': {
+      const { userId, otp } = data;
+      const stored = otpStore.get(userId);
+      if (!stored || stored.code !== otp || Date.now() > stored.expires) {
+        return { success: false, error: 'Invalid or expired OTP' };
+      }
+      otpStore.delete(userId);
+      return { success: true };
+    }
+    case 'get-email-settings': {
+      return store.get('emailSettings', { gmailAddress: '', appPassword: '' });
+    }
+    case 'save-email-settings': {
+      store.set('emailSettings', { gmailAddress: data.gmailAddress || '', appPassword: data.appPassword || '' });
+      return { success: true };
+    }
+    case 'test-email-settings': {
+      const { gmailAddress, appPassword, testRecipient } = data;
+      try {
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: { user: gmailAddress, pass: appPassword }
+        });
+        await transporter.sendMail({
+          from: gmailAddress,
+          to: testRecipient || gmailAddress,
+          subject: 'Al-Touheed - Test Email',
+          text: 'This is a test email from Al-Touheed Wholesale System. Email settings are working correctly!',
+          html: `<div style="font-family:Arial,sans-serif;padding:20px;"><h2 style="color:#3699ff;">Al-Touheed Wholesale</h2><p style="color:#28a745;font-weight:bold;">✅ Email settings are working correctly!</p><p style="color:#888;">This is a test email.</p></div>`
+        });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
 
     // ─── PRODUCTS ────────────────────────────────────────────────────────────
@@ -2444,7 +2574,8 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
     case 'get-purchases': {
-      const res = await query(`
+      const { startDate, endDate } = data || {};
+      let q = `
         SELECT p.*, 
                COALESCE(pi.total_qty, 0) as total_qty,
                CASE WHEN COALESCE(p.ctn_qty, 0) > 0 THEN p.ctn_qty ELSE COALESCE(pe.cartons, 0) END as ctn_qty
@@ -2455,8 +2586,12 @@ async function handleIPC(channel, ...args) {
         LEFT JOIN (
           SELECT purchase_id, COALESCE(SUM(cartons), 0) as cartons FROM purchase_expenses GROUP BY purchase_id
         ) pe ON pe.purchase_id = p.id
-        ORDER BY p.id DESC LIMIT 500
-      `);
+        WHERE 1=1`;
+      const params = [];
+      if (startDate) { params.push(startDate); q += ` AND p.purchase_date::date >= $${params.length}`; }
+      if (endDate) { params.push(endDate); q += ` AND p.purchase_date::date <= $${params.length}`; }
+      q += ' ORDER BY p.id DESC LIMIT 500';
+      const res = await query(q, params);
       return res.rows;
     }
     case 'get-purchase-items': {
@@ -2654,7 +2789,13 @@ async function handleIPC(channel, ...args) {
       return r.rows;
     }
     case 'get-purchase-return-items': {
-      const r = await query('SELECT * FROM purchase_return_items WHERE return_id=$1 ORDER BY id', [data]);
+      const r = await query(`
+        SELECT pri.*, COALESCE(NULLIF(pri.packing_qty, 0), p.packing_qty, 1) AS packing_qty
+        FROM purchase_return_items pri
+        LEFT JOIN products p ON LOWER(TRIM(pri.item_code)) = LOWER(TRIM(p.item_code))
+        WHERE pri.return_id=$1
+        ORDER BY pri.id
+      `, [data]);
       return r.rows;
     }
     case 'delete-purchase-return': {
@@ -2949,7 +3090,6 @@ async function handleIPC(channel, ...args) {
     }
     case 'get-supplier-statement': {
       const { supplier_name } = data;
-      console.log('[SUPP STMT] Fetching statement for supplier:', supplier_name);
       const supplierRow = await query('SELECT initial_balance FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [supplier_name]);
       const initial_balance = supplierRow.rows[0]?.initial_balance || 0;
 
@@ -3079,7 +3219,6 @@ async function handleIPC(channel, ...args) {
         ORDER BY txn_date ASC, raw_date ASC, id ASC
       `, [supplier_name]);
 
-      console.log(`[SUPP STMT] Returned ${res.rows.length} transactions for supplier:`, supplier_name);
       return { initial_balance, transactions: res.rows };
     }
 
@@ -3217,9 +3356,13 @@ async function handleIPC(channel, ...args) {
       }
     }
     case 'save-sale': {
-      const { saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes, userId, customerPrevBalance } = data;
+      const { saleDate, invoiceNo, customerName, customerPhone, items, discount, extraDiscountPct, miscCharges, paymentMethod, notes, userId, customerPrevBalance, grandTotal } = data;
       const subTotal = items.reduce((s, i) => s + i.amount, 0);
-      const total = subTotal - (discount || 0) + (miscCharges || 0);
+      const roundToFive = (num) => Math.round((parseFloat(num) || 0) / 5) * 5;
+      const preExtraPctTotal = subTotal + (miscCharges || 0);
+      const extraPctAmt = roundToFive((preExtraPctTotal * (parseFloat(extraDiscountPct) || 0)) / 100);
+      const calcTotal = subTotal - (discount || 0) - extraPctAmt + (miscCharges || 0);
+      const total = grandTotal !== undefined && grandTotal !== null ? parseFloat(grandTotal) : calcTotal;
       const totalPackets = items.reduce((s, i) => s + i.packets, 0);
 
       let cId;
@@ -3249,8 +3392,8 @@ async function handleIPC(channel, ...args) {
 
       const nowLocal = getLocalTimestampString();
       const sr = await query(
-        'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, misc_charges, payment_method, notes, user_id, customer_prev_balance, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id',
-        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null, customerPrevBalance || 0, nowLocal, nowLocal]
+        'INSERT INTO sales (sale_date, invoice_no, customer_name, customer_phone, total_amount, total_packets, discount, extra_discount_pct, misc_charges, payment_method, notes, user_id, customer_prev_balance, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id',
+        [saleDate, finalInvoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, extraDiscountPct || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, userId || null, customerPrevBalance || 0, nowLocal, nowLocal]
       );
       const saleId = sr.rows[0].id;
       for (const item of items) {
@@ -3265,9 +3408,13 @@ async function handleIPC(channel, ...args) {
       return { success: true, id: saleId, invoiceNo: finalInvoiceNo };
     }
     case 'update-sale': {
-      const { id, saleDate, invoiceNo, customerName, customerPhone, items, discount, miscCharges, paymentMethod, notes, customerPrevBalance } = data;
+      const { id, saleDate, invoiceNo, customerName, customerPhone, items, discount, extraDiscountPct, miscCharges, paymentMethod, notes, customerPrevBalance, grandTotal } = data;
       const subTotal = items.reduce((s, i) => s + i.amount, 0);
-      const total = subTotal - (discount || 0) + (miscCharges || 0);
+      const roundToFive = (num) => Math.round((parseFloat(num) || 0) / 5) * 5;
+      const preExtraPctTotal = subTotal + (miscCharges || 0);
+      const extraPctAmt = roundToFive((preExtraPctTotal * (parseFloat(extraDiscountPct) || 0)) / 100);
+      const calcTotal = subTotal - (discount || 0) - extraPctAmt + (miscCharges || 0);
+      const total = grandTotal !== undefined && grandTotal !== null ? parseFloat(grandTotal) : calcTotal;
       const totalPackets = items.reduce((s, i) => s + i.packets, 0);
 
       let cId;
@@ -3284,14 +3431,15 @@ async function handleIPC(channel, ...args) {
       }
 
       const nowLocal = getLocalTimestampString();
-      await query('UPDATE sales SET sale_date=$1, invoice_no=$2, customer_name=$3, customer_phone=$4, total_amount=$5, total_packets=$6, discount=$7, misc_charges=$8, payment_method=$9, notes=$10, customer_prev_balance=$11, updated_at=$12 WHERE id=$13',
-        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, customerPrevBalance || 0, nowLocal, id]);
+      await query('UPDATE sales SET sale_date=$1, invoice_no=$2, customer_name=$3, customer_phone=$4, total_amount=$5, total_packets=$6, discount=$7, extra_discount_pct=$8, misc_charges=$9, payment_method=$10, notes=$11, customer_prev_balance=$12, updated_at=$13 WHERE id=$14',
+        [saleDate, invoiceNo || null, customerName || null, customerPhone || null, total, totalPackets, discount || 0, extraDiscountPct || 0, miscCharges || 0, paymentMethod || 'Cash', notes || null, customerPrevBalance || 0, nowLocal, id]);
       await query('DELETE FROM sale_items WHERE sale_id=$1', [id]);
       for (const item of items) {
         const profit = (item.saleRate - item.purchaseRate) * item.packets;
         await query('INSERT INTO sale_items (sale_id, item_code, item_description, packets, packing_qty, sale_rate, purchase_rate, amount, profit, discount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
           [id, item.itemCode, item.itemDescription, item.packets, item.packingQty || 0, item.saleRate, item.purchaseRate, item.amount, profit, item.discount || 0]);
       }
+
 
       broadcast('sales'); broadcast('stock'); broadcast('customers');
       return { success: true };
@@ -3333,35 +3481,66 @@ async function handleIPC(channel, ...args) {
 
     // ─── SALES RETURNS ────────────────────────────────────────────────────────
     case 'save-sales-return': {
-      const { returnDate, invoiceNo, customerName, items, discount, miscCharges, notes, userId } = data;
-      const subTotal = items.reduce((s, i) => s + i.amount, 0);
-      const total = subTotal - (discount || 0) + (miscCharges || 0);
+      const { returnDate, invoiceNo, customerName, items, discount, extraDiscountPct, miscCharges, notes, userId, totalAmount } = data;
+      const subTotal = items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+      const itemDiscounts = items.reduce((s, i) => s + (Math.abs(parseInt(i.packets) || 0) * (parseFloat(i.discount) || 0)), 0);
+      const extraFlatDisc = parseFloat(discount) || 0;
+      const miscAmt = parseFloat(miscCharges) || 0;
+      const extraPct = parseFloat(extraDiscountPct) || 0;
+
+      const preExtraPctTotal = subTotal + miscAmt - itemDiscounts;
+      const extraPctAmt = Math.round(((preExtraPctTotal * extraPct) / 100) / 5) * 5;
+      const totalDiscount = itemDiscounts + extraFlatDisc + extraPctAmt;
+      const grandTotal = totalAmount !== undefined && !isNaN(parseFloat(totalAmount))
+        ? parseFloat(totalAmount)
+        : Math.max(0, subTotal + miscAmt - totalDiscount);
+
       const maxNo = await query("SELECT MAX(CAST(return_no AS INTEGER)) FROM sales_returns WHERE return_no ~ '^[0-9]+$'");
       const nextNo = String((parseInt(maxNo.rows[0].max) || 0) + 1);
       const rr = await query(
-        'INSERT INTO sales_returns (return_date, return_no, invoice_no, customer_name, total_amount, discount, misc_charges, notes, is_posted, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9) RETURNING id',
-        [returnDate, nextNo, invoiceNo || null, customerName || null, total, discount || 0, miscCharges || 0, notes || null, userId || null]
+        `INSERT INTO sales_returns (
+          return_date, return_no, invoice_no, customer_name, total_amount, discount, extra_disc_pct, extra_disc_amount, item_discounts, misc_charges, notes, is_posted, user_id
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12) RETURNING id`,
+        [
+          returnDate, nextNo, invoiceNo || null, customerName || null, grandTotal,
+          extraFlatDisc, extraPct, extraPctAmt, itemDiscounts, miscAmt, notes || null, userId || null
+        ]
       );
       const returnId = rr.rows[0].id;
       for (const item of items) {
         await query('INSERT INTO sales_return_items (return_id, item_code, item_description, packets, price, discount, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
           [returnId, item.itemCode, item.itemDescription, item.packets, item.price, item.discount || 0, item.amount]);
       }
-      broadcast('sales-returns'); broadcast('stock');
+      broadcast('sales-returns'); broadcast('stock'); broadcast('customers');
       return { success: true, id: returnId, returnNo: nextNo };
     }
     case 'update-sales-return': {
-      const { id, returnDate, invoiceNo, customerName, items, discount, miscCharges, notes } = data;
-      const subTotal = items.reduce((s, i) => s + i.amount, 0);
-      const total = subTotal - (discount || 0) + (miscCharges || 0);
-      await query('UPDATE sales_returns SET return_date=$1, invoice_no=$2, customer_name=$3, total_amount=$4, discount=$5, misc_charges=$6, notes=$7 WHERE id=$8',
-        [returnDate, invoiceNo || null, customerName || null, total, discount || 0, miscCharges || 0, notes || null, id]);
+      const { id, returnDate, invoiceNo, customerName, items, discount, extraDiscountPct, miscCharges, notes, totalAmount } = data;
+      const subTotal = items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+      const itemDiscounts = items.reduce((s, i) => s + (Math.abs(parseInt(i.packets) || 0) * (parseFloat(i.discount) || 0)), 0);
+      const extraFlatDisc = parseFloat(discount) || 0;
+      const miscAmt = parseFloat(miscCharges) || 0;
+      const extraPct = parseFloat(extraDiscountPct) || 0;
+
+      const preExtraPctTotal = subTotal + miscAmt - itemDiscounts;
+      const extraPctAmt = Math.round(((preExtraPctTotal * extraPct) / 100) / 5) * 5;
+      const totalDiscount = itemDiscounts + extraFlatDisc + extraPctAmt;
+      const grandTotal = totalAmount !== undefined && !isNaN(parseFloat(totalAmount))
+        ? parseFloat(totalAmount)
+        : Math.max(0, subTotal + miscAmt - totalDiscount);
+
+      await query(
+        `UPDATE sales_returns 
+         SET return_date=$1, invoice_no=$2, customer_name=$3, total_amount=$4, discount=$5, extra_disc_pct=$6, extra_disc_amount=$7, item_discounts=$8, misc_charges=$9, notes=$10 
+         WHERE id=$11`,
+        [returnDate, invoiceNo || null, customerName || null, grandTotal, extraFlatDisc, extraPct, extraPctAmt, itemDiscounts, miscAmt, notes || null, id]
+      );
       await query('DELETE FROM sales_return_items WHERE return_id=$1', [id]);
       for (const item of items) {
         await query('INSERT INTO sales_return_items (return_id, item_code, item_description, packets, price, discount, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
           [id, item.itemCode, item.itemDescription, item.packets, item.price, item.discount || 0, item.amount]);
       }
-      broadcast('sales-returns'); broadcast('stock');
+      broadcast('sales-returns'); broadcast('stock'); broadcast('customers');
       return { success: true };
     }
     case 'get-sales-returns': {
@@ -3382,6 +3561,278 @@ async function handleIPC(channel, ...args) {
       await query('DELETE FROM sales_returns WHERE id=$1', [data]);
       broadcast('sales-returns'); broadcast('stock');
       return { success: true };
+    }
+
+    case 'get-item-audit-data': {
+      const { itemCode } = typeof data === 'string' ? { itemCode: data } : (data || {});
+      if (!itemCode) return { success: false, error: 'Item code is required' };
+
+      const prodRes = await query(
+        'SELECT * FROM products WHERE LOWER(TRIM(item_code)) = LOWER(TRIM($1)) LIMIT 1',
+        [itemCode.trim()]
+      );
+
+      const product = prodRes.rows[0] || null;
+
+      // 1. Fetch Purchases (Stock Arrived)
+      let purchRes;
+      try {
+        purchRes = await query(`
+          SELECT pi.*, p.invoice_no, p.supplier_inv_no, p.purchase_date, p.supplier_name, p.created_at, u.username
+          FROM purchase_items pi
+          JOIN purchases p ON p.id = pi.purchase_id
+          LEFT JOIN users u ON p.user_id = u.id
+          WHERE LOWER(TRIM(pi.item_code)) = LOWER(TRIM($1))
+          ORDER BY p.purchase_date ASC, p.created_at ASC, pi.id ASC
+        `, [itemCode.trim()]);
+      } catch (err) {
+        purchRes = await query(`
+          SELECT pi.*, p.invoice_no, p.supplier_inv_no, p.purchase_date, p.supplier_name, p.created_at, NULL AS username
+          FROM purchase_items pi
+          JOIN purchases p ON p.id = pi.purchase_id
+          WHERE LOWER(TRIM(pi.item_code)) = LOWER(TRIM($1))
+          ORDER BY p.purchase_date ASC, p.created_at ASC, pi.id ASC
+        `, [itemCode.trim()]);
+      }
+
+      // 2. Fetch Sales (Stock Sold)
+      let salesRes;
+      try {
+        salesRes = await query(`
+          SELECT si.*, s.invoice_no, s.sale_date, s.customer_name, s.created_at, u.username
+          FROM sale_items si
+          JOIN sales s ON s.id = si.sale_id
+          LEFT JOIN users u ON s.user_id = u.id
+          WHERE LOWER(TRIM(si.item_code)) = LOWER(TRIM($1))
+          ORDER BY s.sale_date ASC, s.created_at ASC, si.id ASC
+        `, [itemCode.trim()]);
+      } catch (err) {
+        salesRes = await query(`
+          SELECT si.*, s.invoice_no, s.sale_date, s.customer_name, s.created_at, NULL AS username
+          FROM sale_items si
+          JOIN sales s ON s.id = si.sale_id
+          WHERE LOWER(TRIM(si.item_code)) = LOWER(TRIM($1))
+          ORDER BY s.sale_date ASC, s.created_at ASC, si.id ASC
+        `, [itemCode.trim()]);
+      }
+
+      // 3. Fetch Sales Returns
+      let srRes;
+      try {
+        srRes = await query(`
+          SELECT sri.*, sr.return_no, sr.return_date, sr.invoice_no AS orig_invoice_no, sr.customer_name, sr.created_at, u.username
+          FROM sales_return_items sri
+          JOIN sales_returns sr ON sr.id = sri.return_id
+          LEFT JOIN users u ON sr.user_id = u.id
+          WHERE LOWER(TRIM(sri.item_code)) = LOWER(TRIM($1))
+          ORDER BY sr.return_date ASC, sr.created_at ASC, sri.id ASC
+        `, [itemCode.trim()]);
+      } catch (err) {
+        srRes = await query(`
+          SELECT sri.*, sr.return_no, sr.return_date, sr.invoice_no AS orig_invoice_no, sr.customer_name, sr.created_at, NULL AS username
+          FROM sales_return_items sri
+          JOIN sales_returns sr ON sr.id = sri.return_id
+          WHERE LOWER(TRIM(sri.item_code)) = LOWER(TRIM($1))
+          ORDER BY sr.return_date ASC, sr.created_at ASC, sri.id ASC
+        `, [itemCode.trim()]);
+      }
+
+      // 4. Fetch Purchase Returns
+      let prRes;
+      try {
+        prRes = await query(`
+          SELECT pri.*, pr.return_no, pr.return_date, pr.supplier_name, pr.created_at, u.username
+          FROM purchase_return_items pri
+          JOIN purchase_returns pr ON pr.id = pri.return_id
+          LEFT JOIN users u ON pr.user_id = u.id
+          WHERE LOWER(TRIM(pri.item_code)) = LOWER(TRIM($1))
+          ORDER BY pr.return_date ASC, pr.created_at ASC, pri.id ASC
+        `, [itemCode.trim()]);
+      } catch (err) {
+        prRes = await query(`
+          SELECT pri.*, pr.return_no, pr.return_date, pr.supplier_name, pr.created_at, NULL AS username
+          FROM purchase_return_items pri
+          JOIN purchase_returns pr ON pr.id = pri.return_id
+          WHERE LOWER(TRIM(pri.item_code)) = LOWER(TRIM($1))
+          ORDER BY pr.return_date ASC, pr.created_at ASC, pri.id ASC
+        `, [itemCode.trim()]);
+      }
+
+      let events = [];
+
+      // Add product creation event if product exists
+      if (product && product.created_at) {
+        events.push({
+          id: `creation-${product.id}`,
+          type: 'creation',
+          date: product.created_at,
+          title: 'Item Feeded / Created in Database',
+          refNo: product.item_code,
+          party: 'System Entry',
+          user: 'Admin',
+          qty: 0,
+          rate: parseFloat(product.sale_rate) || 0,
+          purchaseRate: parseFloat(product.purchase_rate) || 0,
+          amount: 0,
+          notes: `Category: ${product.category || '-'}, Brand: ${product.brand || '-'}, Size: ${product.size_range || '-'}`
+        });
+      }
+
+      let latestArrivedNetRate = 0;
+      for (const p of purchRes.rows) {
+        const grossRate = parseFloat(p.pre_disc_price || p.rate) || 0;
+        let netRate = parseFloat(p.net_rate) || 0;
+        if (!netRate || netRate <= 0) {
+          const pkts = Math.abs(parseInt(p.packets) || 1);
+          const amt = parseFloat(p.amount) || 0;
+          if (amt > 0 && pkts > 0) {
+            netRate = amt / pkts;
+          } else {
+            const flat = parseFloat(p.flat_discount) || 0;
+            const pct = parseFloat(p.disc_pct) || 0;
+            netRate = Math.max(0, grossRate - (grossRate * (pct / 100)) - flat);
+          }
+        }
+        if (netRate > 0) {
+          latestArrivedNetRate = netRate;
+        }
+
+        events.push({
+          id: `purch-${p.id}`,
+          type: 'purchase',
+          date: p.created_at || p.purchase_date,
+          refNo: p.invoice_no ? (p.invoice_no.startsWith('PUR') ? p.invoice_no : `PUR-${p.invoice_no}`) : `PUR-ID-${p.purchase_id}`,
+          suppInvoice: p.supplier_inv_no || '',
+          party: p.supplier_name || 'Supplier Arrived',
+          user: p.username || 'System',
+          qty: Math.abs(parseInt(p.packets) || 0),
+          rate: grossRate || parseFloat(p.rate) || 0,
+          netRate: netRate || grossRate || parseFloat(p.rate) || 0,
+          purchaseRate: netRate || grossRate || parseFloat(p.rate) || 0,
+          saleRate: parseFloat(p.sale_rate) || parseFloat(product?.sale_rate) || 0,
+          discount: parseFloat(p.flat_discount) || 0,
+          discPct: parseFloat(p.disc_pct) || 0,
+          amount: parseFloat(p.amount) || 0
+        });
+      }
+
+      const defaultCost = latestArrivedNetRate > 0 
+        ? latestArrivedNetRate 
+        : (parseFloat(product?.actual_cost) > 0 ? parseFloat(product.actual_cost) : (parseFloat(product?.purchase_rate) || 0));
+
+      for (const s of salesRes.rows) {
+        const qty = Math.abs(parseInt(s.packets) || 0);
+        const saleRate = parseFloat(s.sale_rate) || 0;
+        const lineAmt = parseFloat(s.amount) || (qty * saleRate - (parseFloat(s.discount) || 0));
+        const costRate = defaultCost > 0 ? defaultCost : (parseFloat(s.purchase_rate) || 0);
+        const profit = lineAmt - (costRate * qty);
+
+        events.push({
+          id: `sale-${s.id}`,
+          type: 'sale',
+          date: s.created_at || s.sale_date,
+          refNo: s.invoice_no ? `INV-${s.invoice_no}` : `INV-ID-${s.sale_id}`,
+          party: s.customer_name || 'Walk-in Customer',
+          user: s.username || 'System',
+          qty,
+          rate: saleRate,
+          purchaseRate: costRate,
+          netRate: costRate,
+          discount: parseFloat(s.discount) || 0,
+          profit,
+          amount: lineAmt
+        });
+      }
+
+      for (const sr of srRes.rows) {
+        const qty = Math.abs(parseInt(sr.packets) || 0);
+        const returnRate = parseFloat(sr.price || sr.rate || sr.sale_rate) || parseFloat(product?.sale_rate) || 0;
+        const lineAmt = parseFloat(sr.amount) || (qty * returnRate - (parseFloat(sr.discount) || 0));
+        const costRate = defaultCost > 0 ? defaultCost : (parseFloat(sr.purchase_rate) || 0);
+        const returnProfit = lineAmt - (costRate * qty);
+
+        events.push({
+          id: `sr-${sr.id}`,
+          type: 'sales_return',
+          date: sr.created_at || sr.return_date,
+          refNo: sr.return_no ? `SR-${sr.return_no}` : `SR-ID-${sr.return_id}`,
+          origRef: sr.orig_invoice_no ? `INV-${sr.orig_invoice_no}` : '',
+          party: sr.customer_name || 'Customer Return',
+          user: sr.username || 'System',
+          qty,
+          rate: returnRate,
+          purchaseRate: costRate,
+          netRate: costRate,
+          discount: parseFloat(sr.discount) || 0,
+          profit: returnProfit,
+          amount: lineAmt
+        });
+      }
+
+      for (const pr of prRes.rows) {
+        const qty = Math.abs(parseInt(pr.packets) || 0);
+        const returnRate = parseFloat(pr.rate || pr.price) || defaultCost;
+        const lineAmt = parseFloat(pr.amount) || (qty * returnRate - (parseFloat(pr.discount) || 0));
+
+        events.push({
+          id: `pr-${pr.id}`,
+          type: 'purchase_return',
+          date: pr.created_at || pr.return_date,
+          refNo: pr.return_no ? `PR-${pr.return_no}` : `PR-ID-${pr.return_id}`,
+          party: pr.supplier_name || 'Supplier Return',
+          user: pr.username || 'System',
+          qty,
+          rate: returnRate,
+          netRate: returnRate,
+          purchaseRate: returnRate,
+          discount: parseFloat(pr.discount) || 0,
+          amount: lineAmt
+        });
+      }
+
+      // Sort all events chronologically
+      events.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Calculate running stock balance for timeline
+      let runningStock = 0;
+      for (const ev of events) {
+        if (ev.type === 'purchase') runningStock += ev.qty;
+        else if (ev.type === 'sale') runningStock -= ev.qty;
+        else if (ev.type === 'sales_return') runningStock += ev.qty;
+        else if (ev.type === 'purchase_return') runningStock -= ev.qty;
+        ev.stockBalance = runningStock;
+      }
+
+      // Reverse events for display (newest first)
+      const timeline = [...events].reverse();
+
+      // Summary statistics
+      const totalPurchasedQty = purchRes.rows.reduce((sum, r) => sum + Math.abs(parseInt(r.packets) || 0), 0);
+      const totalSoldQty = salesRes.rows.reduce((sum, r) => sum + Math.abs(parseInt(r.packets) || 0), 0);
+      const totalSalesReturnQty = srRes.rows.reduce((sum, r) => sum + Math.abs(parseInt(r.packets) || 0), 0);
+      const totalPurchaseReturnQty = prRes.rows.reduce((sum, r) => sum + Math.abs(parseInt(pr.packets) || 0), 0);
+      
+      const totalSalesRevenue = events.filter(e => e.type === 'sale').reduce((sum, e) => sum + e.amount, 0) - events.filter(e => e.type === 'sales_return').reduce((sum, e) => sum + e.amount, 0);
+      const totalProfit = events.filter(e => e.type === 'sale').reduce((sum, e) => sum + (e.profit || 0), 0) - events.filter(e => e.type === 'sales_return').reduce((sum, e) => sum + (e.profit || 0), 0);
+
+      return {
+        success: true,
+        product,
+        timeline,
+        summary: {
+          totalPurchasedQty,
+          totalSoldQty,
+          totalSalesReturnQty,
+          totalPurchaseReturnQty,
+          netPurchasedQty: totalPurchasedQty - totalPurchaseReturnQty,
+          netSoldQty: totalSoldQty - totalSalesReturnQty,
+          totalSalesRevenue,
+          totalProfit,
+          latestArrivedNetRate: defaultCost,
+          calculatedStock: runningStock,
+          currentStock: product ? (product.available_stock ?? product.stock_qty ?? runningStock) : runningStock
+        }
+      };
     }
 
     // ─── REPORTS ──────────────────────────────────────────────────────────────
@@ -3411,10 +3862,79 @@ async function handleIPC(channel, ...args) {
       `, [startDate || '2000-01-01', endDate || '2099-12-31']);
       return r.rows;
     }
+    case 'get-customers-balance-list': {
+      const custs = await query('SELECT * FROM customers ORDER BY name ASC');
+      const list = await Promise.all(custs.rows.map(async (c) => {
+        const stmt = await getCustomerStatementData({ customerId: c.id, customerName: c.name });
+        const bal = stmt?.signed_balance || 0;
+        const roundedBal = Math.round(bal * 100) / 100;
+        return {
+          id: c.id,
+          code: c.id,
+          name: c.name,
+          phone: c.phone || '',
+          city: c.city || 'ALL CITY',
+          debit: roundedBal > 0 ? roundedBal : 0,
+          credit: roundedBal < 0 ? Math.abs(roundedBal) : 0,
+          balance: roundedBal,
+          statusText: roundedBal > 0 ? 'Lene Hain (Dr)' : roundedBal < 0 ? 'Dene Hain (Cr)' : 'Nil'
+        };
+      }));
+      return list;
+    }
+    case 'get-suppliers-balance-list': {
+      const suppLedger = await query(`
+        SELECT 
+          s.id,
+          s.name,
+          s.phone,
+          s.address,
+          (s.initial_balance + COALESCE(p.total_purchases, 0) - COALESCE(pr.total_returns, 0) - COALESCE(sp.total_paid, 0)) as net_balance
+        FROM suppliers s
+        LEFT JOIN (
+          SELECT supplier_name, SUM(total_amount) as total_purchases
+          FROM purchases WHERE is_posted = 1 GROUP BY supplier_name
+        ) p ON LOWER(TRIM(p.supplier_name)) = LOWER(TRIM(s.name))
+        LEFT JOIN (
+          SELECT supplier_name, SUM(total_amount) as total_returns
+          FROM purchase_returns WHERE is_posted = 1 GROUP BY supplier_name
+        ) pr ON LOWER(TRIM(pr.supplier_name)) = LOWER(TRIM(s.name))
+        LEFT JOIN (
+          SELECT 
+            sp.supplier_name,
+            SUM(sp.total_paid) as total_paid
+          FROM (
+            SELECT supplier_name, SUM(amount) as total_paid FROM supplier_payments GROUP BY supplier_name
+            UNION ALL
+            SELECT replace(g.account_name, 'Supplier - ', '') as supplier_name, SUM(vd.debit - vd.credit) as total_paid
+            FROM voucher_details vd
+            JOIN gl_accounts g ON g.id = vd.account_id
+            WHERE g.account_type = 'Supplier'
+            GROUP BY g.account_name
+          ) sp GROUP BY sp.supplier_name
+        ) sp ON LOWER(TRIM(sp.supplier_name)) = LOWER(TRIM(s.name))
+        ORDER BY s.name ASC
+      `);
+
+      return suppLedger.rows.map(r => {
+        const bal = parseFloat(r.net_balance) || 0;
+        const roundedBal = Math.round(bal * 100) / 100;
+        return {
+          id: r.id,
+          code: r.id,
+          name: r.name,
+          category: r.address || 'KHI',
+          debit: roundedBal < 0 ? Math.abs(roundedBal) : 0,
+          credit: roundedBal > 0 ? roundedBal : 0,
+          balance: roundedBal,
+          statusText: roundedBal > 0 ? 'Dene Hain (Cr)' : roundedBal < 0 ? 'Lene Hain (Dr)' : 'Nil'
+        };
+      });
+    }
 
     // ─── USERS ────────────────────────────────────────────────────────────────
     case 'get-users': {
-      const r = await query('SELECT id, username, role, permissions, created_at FROM users ORDER BY id');
+      const r = await query('SELECT id, username, role, permissions, email, otp_enabled, created_at FROM users ORDER BY id');
       return r.rows;
     }
     case 'add-user': {
@@ -3424,11 +3944,11 @@ async function handleIPC(channel, ...args) {
       return { success: true };
     }
     case 'create-user': {
-      const { username, password, role, permissions } = data;
+      const { username, password, role, permissions, email, otpEnabled } = data;
       const hash = await bcrypt.hash(password, 10);
       const permsStr = Array.isArray(permissions) ? permissions.join(',') : (permissions || '');
       try {
-        await query('INSERT INTO users (username, password_hash, role, permissions) VALUES ($1,$2,$3,$4)', [username, hash, role || 'operator', permsStr]);
+        await query('INSERT INTO users (username, password_hash, role, permissions, email, otp_enabled) VALUES ($1,$2,$3,$4,$5,$6)', [username, hash, role || 'operator', permsStr, email || '', otpEnabled || false]);
         return { success: true };
       } catch (e) {
         if (e.code === '23505') return { success: false, error: 'Username already exists' };
@@ -3436,13 +3956,13 @@ async function handleIPC(channel, ...args) {
       }
     }
     case 'update-user': {
-      const { id, username, role, permissions, password } = data;
+      const { id, username, role, permissions, password, email, otpEnabled } = data;
       const permsStr = Array.isArray(permissions) ? permissions.join(',') : (permissions || '');
       if (password) {
         const hash = await bcrypt.hash(password, 10);
-        await query('UPDATE users SET username=$1, role=$2, permissions=$3, password_hash=$4 WHERE id=$5', [username, role, permsStr, hash, id]);
+        await query('UPDATE users SET username=$1, role=$2, permissions=$3, password_hash=$4, email=$5, otp_enabled=$6 WHERE id=$7', [username, role, permsStr, hash, email || '', otpEnabled || false, id]);
       } else {
-        await query('UPDATE users SET username=$1, role=$2, permissions=$3 WHERE id=$4', [username, role, permsStr, id]);
+        await query('UPDATE users SET username=$1, role=$2, permissions=$3, email=$4, otp_enabled=$5 WHERE id=$6', [username, role, permsStr, email || '', otpEnabled || false, id]);
       }
       return { success: true };
     }
@@ -4008,13 +4528,13 @@ async function handleIPC(channel, ...args) {
 
     case 'get-daily-report': {
       try {
-        const { startDate, endDate, startTime, endTime, userId } = data || {};
+        const { startDate, endDate, startTime, endTime, userId, includeItems = true } = data || {};
         const start = (startDate && typeof startDate === 'string' && startDate.trim()) ? startDate.trim() : '2000-01-01';
         const end = (endDate && typeof endDate === 'string' && endDate.trim()) ? endDate.trim() : '2099-12-31';
 
-        const hasTimeFilter = !!(startTime || endTime);
         const matchesTimeWindow = (createdAt) => {
-          if (!hasTimeFilter || !createdAt) return true;
+          if (!startTime && !endTime) return true;
+          if (!createdAt) return true;
           const dt = new Date(createdAt);
           if (isNaN(dt.getTime())) return true;
           const h = String(dt.getHours()).padStart(2, '0');
@@ -4045,12 +4565,12 @@ async function handleIPC(channel, ...args) {
         const glRes = await query(`SELECT account_name FROM gl_accounts WHERE account_type = 'Bank'`);
         const bankAccountNames = glRes.rows.map(r => (r.account_name || '').toLowerCase().trim());
 
-        const enrichedSales = [];
-        const returnInvoices = [];
-        for (const sale of sales) {
-          if (!matchesTimeWindow(sale.created_at)) continue;
+        // Bulk fetch sale_items in 1 single query if requested
+        let itemsMap = {};
+        if (includeItems && sales.length > 0) {
+          const saleIds = sales.map(s => s.id);
           const itemsRes = await query(`
-            SELECT si.item_code, si.item_description, si.packets as quantity, si.sale_rate, COALESCE(si.discount, 0) as discount,
+            SELECT si.sale_id, si.item_code, si.item_description, si.packets as quantity, si.sale_rate, COALESCE(si.discount, 0) as discount,
               COALESCE(
                 CASE
                   WHEN COALESCE(lp.net_rate, 0) > 0 THEN lp.net_rate
@@ -4082,10 +4602,20 @@ async function handleIPC(channel, ...args) {
               WHERE pu.is_posted = 1 AND pi.net_rate > 0
               GROUP BY pi.item_code
             ) nc ON nc.item_code = si.item_code
-            WHERE si.sale_id = $1
+            WHERE si.sale_id = ANY($1)
             ORDER BY si.id
-          `, [sale.id]);
-          const items = itemsRes.rows;
+          `, [saleIds]);
+          itemsRes.rows.forEach(item => {
+            if (!itemsMap[item.sale_id]) itemsMap[item.sale_id] = [];
+            itemsMap[item.sale_id].push(item);
+          });
+        }
+
+        const enrichedSales = [];
+        const returnInvoices = [];
+        for (const sale of sales) {
+          if (!matchesTimeWindow(sale.created_at)) continue;
+          const items = itemsMap[sale.id] || [];
 
           const billAmt = parseFloat(sale.total_amount) || 0;
           const isReturnInvoice = billAmt < 0 || (sale.payment_method && sale.payment_method.toLowerCase().includes('return'));
@@ -4162,24 +4692,26 @@ async function handleIPC(channel, ...args) {
         `, params);
         const returns = returnsRes.rows;
 
+        // Bulk fetch sales_return_items if requested
+        let returnItemsMap = {};
+        if (includeItems && returns.length > 0) {
+          const returnIds = returns.map(r => r.id);
+          const rItemsRes = await query(`
+            SELECT sri.return_id, sri.item_code, sri.item_description, sri.packets as quantity, sri.price as sale_rate, sri.amount
+            FROM sales_return_items sri
+            WHERE sri.return_id = ANY($1)
+            ORDER BY sri.id
+          `, [returnIds]);
+          rItemsRes.rows.forEach(item => {
+            if (!returnItemsMap[item.return_id]) returnItemsMap[item.return_id] = [];
+            returnItemsMap[item.return_id].push({ ...item, profit: 0 });
+          });
+        }
+
         const enrichedReturns = [];
         for (const ret of returns) {
           if (!matchesTimeWindow(ret.created_at)) continue;
-          const itemsRes = await query(`
-            SELECT 
-              sri.item_code, sri.item_description, sri.packets as quantity, sri.price as sale_rate, sri.amount,
-              COALESCE(
-                (SELECT purchase_rate FROM sale_items WHERE item_code = sri.item_code LIMIT 1),
-                0
-              ) as purchase_rate
-            FROM sales_return_items sri
-            WHERE sri.return_id = $1
-            ORDER BY sri.id
-          `, [ret.id]);
-          const items = itemsRes.rows.map(i => ({
-            ...i,
-            profit: ((parseFloat(i.sale_rate) || 0) - (parseFloat(i.purchase_rate) || 0)) * (parseFloat(i.quantity) || 0)
-          }));
+          const items = returnItemsMap[ret.id] || [];
           enrichedReturns.push({ ...ret, items });
         }
 
@@ -4489,6 +5021,7 @@ async function handleIPC(channel, ...args) {
               p.gender,
               p.brand,
               p.year,
+              COALESCE(p.packing_qty, 1) AS packing_qty,
               CASE
                 WHEN s.name IS NOT NULL THEN s.name
                 WHEN s2.name IS NOT NULL THEN s2.name
@@ -4737,13 +5270,17 @@ async function handleIPC(channel, ...args) {
       }
     }
     case 'get-vouchers': {
-      const { startDate, endDate, type } = data || {};
-      let q = 'SELECT * FROM vouchers WHERE 1=1';
+      const { startDate, endDate, type, searchTerm } = data || {};
+      let q = 'SELECT DISTINCT v.* FROM vouchers v LEFT JOIN voucher_details vd ON v.id = vd.voucher_id LEFT JOIN gl_accounts a ON vd.account_id = a.id WHERE 1=1';
       const params = [];
-      if (startDate) { params.push(startDate); q += ` AND voucher_date >= $${params.length}`; }
-      if (endDate) { params.push(endDate); q += ` AND voucher_date <= $${params.length}`; }
-      if (type) { params.push(type); q += ` AND voucher_type = $${params.length}`; }
-      q += ' ORDER BY id DESC LIMIT 500';
+      if (startDate) { params.push(startDate); q += ` AND v.voucher_date >= $${params.length}`; }
+      if (endDate) { params.push(endDate); q += ` AND v.voucher_date <= $${params.length}`; }
+      if (type) { params.push(type); q += ` AND v.voucher_type = $${params.length}`; }
+      if (searchTerm && searchTerm.trim()) {
+        params.push(`%${searchTerm.trim()}%`);
+        q += ` AND (v.voucher_no ILIKE $${params.length} OR v.remarks ILIKE $${params.length} OR a.account_name ILIKE $${params.length} OR vd.description ILIKE $${params.length} OR vd.reference_no ILIKE $${params.length})`;
+      }
+      q += ' ORDER BY v.id DESC LIMIT 500';
       const r = await query(q, params);
       return r.rows;
     }
@@ -4875,7 +5412,8 @@ const LOCAL_CHANNELS = new Set([
   'get-local-ips', 'test-db-connection', 'test-client-connection', 'setup-database',
   'get-backup-settings', 'set-backup-path', 'test-backup', 'restore-from-backup',
   'relaunch-app', 'select-backup-dir', 'get-printers', 'print-receipt', 'save-invoice-pdf', 'print-pdf', 'print-barcodes-pdf', 'print-raw',
-  'select-json-file', 'read-file'
+  'select-json-file', 'read-file',
+  'get-email-settings', 'save-email-settings', 'test-email-settings'
 ]);
 
 function registerIPC() {
@@ -4900,10 +5438,11 @@ function registerIPC() {
     'save-purchase-return', 'update-purchase-return', 'get-purchase-returns', 'get-purchase-return-items', 'delete-purchase-return', 'get-next-purchase-return-no', 'save-purchase-return-pdf', 'print-purchase-return-html', 'save-manufacturer-stock-pdf', 'print-manufacturer-stock-html',
     'get-suppliers-ledger', 'update-supplier', 'update-supplier-balance', 'delete-supplier', 'add-supplier-payment', 'get-supplier-statement',
     'save-sale', 'update-sale', 'get-sales', 'get-sale-items', 'delete-sale', 'get-next-invoice-no',
-    'get-customers', 'add-customer', 'get-customer-balance', 'update-customer', 'update-customer-balance', 'get-customer-statement', 'add-customer-payment',
+    'get-customers', 'add-customer', 'get-customer-balance', 'update-customer', 'update-customer-balance', 'get-customer-statement', 'add-customer-payment', 'get-customers-balance-list', 'get-suppliers-balance-list',
     'save-sales-return', 'update-sales-return', 'get-sales-returns', 'get-sales-return-items', 'delete-sales-return', 'get-next-return-no',
-    'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report', 'get-supplier-stock-report',
+    'get-report-summary', 'get-report-top-items', 'get-daily-report', 'get-user-report', 'get-date-summary', 'get-sales-report', 'get-stock-report', 'get-supplier-stock-report', 'get-item-audit-data',
     'get-users', 'add-user', 'create-user', 'update-user', 'delete-user',
+    'verify-password', 'get-feature-locks', 'lock-feature', 'unlock-feature', 'verify-feature-lock-access', 'send-otp', 'verify-otp', 'get-email-settings', 'save-email-settings', 'test-email-settings',
     'get-payment-accounts', 'save-payment-accounts',
     'get-network-settings', 'save-network-settings', 'get-network-config', 'save-network-config',
     'get-receipt-settings', 'save-receipt-settings',

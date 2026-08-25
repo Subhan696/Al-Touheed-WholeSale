@@ -333,7 +333,7 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
         sessionMsg = fromId === toId ? `Session ${fromId}` : `Sessions ${fromId} to ${toId}`;
       } else {
         // Default: fetch and use the last session
-        const sess = await ipcRenderer.invoke('get-item-sessions');
+        const sess = await ipcRenderer.invoke('get-item-sessions', { showAll: true });
         if (!sess || sess.length === 0) {
           setStatusMsg('No sessions found for today');
           setTimeout(() => setStatusMsg(''), 3000);

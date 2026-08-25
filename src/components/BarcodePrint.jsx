@@ -5,10 +5,21 @@ import BarcodeSheet from './BarcodeSheet';
 
 const { ipcRenderer } = window.require('electron');
 
+const getTodayDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 function BarcodePrint({ isActive }) {
   const [mode, setMode] = useState('manual'); // 'manual' or 'purchase'
   const [purchases, setPurchases] = useState([]);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
+
+  const [startDate, setStartDate] = useState(getTodayDateString);
+  const [endDate, setEndDate] = useState(getTodayDateString);
 
   // Unified items list for printing
   const [items, setItems] = useState([]);
@@ -23,7 +34,7 @@ function BarcodePrint({ isActive }) {
 
   useEffect(() => {
     if (isActive) {
-      loadPurchases();
+      loadPurchases(startDate, endDate);
 
       // Check if there are fast purchase barcode items
       const fastPurchaseItems = sessionStorage.getItem('fastPurchaseBarcodeItems');
@@ -58,9 +69,13 @@ function BarcodePrint({ isActive }) {
     }
   }, [isActive, showPrintPreview, mode, items.length]);
 
-  const loadPurchases = async () => {
-    const data = await ipcRenderer.invoke('get-purchases');
-    setPurchases(data);
+  const loadPurchases = async (sDate = startDate, eDate = endDate) => {
+    try {
+      const data = await ipcRenderer.invoke('get-purchases', { startDate: sDate, endDate: eDate });
+      setPurchases(data || []);
+    } catch (err) {
+      console.error('Error loading purchases:', err);
+    }
   };
 
   const handleSelectPurchase = async (purchase) => {
@@ -306,8 +321,58 @@ function BarcodePrint({ isActive }) {
           <div className="sale-body" style={{ paddingTop: '16px' }}>
             {mode === 'purchase' ? (
               <div className="barcode-purchase-split" style={{ display: 'flex', gap: '16px', width: '100%', height: '100%' }}>
-                <div className="purchase-side-panel" style={{ flex: '0 0 300px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#6b7280', textTransform: 'uppercase' }}>Select Purchase</span>
+                <div className="purchase-side-panel" style={{ flex: '0 0 320px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#334155', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>📅 Date Filter</span>
+                      <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>
+                        {startDate && endDate ? `${startDate} to ${endDate}` : 'All Purchases'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={e => setStartDate(e.target.value)}
+                        style={{ flex: 1, padding: '5px 6px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                      />
+                      <span style={{ fontSize: '0.75rem', color: '#64748b' }}>to</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={e => setEndDate(e.target.value)}
+                        style={{ flex: 1, padding: '5px 6px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => loadPurchases(startDate, endDate)}
+                        style={{ flex: 1, padding: '6px 8px', fontSize: '0.75rem', fontWeight: 'bold', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                      >
+                        🔍 Filter Date
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartDate('');
+                          setEndDate('');
+                          loadPurchases('', '');
+                        }}
+                        style={{ flex: 1, padding: '6px 8px', fontSize: '0.75rem', fontWeight: 'bold', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                      >
+                        🌐 Retrieve All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#6b7280', textTransform: 'uppercase' }}>
+                      Select Purchase ({purchases.length})
+                    </span>
+                  </div>
                   <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {purchases.map(p => (
                       <div

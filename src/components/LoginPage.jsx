@@ -17,6 +17,14 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
   const [setupError, setSetupError] = useState('');
   const passwordRef = useRef(null);
 
+  // OTP state
+  const [otpStep, setOtpStep] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpMessage, setOtpMessage] = useState('');
+  const [storedUsername, setStoredUsername] = useState('');
+  const [storedPassword, setStoredPassword] = useState('');
+  const otpRef = useRef(null);
+
   React.useEffect(() => {
     // Check database status first
     ipcRenderer.invoke('get-db-status').then(status => {
@@ -56,7 +64,52 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
     if (result.success) {
       setMessage('✅ Login successful!');
       setTimeout(() => onLoginSuccess(result.userId, result.username, result.password, result.role, result.permissions), 400);
+    } else if (result.requiresOtp) {
+      // OTP required - switch to OTP step
+      setStoredUsername(username);
+      setStoredPassword(password);
+      setOtpStep(true);
+      setOtpMessage(result.message || 'OTP sent to your email');
+      setOtp('');
+      setMessage('');
+      setTimeout(() => otpRef.current?.focus(), 200);
     } else {
+      setMessage(`❌ ${result.error}`);
+    }
+    setIsLoading(false);
+  };
+
+  const handleOtpSubmit = async (e) => {
+    e.preventDefault();
+    if (!otp || otp.length !== 6) { setMessage('❌ Please enter 6-digit OTP'); return; }
+    setIsLoading(true);
+    const result = await ipcRenderer.invoke('login', { username: storedUsername, password: storedPassword, otp });
+    if (result.success) {
+      setMessage('✅ Login successful!');
+      setTimeout(() => onLoginSuccess(result.userId, result.username, result.password, result.role, result.permissions), 400);
+    } else {
+      setMessage(`❌ ${result.error}`);
+    }
+    setIsLoading(false);
+  };
+
+  const handleBackFromOtp = () => {
+    setOtpStep(false);
+    setOtp('');
+    setOtpMessage('');
+    setStoredUsername('');
+    setStoredPassword('');
+    setMessage('');
+  };
+
+  const handleResendOtp = async () => {
+    setIsLoading(true);
+    setMessage('');
+    const result = await ipcRenderer.invoke('login', { username: storedUsername, password: storedPassword });
+    if (result.requiresOtp) {
+      setOtpMessage(result.message || 'OTP re-sent to your email');
+      setOtp('');
+    } else if (result.error) {
       setMessage(`❌ ${result.error}`);
     }
     setIsLoading(false);
@@ -122,32 +175,73 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
           </div>
         )}
 
-        <form onSubmit={isRegistering ? handleRegister : handleLogin} className="login-form">
-          <h2 className="form-title">{isRegistering ? 'Create Account' : 'Login'}</h2>
-          <div className="form-group">
-            <label>Username</label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); passwordRef.current?.focus(); } }}
-              placeholder="Enter username" className="form-input" disabled={isLoading} autoFocus />
-          </div>
-          <div className="form-group">
-            <label>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-              placeholder="Enter password" className="form-input" ref={passwordRef} disabled={isLoading} />
-          </div>
-          {isRegistering && (
-            <div className="form-group">
-              <label>Confirm Password</label>
-              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-                placeholder="Confirm password" className="form-input" disabled={isLoading} />
+        {otpStep ? (
+          /* OTP Verification Step */
+          <form onSubmit={handleOtpSubmit} className="login-form">
+            <h2 className="form-title">🔐 OTP Verification</h2>
+            <div style={{ background: '#e8f4fd', border: '1px solid #b8daff', borderRadius: 8, padding: '12px 16px', marginBottom: 12, fontSize: '0.88rem', color: '#004085' }}>
+              {otpMessage}
             </div>
-          )}
-          {message && <div className={`message ${message.includes('✅') ? 'success' : 'error'}`}>{message}</div>}
-          <button type="submit" className="btn-submit" disabled={isLoading || !!dbError}>
-            {isLoading ? 'Loading...' : isRegistering ? 'Create Account' : 'Login'}
-          </button>
-        </form>
-        {!usersExist && (
+            <div className="form-group">
+              <label>Enter 6-digit OTP</label>
+              <input 
+                type="text" 
+                value={otp} 
+                onChange={e => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  setOtp(val);
+                }}
+                placeholder="000000" 
+                className="form-input" 
+                ref={otpRef}
+                disabled={isLoading}
+                style={{ letterSpacing: '8px', fontSize: '1.4rem', textAlign: 'center', fontWeight: 700 }}
+                maxLength={6}
+              />
+            </div>
+            {message && <div className={`message ${message.includes('✅') ? 'success' : 'error'}`}>{message}</div>}
+            <button type="submit" className="btn-submit" disabled={isLoading || otp.length !== 6}>
+              {isLoading ? 'Verifying...' : 'Verify OTP'}
+            </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+              <button type="button" onClick={handleBackFromOtp} className="toggle-btn" style={{ fontSize: '0.88rem' }}>
+                ← Back to Login
+              </button>
+              <button type="button" onClick={handleResendOtp} className="toggle-btn" disabled={isLoading} style={{ fontSize: '0.88rem', color: '#3699ff' }}>
+                📧 Resend OTP
+              </button>
+            </div>
+          </form>
+        ) : (
+          /* Normal Login/Register Form */
+          <form onSubmit={isRegistering ? handleRegister : handleLogin} className="login-form">
+            <h2 className="form-title">{isRegistering ? 'Create Account' : 'Login'}</h2>
+            <div className="form-group">
+              <label>Username</label>
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); passwordRef.current?.focus(); } }}
+                placeholder="Enter username" className="form-input" disabled={isLoading} autoFocus />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="Enter password" className="form-input" ref={passwordRef} disabled={isLoading} />
+            </div>
+            {isRegistering && (
+              <div className="form-group">
+                <label>Confirm Password</label>
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm password" className="form-input" disabled={isLoading} />
+              </div>
+            )}
+            {message && <div className={`message ${message.includes('✅') ? 'success' : 'error'}`}>{message}</div>}
+            <button type="submit" className="btn-submit" disabled={isLoading || !!dbError}>
+              {isLoading ? 'Loading...' : isRegistering ? 'Create Account' : 'Login'}
+            </button>
+          </form>
+        )}
+
+        {!usersExist && !otpStep && (
           <div className="form-footer">
             <p>
               {isRegistering ? 'Already have an account?' : "Don't have an account?"}
@@ -157,7 +251,7 @@ function LoginPage({ onLoginSuccess, onOpenNetworkSettings }) {
             </p>
           </div>
         )}
-        {onOpenNetworkSettings && (
+        {onOpenNetworkSettings && !otpStep && (
           <div className="network-settings-footer">
             <button type="button" className="btn-network-settings" onClick={onOpenNetworkSettings}>
               ⚙️ Network Settings

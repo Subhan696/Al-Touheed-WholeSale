@@ -4,6 +4,8 @@ import BankLedger from './BankLedger';
 import CashLedger from './CashLedger';
 import SupplierLedger from './SupplierLedger';
 import FreightReport from './FreightReport';
+import CustomerBalanceList from './CustomerBalanceList';
+import SupplierBalanceList from './SupplierBalanceList';
 import './Ledgers.css';
 
 const TABS = [

@@ -35,6 +35,7 @@ function Reports({ currentUser, isActive }) {
     const [selectedUser, setSelectedUser] = useState('all');
     const [userList, setUserList] = useState([]);
     const [isMinimized, setIsMinimized] = useState(false);
+    const [showInvoicesList, setShowInvoicesList] = useState(false);
     const printRef = useRef(null);
     const timeFilterMounted = useRef(false);
 
@@ -42,7 +43,7 @@ function Reports({ currentUser, isActive }) {
     const dateInputStyle = { marginLeft: '6px', padding: '8px 11px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '17px', fontWeight: 700, color: '#1e293b' };
     const filterLabelStyle = { fontSize: '15px', fontWeight: 700, color: '#334155' };
 
-    const fetchReport = async (silent = false) => {
+    const fetchReport = async (silent = false, forceIncludeItems = showInvoicesList) => {
         // silent = update data in place without flipping `loading`. Used for the
         // debounced time-window refetch so the report doesn't unmount/collapse
         // (which caused the page to bounce while adjusting the time spinner).
@@ -51,7 +52,14 @@ function Reports({ currentUser, isActive }) {
             const cleanStartDate = startDate && startDate.trim() ? startDate.trim() : '2000-01-01';
             const cleanEndDate = endDate && endDate.trim() ? endDate.trim() : '2099-12-31';
             if (activeTab === 'daily' || activeTab === 'invoices') {
-                const data = await ipcRenderer.invoke('get-daily-report', { startDate: cleanStartDate, endDate: cleanEndDate, startTime, endTime, userId: selectedUser });
+                const data = await ipcRenderer.invoke('get-daily-report', {
+                    startDate: cleanStartDate,
+                    endDate: cleanEndDate,
+                    startTime,
+                    endTime,
+                    userId: selectedUser,
+                    includeItems: forceIncludeItems
+                });
                 setDailyReport(data);
             } else if (activeTab === 'sales') {
                 const data = await ipcRenderer.invoke('get-sales-report', { startDate: cleanStartDate, endDate: cleanEndDate });
@@ -73,9 +81,10 @@ function Reports({ currentUser, isActive }) {
         }
     };
 
-    // Fetch immediately when tab, date, or user changes.
+    // Fetch immediately when tab, date, or user changes. Reset showInvoicesList on tab change.
     useEffect(() => {
-        fetchReport();
+        setShowInvoicesList(false);
+        fetchReport(false, false);
     }, [activeTab, startDate, endDate, selectedUser]);
 
     // Fetch user list on mount
@@ -603,150 +612,185 @@ function Reports({ currentUser, isActive }) {
                             </div>
                         )}
 
-                        {/* Sales Invoices Header with Filtering info */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', paddingBottom: '6px', borderBottom: '2px solid #1e40af' }}>
-                            <h2 style={{ fontSize: '15px', fontWeight: 'bold', color: '#1e3a8a', margin: 0 }}>
-                                {filterMethod ? `🔍 Filtering: ${filterMethod}` : `🧾 Sales Invoices`} ({
-                                    (dailyReport.sales || [])
-                                        .filter(sale => !filterMethod || (sale.payment_method && sale.payment_method.toLowerCase().includes(filterMethod.toLowerCase())))
-                                        .length
-                                })
-                            </h2>
-                            {filterMethod && (
-                                <button
-                                    onClick={() => setFilterMethod(null)}
-                                    style={{ padding: '4px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
-                                >
-                                    Clear Filter ✕
-                                </button>
-                            )}
+                        {/* Load Invoices Toggle Button */}
+                        <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={async () => {
+                                    const nextState = !showInvoicesList;
+                                    setShowInvoicesList(nextState);
+                                    if (nextState) {
+                                        await fetchReport(false, true);
+                                    }
+                                }}
+                                style={{
+                                    padding: '10px 24px',
+                                    fontSize: '15px',
+                                    fontWeight: 'bold',
+                                    background: showInvoicesList ? '#475569' : '#2563eb',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px'
+                                }}
+                            >
+                                {showInvoicesList ? '🔼 Hide Invoices List' : `🧾 Load Invoices List (${(dailyReport.sales || []).length} Invoices)`}
+                            </button>
                         </div>
 
-
-                        {dailyReport.sales.length === 0 && (
-                            <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', background: '#f9fafb', borderRadius: '8px', marginBottom: '16px' }}>
-                                No sales for this period.
-                            </div>
-                        )}
-
-                        {dailyReport.sales
-                            .filter(sale => !filterMethod || (sale.payment_method && sale.payment_method.toLowerCase().includes(filterMethod.toLowerCase())))
-                            .map((sale, idx) => (
-                                <div key={idx} className="invoice-block" style={{ marginBottom: '14px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
-                                    <div style={{ background: '#eff6ff', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #bfdbfe' }}>
-                                        <div>
-                                            <strong style={{ fontSize: '14px', color: '#1e40af' }}>Invoice #{sale.invoice_no || sale.id}</strong>
-                                            {sale.customer_name && <span style={{ marginLeft: '10px', color: '#374151' }}>{sale.customer_name}</span>}
-                                            {sale.sold_by && selectedUser === 'all' && <span style={{ marginLeft: '10px', fontSize: '11px', color: '#6b7280', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px' }}>👤 {sale.sold_by}</span>}
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                            <span style={{ fontSize: '12px', color: '#6b7280' }}>{reformatDateDisplay(sale.sale_date)} {fmtTime(sale.created_at)}</span>
-                                            <span style={{
-                                                padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold',
-                                                background: (sale.displayType === 'Return Invoice' || sale.billAmt < 0) ? '#fee2e2' : (sale.payment_method && (
-                                                    sale.payment_method.toLowerCase().includes('jazzcash') ||
-                                                    sale.payment_method.toLowerCase().includes('easypais') ||
-                                                    sale.payment_method.toLowerCase().includes('raast') ||
-                                                    sale.payment_method.toLowerCase().includes('bank') ||
-                                                    sale.payment_method.toLowerCase().includes('transfer')
-                                                )) ? '#dbeafe' : '#d1fae5',
-                                                color: (sale.displayType === 'Return Invoice' || sale.billAmt < 0) ? '#991b1b' : (sale.payment_method && (
-                                                    sale.payment_method.toLowerCase().includes('jazzcash') ||
-                                                    sale.payment_method.toLowerCase().includes('easypais') ||
-                                                    sale.payment_method.toLowerCase().includes('raast') ||
-                                                    sale.payment_method.toLowerCase().includes('bank') ||
-                                                    sale.payment_method.toLowerCase().includes('transfer')
-                                                )) ? '#1e40af' : '#065f46'
-                                            }}>
-                                                {sale.displayType || sale.payment_method || 'Cash'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <thead>
-                                            <tr style={{ background: '#f3f4f6' }}>
-                                                <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Item Code</th>
-                                                <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Description</th>
-                                                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Qty</th>
-                                                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Rate</th>
-                                                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Disc</th>
-                                                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Amount</th>
-                                                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Profit</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {sale.items.map((item, i) => (
-                                                <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                    <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: '12px', fontWeight: 'bold' }}>{item.item_code}</td>
-                                                    <td style={{ padding: '5px 10px', color: '#374151' }}>{item.item_description}</td>
-                                                    <td style={{ padding: '5px 10px', textAlign: 'right' }}>{item.quantity}</td>
-                                                    <td style={{ padding: '5px 10px', textAlign: 'right' }}>{fmt(item.sale_rate)}</td>
-                                                    <td style={{ padding: '5px 10px', textAlign: 'right', color: item.discount > 0 ? '#ef4444' : '#9ca3af' }}>{item.discount > 0 ? fmt(item.discount) : '—'}</td>
-                                                    <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: 'bold' }}>{fmt(item.amount)}</td>
-                                                    <td style={{ padding: '5px 10px', textAlign: 'right', color: '#10b981' }}>{fmt(item.profit)}</td>
-                                                </tr>
-                                            ))}
-                                            <tr style={{ background: '#eff6ff', borderTop: '2px solid #bfdbfe' }}>
-                                                <td colSpan="2" style={{ padding: '6px 10px', fontWeight: 'bold' }}>
-                                                    Totals — {sale.total_quantity} items
-                                                    {sale.misc_charges > 0 && <span style={{ color: '#059669', marginLeft: '8px' }}> — Misc: {fmt(sale.misc_charges)}</span>}
-                                                    {sale.discount > 0 && <span style={{ color: '#ef4444', marginLeft: '8px' }}> — Discount: {fmt(sale.discount)}</span>}
-                                                </td>
-                                                <td></td>
-                                                <td></td>
-                                                <td></td>
-                                                <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#1e40af' }}>{fmt(sale.total_amount + (sale.misc_charges || 0) - (sale.discount || 0))}</td>
-                                                <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#10b981' }}>{fmt(sale.profit)}</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ))}
-
-                        {/* Returns Section */}
-                        {dailyReport.returns.length > 0 && (
+                        {showInvoicesList && (
                             <>
-                                <h2 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '12px', paddingBottom: '6px', borderBottom: '2px solid #ef4444', color: '#991b1b', marginTop: '20px' }}>
-                                    ↩️ Sales Returns ({dailyReport.returns.length})
-                                </h2>
-                                {dailyReport.returns.map((ret, idx) => (
-                                    <div key={idx} className="return-block" style={{ marginBottom: '14px', border: '1px solid #fecaca', borderRadius: '8px', overflow: 'hidden' }}>
-                                        <div style={{ background: '#fff0f0', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fecaca' }}>
-                                            <div>
-                                                <strong style={{ fontSize: '14px', color: '#991b1b' }}>Return #{ret.return_no || ret.id}</strong>
-                                                <span style={{ fontSize: '11px', color: '#6b7280', display: 'block', marginTop: '2px' }}>Against Inv #{ret.invoice_no}</span>
-                                                {ret.customer_name && <span style={{ marginLeft: '10px', color: '#374151' }}>{ret.customer_name}</span>}
-                                            </div>
-                                            <span style={{ fontSize: '12px', color: '#6b7280' }}>{reformatDateDisplay(ret.return_date)} {fmtTime(ret.created_at)}</span>
-                                        </div>
-                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                            <thead>
-                                                <tr style={{ background: '#fef2f2' }}>
-                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Item Code</th>
-                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Description</th>
-                                                    <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Qty</th>
-                                                    <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Rate</th>
-                                                    <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Amount</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {ret.items.map((item, i) => (
-                                                    <tr key={i} style={{ borderBottom: '1px solid #fee2e2' }}>
-                                                        <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: '12px', fontWeight: 'bold' }}>{item.item_code}</td>
-                                                        <td style={{ padding: '5px 10px', color: '#374151' }}>{item.item_description}</td>
-                                                        <td style={{ padding: '5px 10px', textAlign: 'right' }}>{item.quantity}</td>
-                                                        <td style={{ padding: '5px 10px', textAlign: 'right' }}>{fmt(item.sale_rate)}</td>
-                                                        <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{fmt(item.amount)}</td>
-                                                    </tr>
-                                                ))}
-                                                <tr style={{ background: '#fff0f0', borderTop: '2px solid #fecaca' }}>
-                                                    <td colSpan="4" style={{ padding: '6px 10px', fontWeight: 'bold' }}>Total Returned</td>
-                                                    <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{fmt(ret.total_amount)}</td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
+                                {/* Sales Invoices Header with Filtering info */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', paddingBottom: '6px', borderBottom: '2px solid #1e40af' }}>
+                                    <h2 style={{ fontSize: '15px', fontWeight: 'bold', color: '#1e3a8a', margin: 0 }}>
+                                        {filterMethod ? `🔍 Filtering: ${filterMethod}` : `🧾 Sales Invoices`} ({
+                                            (dailyReport.sales || [])
+                                                .filter(sale => !filterMethod || (sale.payment_method && sale.payment_method.toLowerCase().includes(filterMethod.toLowerCase())))
+                                                .length
+                                        })
+                                    </h2>
+                                    {filterMethod && (
+                                        <button
+                                            onClick={() => setFilterMethod(null)}
+                                            style={{ padding: '4px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+                                        >
+                                            Clear Filter ✕
+                                        </button>
+                                    )}
+                                </div>
+
+
+                                {dailyReport.sales.length === 0 && (
+                                    <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', background: '#f9fafb', borderRadius: '8px', marginBottom: '16px' }}>
+                                        No sales for this period.
                                     </div>
-                                ))}
+                                )}
+
+                                {dailyReport.sales
+                                    .filter(sale => !filterMethod || (sale.payment_method && sale.payment_method.toLowerCase().includes(filterMethod.toLowerCase())))
+                                    .map((sale, idx) => (
+                                        <div key={idx} className="invoice-block" style={{ marginBottom: '14px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                                            <div style={{ background: '#eff6ff', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #bfdbfe' }}>
+                                                <div>
+                                                    <strong style={{ fontSize: '14px', color: '#1e40af' }}>Invoice #{sale.invoice_no || sale.id}</strong>
+                                                    {sale.customer_name && <span style={{ marginLeft: '10px', color: '#374151' }}>{sale.customer_name}</span>}
+                                                    {sale.sold_by && selectedUser === 'all' && <span style={{ marginLeft: '10px', fontSize: '11px', color: '#6b7280', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px' }}>👤 {sale.sold_by}</span>}
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                    <span style={{ fontSize: '12px', color: '#6b7280' }}>{reformatDateDisplay(sale.sale_date)} {fmtTime(sale.created_at)}</span>
+                                                    <span style={{
+                                                        padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold',
+                                                        background: (sale.displayType === 'Return Invoice' || sale.billAmt < 0) ? '#fee2e2' : (sale.payment_method && (
+                                                            sale.payment_method.toLowerCase().includes('jazzcash') ||
+                                                            sale.payment_method.toLowerCase().includes('easypais') ||
+                                                            sale.payment_method.toLowerCase().includes('raast') ||
+                                                            sale.payment_method.toLowerCase().includes('bank') ||
+                                                            sale.payment_method.toLowerCase().includes('transfer')
+                                                        )) ? '#dbeafe' : '#d1fae5',
+                                                        color: (sale.displayType === 'Return Invoice' || sale.billAmt < 0) ? '#991b1b' : (sale.payment_method && (
+                                                            sale.payment_method.toLowerCase().includes('jazzcash') ||
+                                                            sale.payment_method.toLowerCase().includes('easypais') ||
+                                                            sale.payment_method.toLowerCase().includes('raast') ||
+                                                            sale.payment_method.toLowerCase().includes('bank') ||
+                                                            sale.payment_method.toLowerCase().includes('transfer')
+                                                        )) ? '#1e40af' : '#065f46'
+                                                    }}>
+                                                        {sale.displayType || sale.payment_method || 'Cash'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                <thead>
+                                                    <tr style={{ background: '#f3f4f6' }}>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Item Code</th>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Description</th>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Qty</th>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Rate</th>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Disc</th>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Amount</th>
+                                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Profit</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {(sale.items || []).map((item, i) => (
+                                                        <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                            <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: '12px', fontWeight: 'bold' }}>{item.item_code}</td>
+                                                            <td style={{ padding: '5px 10px', color: '#374151' }}>{item.item_description}</td>
+                                                            <td style={{ padding: '5px 10px', textAlign: 'right' }}>{item.quantity}</td>
+                                                            <td style={{ padding: '5px 10px', textAlign: 'right' }}>{fmt(item.sale_rate)}</td>
+                                                            <td style={{ padding: '5px 10px', textAlign: 'right', color: item.discount > 0 ? '#ef4444' : '#9ca3af' }}>{item.discount > 0 ? fmt(item.discount) : '—'}</td>
+                                                            <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: 'bold' }}>{fmt(item.amount)}</td>
+                                                            <td style={{ padding: '5px 10px', textAlign: 'right', color: '#10b981' }}>{fmt(item.profit)}</td>
+                                                        </tr>
+                                                    ))}
+                                                    <tr style={{ background: '#eff6ff', borderTop: '2px solid #bfdbfe' }}>
+                                                        <td colSpan="2" style={{ padding: '6px 10px', fontWeight: 'bold' }}>
+                                                            Totals — {sale.total_quantity} items
+                                                            {sale.misc_charges > 0 && <span style={{ color: '#059669', marginLeft: '8px' }}> — Misc: {fmt(sale.misc_charges)}</span>}
+                                                            {sale.discount > 0 && <span style={{ color: '#ef4444', marginLeft: '8px' }}> — Discount: {fmt(sale.discount)}</span>}
+                                                        </td>
+                                                        <td></td>
+                                                        <td></td>
+                                                        <td></td>
+                                                        <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#1e40af' }}>{fmt(sale.total_amount + (sale.misc_charges || 0) - (sale.discount || 0))}</td>
+                                                        <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#10b981' }}>{fmt(sale.profit)}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ))}
+
+                                {/* Returns Section */}
+                                {dailyReport.returns.length > 0 && (
+                                    <>
+                                        <h2 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '12px', paddingBottom: '6px', borderBottom: '2px solid #ef4444', color: '#991b1b', marginTop: '20px' }}>
+                                            ↩️ Sales Returns ({dailyReport.returns.length})
+                                        </h2>
+                                        {dailyReport.returns.map((ret, idx) => (
+                                            <div key={idx} className="return-block" style={{ marginBottom: '14px', border: '1px solid #fecaca', borderRadius: '8px', overflow: 'hidden' }}>
+                                                <div style={{ background: '#fff0f0', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fecaca' }}>
+                                                    <div>
+                                                        <strong style={{ fontSize: '14px', color: '#991b1b' }}>Return #{ret.return_no || ret.id}</strong>
+                                                        <span style={{ fontSize: '11px', color: '#6b7280', display: 'block', marginTop: '2px' }}>Against Inv #{ret.invoice_no}</span>
+                                                        {ret.customer_name && <span style={{ marginLeft: '10px', color: '#374151' }}>{ret.customer_name}</span>}
+                                                    </div>
+                                                    <span style={{ fontSize: '12px', color: '#6b7280' }}>{reformatDateDisplay(ret.return_date)} {fmtTime(ret.created_at)}</span>
+                                                </div>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                    <thead>
+                                                        <tr style={{ background: '#fef2f2' }}>
+                                                            <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Item Code</th>
+                                                            <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Description</th>
+                                                            <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Qty</th>
+                                                            <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Rate</th>
+                                                            <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: '11px', color: '#374151', fontWeight: '600' }}>Amount</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {(ret.items || []).map((item, i) => (
+                                                            <tr key={i} style={{ borderBottom: '1px solid #fee2e2' }}>
+                                                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: '12px', fontWeight: 'bold' }}>{item.item_code}</td>
+                                                                <td style={{ padding: '5px 10px', color: '#374151' }}>{item.item_description}</td>
+                                                                <td style={{ padding: '5px 10px', textAlign: 'right' }}>{item.quantity}</td>
+                                                                <td style={{ padding: '5px 10px', textAlign: 'right' }}>{fmt(item.sale_rate)}</td>
+                                                                <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{fmt(item.amount)}</td>
+                                                            </tr>
+                                                        ))}
+                                                        <tr style={{ background: '#fff0f0', borderTop: '2px solid #fecaca' }}>
+                                                            <td colSpan="4" style={{ padding: '6px 10px', fontWeight: 'bold' }}>Total Returned</td>
+                                                            <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{fmt(ret.total_amount)}</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
                             </>
                         )}
 
@@ -789,50 +833,81 @@ function Reports({ currentUser, isActive }) {
                             Total Return: {dailyReport.summary.totalReturnedItems || 0}
                         </div>
 
-                        <table className="invoice-summary-table" style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
-                            <thead>
-                                <tr>
-                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>#No</th>
-                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>Time</th>
-                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>Bill (Items)</th>
-                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'right' }}>Discount</th>
-                                    <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'right' }}>Total Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {dailyReport.sales.map((sale, i) => {
-                                    const prev = dailyReport.sales[i - 1];
-                                    // For a multi-day range, write the date at the start of each day's
-                                    // group — including the very first batch.
-                                    const multiDate = startDate !== endDate;
-                                    const showDate = multiDate && (i === 0 || sale.sale_date !== prev.sale_date);
-                                    return (
-                                        <React.Fragment key={sale.id}>
-                                            {showDate && (
-                                                <tr className="inv-date-row">
-                                                    <td colSpan="5" style={{ padding: '7px 6px 2px', borderTop: '2px solid #d1d5db' }}>
-                                                        <span style={{ fontWeight: 'bold', fontSize: '17px', color: '#111827' }}>{reformatDateDisplay(sale.sale_date)}</span>
-                                                        <span style={{ marginLeft: '40px', fontWeight: 'bold', fontSize: '17px', color: '#991b1b' }}>Returns: {invoiceReturnsByDate[sale.sale_date] || 0}</span>
-                                                    </td>
-                                                </tr>
-                                            )}
-                                            <tr style={{ borderBottom: '1px solid #e5e7eb', background: i % 2 === 0 ? 'white' : '#f9fafb' }}>
-                                                <td style={{ padding: '3px 6px', fontWeight: 'bold' }}>{sale.invoice_no || sale.id}</td>
-                                                <td style={{ padding: '3px 6px' }}>{fmtTime(sale.created_at)}</td>
-                                                <td style={{ padding: '3px 6px' }}>{sale.total_quantity || 0} item{(sale.total_quantity || 0) !== 1 ? 's' : ''}</td>
-                                                <td style={{ padding: '3px 6px', textAlign: 'right', color: sale.discount > 0 ? '#ef4444' : '#9ca3af' }}>{sale.discount > 0 ? fmt(sale.discount) : '—'}</td>
-                                                <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 'bold' }}>{fmt(sale.total_amount + (sale.misc_charges || 0) - (sale.discount || 0))}</td>
-                                            </tr>
-                                        </React.Fragment>
-                                    );
-                                })}
-                                {dailyReport.sales.length === 0 && (
+                        {/* Load Invoices Toggle Button */}
+                        <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={async () => {
+                                    const nextState = !showInvoicesList;
+                                    setShowInvoicesList(nextState);
+                                    if (nextState) {
+                                        await fetchReport(false, true);
+                                    }
+                                }}
+                                style={{
+                                    padding: '10px 24px',
+                                    fontSize: '15px',
+                                    fontWeight: 'bold',
+                                    background: showInvoicesList ? '#475569' : '#2563eb',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px'
+                                }}
+                            >
+                                {showInvoicesList ? '🔼 Hide Invoices List' : `🧾 Load Invoices List (${(dailyReport.sales || []).length} Invoices)`}
+                            </button>
+                        </div>
+
+                        {showInvoicesList && (
+                            <table className="invoice-summary-table" style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
+                                <thead>
                                     <tr>
-                                        <td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No invoices found.</td>
+                                        <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>#No</th>
+                                        <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>Time</th>
+                                        <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'left' }}>Bill (Items)</th>
+                                        <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'right' }}>Discount</th>
+                                        <th style={{ background: '#f3f4f6', color: '#374151', padding: '5px 6px', borderBottom: '2px solid #d1d5db', textAlign: 'right' }}>Total Amount</th>
                                     </tr>
-                                )}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {dailyReport.sales.map((sale, i) => {
+                                        const prev = dailyReport.sales[i - 1];
+                                        const multiDate = startDate !== endDate;
+                                        const showDate = multiDate && (i === 0 || sale.sale_date !== prev.sale_date);
+                                        return (
+                                            <React.Fragment key={sale.id}>
+                                                {showDate && (
+                                                    <tr className="inv-date-row">
+                                                        <td colSpan="5" style={{ padding: '7px 6px 2px', borderTop: '2px solid #d1d5db' }}>
+                                                            <span style={{ fontWeight: 'bold', fontSize: '17px', color: '#111827' }}>{reformatDateDisplay(sale.sale_date)}</span>
+                                                            <span style={{ marginLeft: '40px', fontWeight: 'bold', fontSize: '17px', color: '#991b1b' }}>Returns: {invoiceReturnsByDate[sale.sale_date] || 0}</span>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                                <tr style={{ borderBottom: '1px solid #e5e7eb', background: i % 2 === 0 ? 'white' : '#f9fafb' }}>
+                                                    <td style={{ padding: '3px 6px', fontWeight: 'bold' }}>{sale.invoice_no || sale.id}</td>
+                                                    <td style={{ padding: '3px 6px' }}>{fmtTime(sale.created_at)}</td>
+                                                    <td style={{ padding: '3px 6px' }}>{sale.total_quantity || 0} item{(sale.total_quantity || 0) !== 1 ? 's' : ''}</td>
+                                                    <td style={{ padding: '3px 6px', textAlign: 'right', color: sale.discount > 0 ? '#ef4444' : '#9ca3af' }}>{sale.discount > 0 ? fmt(sale.discount) : '—'}</td>
+                                                    <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 'bold' }}>{fmt(sale.total_amount + (sale.misc_charges || 0) - (sale.discount || 0))}</td>
+                                                </tr>
+                                            </React.Fragment>
+                                        );
+                                    })}
+                                    {dailyReport.sales.length === 0 && (
+                                        <tr>
+                                            <td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No invoices found.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        )}
 
                         <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '15px', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px', borderTop: '2px solid #ccc', paddingTop: '10px' }}>
                             Total Bill: {dailyReport.sales.length}
