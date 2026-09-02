@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useDataVersion } from '../context/DataContext';
 import './UserManagement.css';
 
 const { ipcRenderer } = window.require('electron');
@@ -13,6 +14,8 @@ function BackupSettings() {
     // Connection detection state
     const [hasExistingBackup, setHasExistingBackup] = useState(false);
 
+    const backupVer = useDataVersion('auto-backup');
+
     const loadSettings = async () => {
         const s = await ipcRenderer.invoke('get-backup-settings');
         setSettings(s);
@@ -23,7 +26,13 @@ function BackupSettings() {
         }
     };
 
-    useEffect(() => { loadSettings(); }, []);
+    useEffect(() => {
+        loadSettings();
+        const timer = setInterval(() => {
+            loadSettings();
+        }, 5000);
+        return () => clearInterval(timer);
+    }, [backupVer]);
 
     const fmtTime = (iso) => {
         if (!iso) return 'Never';

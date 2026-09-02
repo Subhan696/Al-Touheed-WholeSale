@@ -188,8 +188,7 @@ export default function FreightReport() {
             <thead>
               <tr>
                 <th style={{ width: '85px', textAlign: 'left' }}>Date</th>
-                <th style={{ width: '75px', textAlign: 'left' }}>Type</th>
-                <th style={{ width: '65px', textAlign: 'left' }}>V/Code</th>
+                <th style={{ width: '80px', textAlign: 'left' }}>Type</th>
                 <th style={{ textAlign: 'left' }}>Remarks</th>
                 <th style={{ width: '50px', textAlign: 'center', backgroundColor: '#e0f2fe', color: '#0369a1' }}>Ctns</th>
                 <th style={{ width: '80px', textAlign: 'left' }}>Cheque #</th>
@@ -206,7 +205,7 @@ export default function FreightReport() {
             <tbody>
               {/* Account Subheader */}
               <tr className="fr-account-header-row">
-                <td colSpan="6">
+                <td colSpan="5">
                   <span style={{ fontWeight: 'bold' }}>Alias Name:</span> {getAliasName(selectedAccount)}
                   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
                   <span style={{ fontWeight: 'bold' }}>{selectedAccount || 'PURCHASE EXPENSE PAYABLE A/C'}</span>
@@ -219,18 +218,17 @@ export default function FreightReport() {
               {/* Transactions */}
               {loading ? (
                 <tr>
-                  <td colSpan="9" style={{ padding: '30px', textAlign: 'center' }}>Loading statement...</td>
+                  <td colSpan="8" style={{ padding: '30px', textAlign: 'center' }}>Loading statement...</td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan="9" style={{ padding: '30px', textAlign: 'center' }}>No transactions found for this period.</td>
+                  <td colSpan="8" style={{ padding: '30px', textAlign: 'center' }}>No transactions found for this period.</td>
                 </tr>
               ) : (
                 transactions.map((t, idx) => (
                   <tr key={idx}>
                     <td style={{ width: '85px' }}>{fmtDate(t.date)}</td>
-                    <td style={{ width: '75px' }}>{t.type}</td>
-                    <td style={{ width: '65px' }}>{t.vcode}</td>
+                    <td style={{ width: '80px' }}>{t.type}</td>
                     <td>{t.remarks}</td>
                     <td style={{ width: '50px', textAlign: 'center', fontWeight: 700, color: t.ctns > 0 ? '#0284c7' : '#94a3b8' }}>{t.ctns || 0}</td>
                     <td style={{ width: '80px' }}>{t.cheque_no || ''}</td>

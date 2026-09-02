@@ -61,10 +61,10 @@ export default function Ledgers({ currentUser, isActive, initialTab = 'customer'
           <BankLedger currentUser={currentUser} isActive={isActive && activeTab === 'bank'} />
         )}
         {activeTab === 'supplier' && (
-          <SupplierLedger />
+          <SupplierLedger currentUser={currentUser} />
         )}
         {activeTab === 'freight' && (
-          <FreightReport />
+          <FreightReport currentUser={currentUser} />
         )}
       </div>
     </div>

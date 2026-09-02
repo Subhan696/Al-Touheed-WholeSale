@@ -11,19 +11,31 @@ import './StockList.css';
 import './ProductList.css';
 
 import PaymentModal from './PaymentModal';
-
+import StockSearchModal from './StockSearchModal';
 import { PAKISTAN_CITIES } from '../utils/pakistanCities';
-
-
 
 const { ipcRenderer } = window.require('electron');
 
 
 
+const LiveClock = React.memo(({ initialDate, isLive }) => {
+  const [now, setNow] = useState(initialDate || new Date());
+  useEffect(() => {
+    if (!isLive) return;
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, [isLive]);
+
+  const d = isLive ? now : (initialDate || new Date());
+  return (
+    <span className="topbar-dt">
+      {`${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}, ${d.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
+    </span>
+  );
+});
+
 function descForProduct(p) {
-
   return `${p.description || ''} ${p.category || ''} ${p.size_range || ''} ${p.gender || ''}`.replace(/\s+/g, ' ').trim();
-
 }
 
 
@@ -86,7 +98,7 @@ function parsePaymentMethodString(str) {
 
 
 
-function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesList, onNewSale, isActive }) {
+function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesList, onNewSale, isActive, onCustomerNameChange }) {
   const isEditing = !!saleToEdit;
 
   const salesVersion = useDataVersion('sales');
@@ -95,27 +107,18 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
   const productVer = useDataVersion('products');
 
+  const brandsVersion = useDataVersion('brands');
+
+  const sizeRangesVersion = useDataVersion('size_ranges');
+
+  const profitRulesVersion = useDataVersion('profit_rules');
+
+  const overallProfitVersion = useDataVersion('overall_profit');
+
 
 
   // Stock inventory search modal state
-
   const [stockSearchModalOpen, setStockSearchModalOpen] = useState(false);
-
-  const [stockSearchFilters, setStockSearchFilters] = useState({ search: '', brand: '', category: '', size: '' });
-
-  const [stockSearchItems, setStockSearchItems] = useState([]);
-
-  const [stockSearchLoading, setStockSearchLoading] = useState(false);
-
-  const [stockModalSelectedIndex, setStockModalSelectedIndex] = useState(0);
-
-  const [stockToastMsg, setStockToastMsg] = useState('');
-
-  const stockSearchInputRef = useRef(null);
-
-  const stockModalRowRefs = useRef({});
-
-
 
   const [invoiceNo, setInvoiceNo] = useState('');
 
@@ -124,6 +127,10 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
   const [customerId, setCustomerId] = useState(null);
 
   const [customerName, setCustomerName] = useState('');
+
+  useEffect(() => {
+    onCustomerNameChange?.(customerName);
+  }, [customerName, onCustomerNameChange]);
 
   const [customerPhone, setCustomerPhone] = useState('');
 
@@ -171,6 +178,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
   const [miscCharges, setMiscCharges] = useState(0);
 
   const [notes, setNotes] = useState('');
+  const [remarksModalOpen, setRemarksModalOpen] = useState(false);
+  const [tempRemarks, setTempRemarks] = useState('');
 
 
 
@@ -208,32 +217,38 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
   useEffect(() => {
-
-    if (customerName && !isEditing) {
-
-      ipcRenderer.invoke('get-customer-balance', { customerName, customerId })
-
-        .then(res => {
-
-          setCustomerPrevBalance(res?.balance || 0);
-
-        })
-
-        .catch(() => setCustomerPrevBalance(0));
-
-    } else if (!customerName) {
-
+    if (!customerName) {
       setCustomerPrevBalance(0);
+    } else if (isEditing && saleToEdit) {
+      const origId = saleToEdit.customer_id;
+      const origName = saleToEdit.customer_name;
+      const isOriginalCustomer =
+        (origId && String(customerId) === String(origId)) ||
+        (origName && customerName.trim().toLowerCase() === String(origName).trim().toLowerCase());
 
+      if (isOriginalCustomer) {
+        setCustomerPrevBalance(saleToEdit.customer_prev_balance || 0);
+      } else {
+        ipcRenderer.invoke('get-customer-balance', { customerName, customerId })
+          .then(res => {
+            setCustomerPrevBalance(res?.balance || 0);
+          })
+          .catch(() => setCustomerPrevBalance(0));
+      }
+    } else {
+      ipcRenderer.invoke('get-customer-balance', { customerName, customerId })
+        .then(res => {
+          setCustomerPrevBalance(res?.balance || 0);
+        })
+        .catch(() => setCustomerPrevBalance(0));
     }
-
-  }, [customerName, customerId, isEditing]);
-
+  }, [customerName, customerId, isEditing, saleToEdit]);
 
 
-  // References
 
   const itemCodeRefs = useRef({});
+  const productCacheRef = useRef(new Map());
+  const codeSearchTimerRef = useRef(null);
 
   const [items, setItems] = useState([]);
 
@@ -483,15 +498,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
       });
 
     } else {
-
       ipcRenderer.invoke('get-next-invoice-no').then(n => setInvoiceNo(n)).catch(() => { });
-
-      const t = setInterval(() => setSaleDate(new Date()), 1000);
-
-      return () => clearInterval(t);
-
     }
-
   }, [saleToEdit, salesVersion]);
 
 
@@ -548,7 +556,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     });
 
-  }, [isActive]);
+  }, [isActive, brandsVersion, sizeRangesVersion, profitRulesVersion, overallProfitVersion]);
 
 
 
@@ -862,17 +870,13 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       isReturn: false,
 
-      stock: product.available_stock ?? product.stock_qty ?? null
+      stock: product.stock_packets ?? product.available_stock ?? product.stock_qty ?? null
 
     };
-
-
 
     draftItem.discount = calculateEffectiveDiscount(draftItem, invoiceDiscounts);
 
     draftItem.amount = calcAmount(draftItem);
-
-
 
     setItems(prev => [...prev, draftItem]);
 
@@ -884,295 +888,15 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     setShowScanDrop(false);
 
-
-
-    ipcRenderer.invoke('get-stock-single', product.item_code)
-
-      .then(st => setItems(prev => prev.map((item, i) => i === newIdx ? { ...item, stock: st } : item)))
-
-      .catch(() => { });
-
-
+    if (draftItem.stock === null || draftItem.stock === undefined) {
+      ipcRenderer.invoke('get-stock-single', product.item_code)
+        .then(st => setItems(prev => prev.map((item, i) => i === newIdx ? { ...item, stock: st } : item)))
+        .catch(() => { });
+    }
 
     // Return focus to scan so next item can be typed immediately
 
     setTimeout(() => scanRef.current?.focus(), 50);
-
-  };
-
-
-
-  // ── Stock Search Modal Logic ────────────────────────────────────────────────
-
-  const loadStockForSearch = async () => {
-
-    setStockSearchLoading(true);
-
-    try {
-
-      const res = await ipcRenderer.invoke('get-stock-list-chunked', { limit: 100, offset: 0 });
-
-      if (res && res.items) {
-
-        setStockSearchItems(res.items);
-
-        setStockSearchLoading(false);
-
-        if (res.total > 100) {
-
-          const remaining = await ipcRenderer.invoke('get-stock-list');
-
-          setStockSearchItems(remaining || []);
-
-        }
-
-      } else {
-
-        setStockSearchLoading(false);
-
-      }
-
-    } catch (e) {
-
-      setStockSearchLoading(false);
-
-    }
-
-  };
-
-
-
-  useEffect(() => {
-
-    if (stockSearchModalOpen) {
-
-      setStockSearchFilters({ search: '', brand: '', category: '', size: '' });
-
-      setStockModalSelectedIndex(0);
-
-      loadStockForSearch();
-
-      setTimeout(() => stockSearchInputRef.current?.focus(), 50);
-
-    }
-
-  }, [stockSearchModalOpen, stockVer, productVer]);
-
-
-
-  const filteredStockItems = useMemo(() => {
-
-    const s = stockSearchFilters.search.toLowerCase().trim();
-
-    const b = stockSearchFilters.brand.toLowerCase().trim();
-
-    const c = stockSearchFilters.category.toLowerCase().trim();
-
-    const sz = stockSearchFilters.size.toLowerCase().trim();
-
-
-
-    let res = stockSearchItems.filter(p => {
-
-      if (s && !(p.item_code || '').toLowerCase().includes(s) && !(p.description || '').toLowerCase().includes(s)) return false;
-
-      if (b && !(p.brand || '').toLowerCase().includes(b)) return false;
-
-      if (c && !(p.category || '').toLowerCase().includes(c)) return false;
-
-      if (sz && !(p.size_range || '').toLowerCase().includes(sz)) return false;
-
-      return true;
-
-    });
-
-
-
-    if (s) {
-
-      res.sort((a, b) => {
-
-        const aCode = (a.item_code || '').toLowerCase();
-
-        const bCode = (b.item_code || '').toLowerCase();
-
-        if (aCode === s && bCode !== s) return -1;
-
-        if (bCode === s && aCode !== s) return 1;
-
-        const aStarts = aCode.startsWith(s);
-
-        const bStarts = bCode.startsWith(s);
-
-        if (aStarts && !bStarts) return -1;
-
-        if (bStarts && !aStarts) return 1;
-
-        return 0;
-
-      });
-
-    }
-
-
-
-    return res;
-
-  }, [stockSearchItems, stockSearchFilters]);
-
-
-
-  useEffect(() => {
-
-    if (stockSearchModalOpen) {
-
-      setStockModalSelectedIndex(filteredStockItems.length > 0 ? 0 : -1);
-
-    }
-
-  }, [filteredStockItems, stockSearchModalOpen]);
-
-
-
-  useEffect(() => {
-
-    if (stockSearchModalOpen && stockModalSelectedIndex >= 0) {
-
-      const el = stockModalRowRefs.current[stockModalSelectedIndex];
-
-      if (el) {
-
-        el.scrollIntoView({ block: 'nearest' });
-
-      }
-
-    }
-
-  }, [stockModalSelectedIndex, stockSearchModalOpen]);
-
-
-
-  const totalStockSearchValue = useMemo(() => {
-
-    return filteredStockItems.reduce((sum, p) => sum + ((p.stock_packets || 0) * (parseFloat(p.purchase_rate) || 0)), 0);
-
-  }, [filteredStockItems]);
-
-
-
-  const handleAddStockItemToSale = (product) => {
-
-    if (!product) return;
-
-    addProduct(product);
-
-    setStockSearchModalOpen(false);
-
-    setTimeout(() => {
-
-      if (scanRef.current) {
-
-        scanRef.current.focus();
-
-        scanRef.current.select?.();
-
-      }
-
-    }, 50);
-
-  };
-
-
-
-  // Dedicated capture-phase Esc key listener for Stock Search Modal
-
-  useEffect(() => {
-
-    if (!stockSearchModalOpen) return;
-
-
-
-    const handleStockSearchEsc = (e) => {
-
-      if (e.key === 'Escape' || e.code === 'Escape') {
-
-        e.preventDefault();
-
-        e.stopPropagation();
-
-        e.stopImmediatePropagation();
-
-        setStockSearchModalOpen(false);
-
-        setTimeout(() => {
-
-          if (scanRef.current) {
-
-            scanRef.current.focus();
-
-            scanRef.current.select?.();
-
-          }
-
-        }, 50);
-
-      }
-
-    };
-
-
-
-    window.addEventListener('keydown', handleStockSearchEsc, true);
-
-    return () => window.removeEventListener('keydown', handleStockSearchEsc, true);
-
-  }, [stockSearchModalOpen]);
-
-
-
-  const handleStockModalKeyDown = (e) => {
-
-    if (e.key === 'ArrowDown') {
-
-      e.preventDefault();
-
-      setStockModalSelectedIndex(prev => Math.min(prev + 1, Math.min(filteredStockItems.length - 1, 149)));
-
-    } else if (e.key === 'ArrowUp') {
-
-      e.preventDefault();
-
-      setStockModalSelectedIndex(prev => Math.max(prev - 1, 0));
-
-    } else if (e.key === 'Enter') {
-
-      e.preventDefault();
-
-      if (filteredStockItems.length > 0) {
-
-        const idx = stockModalSelectedIndex >= 0 ? stockModalSelectedIndex : 0;
-
-        if (filteredStockItems[idx]) {
-
-          handleAddStockItemToSale(filteredStockItems[idx]);
-
-        }
-
-      }
-
-    } else if (e.key === 'Escape') {
-
-      e.preventDefault();
-
-      e.stopPropagation();
-
-      e.stopImmediatePropagation();
-
-      setStockSearchModalOpen(false);
-
-      setTimeout(() => scanRef.current?.focus(), 50);
-
-    }
 
   };
 
@@ -1240,11 +964,29 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
 
+      const lowerTrimmed = trimmed.toLowerCase();
+      const cached = productCacheRef.current.get(lowerTrimmed);
+      if (cached) {
+        addProduct(cached);
+        // Refresh product in background to ensure latest rate/stock without blocking UI
+        ipcRenderer.invoke('search-products', trimmed).then(results => {
+          if (results && results.length > 0) {
+            results.forEach(r => {
+              if (r.item_code) productCacheRef.current.set(r.item_code.toLowerCase(), r);
+            });
+          }
+        }).catch(() => {});
+        return;
+      }
+
       const results = await ipcRenderer.invoke('search-products', trimmed);
 
       if (results && results.length > 0) {
+        results.forEach(r => {
+          if (r.item_code) productCacheRef.current.set(r.item_code.toLowerCase(), r);
+        });
 
-        const exact = results.find(r => r.item_code.toLowerCase() === trimmed.toLowerCase());
+        const exact = results.find(r => r.item_code.toLowerCase() === lowerTrimmed);
 
         addProduct(exact || results[0]);
 
@@ -1312,7 +1054,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
   // ── Per-row code editing ──────────────────────────────────────────────────
 
-  const handleCodeChange = async (idx, val) => {
+  const handleCodeChange = (idx, val) => {
 
     setItems(prev => prev.map((item, i) => i === idx ? { ...item, itemCode: val } : item));
 
@@ -1320,11 +1062,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     if (!val.trim()) { setCodeRowResults([]); setShowCodeRowDrop(false); return; }
 
-    const results = await ipcRenderer.invoke('search-products', val);
-
-    setCodeRowResults(results || []);
-
-    setShowCodeRowDrop((results || []).length > 0);
+    if (codeSearchTimerRef.current) clearTimeout(codeSearchTimerRef.current);
+    codeSearchTimerRef.current = setTimeout(async () => {
+      const results = await ipcRenderer.invoke('search-products', val);
+      if (results && results.length > 0) {
+        results.forEach(r => {
+          if (r.item_code) productCacheRef.current.set(r.item_code.toLowerCase(), r);
+        });
+      }
+      setCodeRowResults(results || []);
+      setShowCodeRowDrop((results || []).length > 0);
+    }, 150);
 
   };
 
@@ -1372,23 +1120,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
         isReturn: false,
 
-        stock: product.available_stock ?? product.stock_qty ?? null
+        stock: product.stock_packets ?? product.available_stock ?? product.stock_qty ?? null
 
       };
-
-
 
       draftItem.discount = calculateEffectiveDiscount(draftItem, invoiceDiscounts);
 
       draftItem.amount = calcAmount(draftItem);
 
-
-
       return draftItem;
 
     }));
-
-
 
     setShowCodeRowDrop(false);
 
@@ -1398,14 +1140,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     setTimeout(() => packetsRefs.current[idx]?.focus(), 30);
 
-
-
-    ipcRenderer.invoke('get-stock-single', product.item_code)
-
-      .then(st => setItems(prev => prev.map((item, i) => i === idx ? { ...item, stock: st } : item)))
-
-      .catch(() => { });
-
+    if (product.stock_packets === undefined && product.available_stock === undefined) {
+      ipcRenderer.invoke('get-stock-single', product.item_code)
+        .then(st => setItems(prev => prev.map((item, i) => i === idx ? { ...item, stock: st } : item)))
+        .catch(() => { });
+    }
   };
 
 
@@ -1971,7 +1710,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
       userId: currentUser?.id,
 
-      customerPrevBalance: customerPrevBalance
+      customerPrevBalance: (currentUser?.permissions || []).includes('use_master_cashier') ? (customerPrevBalance || 0) : 0
 
     };
 
@@ -2010,9 +1749,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
   const handleDeleteSale = async () => {
-
     if (!saleToEdit) return;
-
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete invoices.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete invoice ${saleToEdit.invoice_no}? This will permanently remove this sale.`);
 
     if (!confirmed) return;
@@ -2047,7 +1788,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
   const handlePaymentConfirm = async (paymentData) => {
 
-    const paymentMethodStr = paymentData.payments.length > 0
+    const paymentMethodStr = (paymentData?.payments || []).length > 0
 
       ? paymentData.payments.map(p => {
 
@@ -2525,18 +2266,14 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
     };
 
-    const payments = paymentData?.payments || [];
+    const payments = (paymentData && Array.isArray(paymentData.payments)) ? paymentData.payments : (receivedPayments || []);
 
     const cashReceived = payments
-
       .filter(p => isCashPaymentMethod(p.method))
-
       .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
     const bankReceived = payments
-
       .filter(p => !isCashPaymentMethod(p.method))
-
       .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
     const totalReceived = cashReceived + bankReceived;
@@ -2554,33 +2291,24 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
     // Net Payable + footer notes — reused on every single page so it's
-
     // always pinned to the bottom of whichever page it's printed on.
-
     const pinnedFooterHtml = `
-
       <div class="net-payable">
-
         <div class="footer-notes-inside">
-
           ${(receiptSettings?.footerNotes || "THANKS FOR YOUR VISIT ****!!!!<br/>DON'T EXCHANGE DAMAGED ITEMS AND LOOSE PIECE NOTE: NO ANY RETURN<br/>BRANCH # 2 ..... SHOP NO # E-2028 KUCHA CHAH TAILIAN RANG MAHAL").replace(/\\n/g, '<br/>')}
-
         </div>
-
         <div class="net-payable-title">
-
-          Net Payable Total Rs: ${formatAmt(finalNetPayable)}
-
+          Net Payable Total Rs: ${finalNetPayable < 0 ? `(-) ${formatAmt(Math.abs(finalNetPayable))}` : formatAmt(finalNetPayable)}
         </div>
-
       </div>
-
     `;
 
-
-
-
-    const isCreditSaleInvoice = receivedPayments.length === 0 || (paymentMethod && paymentMethod.toLowerCase().includes('credit'));
+    // Credit Sale Invoice title applies:
+    // 1. In Master Cashier Window when the customer has a non-zero previous balance.
+    // 2. OR when no payments were tendered (0 payments received and explicit credit payment method).
+    const isCreditSaleInvoice = (useMasterCashier && customerPrevBalance && parseFloat(customerPrevBalance) !== 0) ||
+      (payments.length === 0 && totalReceived === 0) ||
+      (paymentMethod && paymentMethod.toLowerCase().includes('credit') && totalReceived === 0);
 
     const isReturnInvoice = isReturnOnlyInvoice || (paymentMethod && paymentMethod.toLowerCase().includes('return'));
 
@@ -2748,7 +2476,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
             <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: none; padding: 3px 6px; margin-top: 2px;">
               <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
                 <span style="white-space: nowrap;"><strong>Total Amount Owed:</strong></span>
-                <span>${formatAmt(totals.grandTotal + parseFloat(customerPrevBalance))}</span>
+                <span>${(totals.grandTotal + parseFloat(customerPrevBalance)) < 0 ? `<span style="font-weight: 900;">(-)</span> ${formatAmt(Math.abs(totals.grandTotal + parseFloat(customerPrevBalance)))}` : formatAmt(totals.grandTotal + parseFloat(customerPrevBalance))}</span>
               </div>
             </div>
           ` : `
@@ -2779,7 +2507,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
               <div class="net-total" style="border-top: 1.5px solid #000; border-bottom: 2.5px double #000; padding: 3px 6px; margin-top: 2px;">
                 <div style="width: 280px; margin-left: auto; display: flex; justify-content: space-between;">
                   <span style="white-space: nowrap;"><strong>Balance:</strong></span>
-                  <span>${formatAmt(balanceAmount)}</span>
+                  <span>${balanceAmount < 0 ? `<span style="font-weight: 900;">(-)</span> ${formatAmt(Math.abs(balanceAmount))}` : formatAmt(balanceAmount)}</span>
                 </div>
               </div>
             ` : ''}
@@ -2838,38 +2566,24 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
         <style>
 
-          @page { size: 6.5in 8.5in; margin: 5mm; }
+          @page { size: 6.5in 8.5in; margin: 3mm 4mm; }
 
           * { box-sizing: border-box; }
 
           html, body { margin: 0; padding: 0; }
 
-          body { font-family: 'Arial', sans-serif; font-size: 13px; font-weight: bold; color: #000; }
+          body { font-family: 'Arial', sans-serif; font-size: 13px; font-weight: bold; color: #000; padding: 0 4px; }
 
-
-
-          /* Each .invoice-page is sized to exactly one printed page's
-
-             content area (page size minus @page margin) and forced onto
-
-             its own page. Its footer sits at the bottom via flexbox, so
-
-             Net Payable + footer notes are pinned to the bottom of every
-
-             single page, not just the last one. */
-
+          /* Each .invoice-page is sized to fit within one printed page's
+             content area and forced onto its own page. */
           .invoice-page {
-
-            height: calc(8.5in - 10mm);
-
+            height: calc(8.5in - 8mm);
             display: flex;
-
             flex-direction: column;
-
             page-break-after: always;
-
             overflow: hidden;
-
+            padding-left: 2px;
+            padding-right: 2px;
           }
 
           .invoice-page:last-child { page-break-after: auto; }
@@ -2890,9 +2604,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           .header .shop-info { font-size: 10px; line-height: 1.15; font-weight: bold; }
 
-          .page-num { position: absolute; top: 0; right: 0; font-size: 11px; }
+          .page-num { position: absolute; top: 0; right: 0; font-size: 11px; font-weight: bold; }
 
-          .page-header-continued { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: bold; }
+          .page-header-continued { position: relative; display: flex; justify-content: center; align-items: center; margin-bottom: 6px; font-size: 13px; font-weight: 900; text-align: center; }
+          .page-header-continued .inv-num-continued { font-size: 14px; font-weight: 900; }
+          .page-header-continued .page-num-continued { position: absolute; right: 0; top: 0; font-size: 11px; font-weight: bold; }
 
 
 
@@ -3130,6 +2846,11 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
         }
 
+        if (remarksModalOpen) {
+          setRemarksModalOpen(false);
+          return;
+        }
+
         if (customerModalOpen) {
 
           setCustomerModalOpen(false);
@@ -3208,11 +2929,7 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <span className="topbar-inv">Invoice: <strong>{invoiceNo}</strong></span>
 
-          <span className="topbar-dt">
-
-            {`${String(saleDate.getDate()).padStart(2, '0')}-${String(saleDate.getMonth() + 1).padStart(2, '0')}-${saleDate.getFullYear()}, ${saleDate.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
-
-          </span>
+          <LiveClock initialDate={saleDate} isLive={!isEditing} />
 
           {saleToEdit?.updated_at && saleToEdit.updated_at !== saleToEdit.created_at && (() => {
             const uDate = parseLocalDate(saleToEdit.updated_at);
@@ -3240,8 +2957,6 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
           <button type="button" className="topbar-btn" onClick={() => setStockSearchModalOpen(true)} title="Stock Search (F8)" style={{ background: '#0284c7', color: '#fff', padding: '2px 8px', fontSize: '0.75rem', height: 26, lineHeight: '20px' }}>Search</button>
 
-          <button type="button" className="topbar-btn" onClick={() => setCustomerModalOpen(true)} title="Search Customer (F4)" style={{ background: '#3b82f6', color: '#fff' }}>CUST</button>
-
           <button type="button" className="topbar-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={() => setShowReturnModal(true)}>Add Return Item</button>
 
           <button type="button" className="topbar-btn topbar-btn-secondary" onClick={() => isEditing ? onExit() : window.location.reload()}>{isEditing ? 'Cancel' : 'Reset'}</button>
@@ -3266,17 +2981,53 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
 
-      {/* Customer section — collapsible */}
-
+      {/* Customer section */}
       <div className="customer-section">
+        <div style={{ display: 'flex', alignItems: 'center', background: '#fafbff', borderBottom: '1px solid #e5e7eb', padding: '2px 8px', gap: '6px' }}>
+          <button
+            type="button"
+            className="customer-toggle"
+            onClick={() => setCustomerModalOpen(true)}
+            title="Search / Select Customer (F4)"
+            style={{ width: 'auto', borderBottom: 'none', background: 'transparent', padding: '2px 6px', fontSize: '0.78rem', lineHeight: '1.2' }}
+          >
+            Customer {customerName ? <strong style={{ color: '#1e1e2d', marginLeft: 6 }}>▸ {customerName}</strong> : <span style={{ marginLeft: 4, fontSize: '0.75rem', color: '#6b7280' }}>▸</span>}
+          </button>
 
-        <button type="button" className="customer-toggle" onClick={() => setCustomerOpen(v => !v)}>
+          <div style={{ height: '14px', width: '1px', background: '#cbd5e1', margin: '0 2px' }} />
 
-          Customer Details {customerOpen ? '▼' : '▶'}
-
-          {!customerOpen && customerName && <strong style={{ color: '#1e1e2d', marginLeft: 8 }}>{customerName}</strong>}
-
-        </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4f46e5', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => customerNotesRef.current?.focus()}>
+              Remarks:
+            </label>
+            <input
+              ref={customerNotesRef}
+              type="text"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  scanRef.current?.focus();
+                }
+              }}
+              placeholder="Optional notes / remarks..."
+              style={{
+                padding: '2px 8px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                height: '24px',
+                borderRadius: '4px',
+                border: notes ? '1.5px solid #86efac' : '1px solid #cbd5e1',
+                outline: 'none',
+                background: notes ? '#f0fdf4' : '#ffffff',
+                color: notes ? '#15803d' : '#0f172a',
+                width: '260px',
+                transition: 'all 0.2s ease'
+              }}
+            />
+          </div>
+        </div>
 
         <div className={`customer-details ${customerOpen ? 'open' : ''}`} style={{ maxHeight: customerOpen ? '90px' : '0' }}>
 
@@ -3827,7 +3578,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
             ? receivedPayments
             : Object.entries(receivedPayments || {}).map(([method, amount]) => ({ method, amount }));
           const totalReceived = receivedList.reduce((acc, p) => acc + (typeof p === 'number' ? p : (parseFloat(p.amount) || 0)), 0);
-          const prevBal = parseFloat(customerPrevBalance || 0);
+          const useMasterCashier = (currentUser?.permissions || []).includes('use_master_cashier');
+          const prevBal = useMasterCashier ? parseFloat(customerPrevBalance || 0) : 0;
           const netPayable = totals.grandTotal + prevBal;
           const remBalance = netPayable - totalReceived;
 
@@ -3998,11 +3750,17 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
         </div>
 
-        <div className="footer-total-qty">
+        <div className="footer-total-qty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
 
           <span>Flat Disc</span>
 
           <strong>{Math.round(totals.totalDiscountAmt).toLocaleString()}</strong>
+
+          {totals.totalDiscountAmt > 0 && (totals.subTotal + (totals.itemDiscounts || 0)) > 0 && (
+            <span style={{ fontSize: '0.65rem', color: '#4b5563', fontWeight: '700', whiteSpace: 'nowrap' }}>
+              ({((totals.totalDiscountAmt / (totals.subTotal + (totals.itemDiscounts || 0))) * 100).toFixed(2)}%)
+            </span>
+          )}
 
         </div>
 
@@ -4371,6 +4129,8 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
         </div>
 
       )}
+
+
 
 
 
@@ -4764,567 +4524,32 @@ function NewSale({ currentUser, saleToEdit, onSaveSuccess, onExit, onViewSalesLi
 
 
       {/* Stock Inventory Search Modal (F8) */}
-
       {stockSearchModalOpen && (
-
-        <div
-
-          style={{
-
-            position: 'fixed',
-
-            top: 0,
-
-            left: 0,
-
-            right: 0,
-
-            bottom: 0,
-
-            background: 'rgba(15, 23, 42, 0.75)',
-
-            backdropFilter: 'blur(4px)',
-
-            zIndex: 9999,
-
-            display: 'flex',
-
-            alignItems: 'center',
-
-            justifyContent: 'center',
-
-            padding: '20px'
-
+        <StockSearchModal
+          isOpen={stockSearchModalOpen}
+          onClose={() => {
+            setStockSearchModalOpen(false);
+            setTimeout(() => {
+              if (scanRef.current) {
+                scanRef.current.focus();
+                scanRef.current.select?.();
+              }
+            }, 50);
           }}
-
-          onClick={() => setStockSearchModalOpen(false)}
-
-        >
-
-          <div
-
-            style={{
-
-              width: '95%',
-
-              maxWidth: '1200px',
-
-              height: '88vh',
-
-              background: '#fff',
-
-              borderRadius: '12px',
-
-              display: 'flex',
-
-              flexDirection: 'column',
-
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-
-              overflow: 'hidden'
-
-            }}
-
-            onClick={e => e.stopPropagation()}
-
-          >
-
-            {/* Header & Filters */}
-
-            <div style={{ background: '#1e293b', color: '#fff', padding: '14px 20px', flexShrink: 0 }}>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-
-                  <span style={{ fontSize: '1.4rem' }}>📦</span>
-
-                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc' }}>
-
-                    Stock Inventory Search
-
-                  </h3>
-
-                  <span style={{ background: '#38bdf8', color: '#0f172a', fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '12px', marginLeft: '6px' }}>
-
-                    F8
-
-                  </span>
-
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-
-                  {stockToastMsg && (
-
-                    <div style={{ background: '#22c55e', color: '#fff', padding: '4px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 600 }}>
-
-                      ✓ {stockToastMsg}
-
-                    </div>
-
-                  )}
-
-                  <button
-
-                    type="button"
-
-                    onClick={() => setStockSearchModalOpen(false)}
-
-                    style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
-
-                  >
-
-                    ✕
-
-                  </button>
-
-                </div>
-
-              </div>
-
-
-
-              {/* Filter controls */}
-
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-
-                <input
-
-                  ref={stockSearchInputRef}
-
-                  autoFocus
-
-                  type="text"
-
-                  placeholder="Search Item Code or Description..."
-
-                  value={stockSearchFilters.search}
-
-                  onChange={e => {
-
-                    setStockSearchFilters(f => ({ ...f, search: e.target.value }));
-
-                    setStockModalSelectedIndex(0);
-
-                  }}
-
-                  onKeyDown={handleStockModalKeyDown}
-
-                  style={{
-
-                    flex: '2',
-
-                    minWidth: '220px',
-
-                    padding: '8px 12px',
-
-                    borderRadius: '6px',
-
-                    border: '1px solid #475569',
-
-                    background: '#0f172a',
-
-                    color: '#fff',
-
-                    fontSize: '0.9rem',
-
-                    outline: 'none'
-
-                  }}
-
-                />
-
-                <input
-
-                  type="text"
-
-                  placeholder="Brand..."
-
-                  value={stockSearchFilters.brand}
-
-                  onChange={e => {
-
-                    setStockSearchFilters(f => ({ ...f, brand: e.target.value }));
-
-                    setStockModalSelectedIndex(0);
-
-                  }}
-
-                  onKeyDown={handleStockModalKeyDown}
-
-                  style={{
-
-                    flex: '1',
-
-                    minWidth: '120px',
-
-                    padding: '8px 12px',
-
-                    borderRadius: '6px',
-
-                    border: '1px solid #475569',
-
-                    background: '#0f172a',
-
-                    color: '#fff',
-
-                    fontSize: '0.9rem',
-
-                    outline: 'none'
-
-                  }}
-
-                />
-
-                <input
-
-                  type="text"
-
-                  placeholder="Category..."
-
-                  value={stockSearchFilters.category}
-
-                  onChange={e => {
-
-                    setStockSearchFilters(f => ({ ...f, category: e.target.value }));
-
-                    setStockModalSelectedIndex(0);
-
-                  }}
-
-                  onKeyDown={handleStockModalKeyDown}
-
-                  style={{
-
-                    flex: '1',
-
-                    minWidth: '120px',
-
-                    padding: '8px 12px',
-
-                    borderRadius: '6px',
-
-                    border: '1px solid #475569',
-
-                    background: '#0f172a',
-
-                    color: '#fff',
-
-                    fontSize: '0.9rem',
-
-                    outline: 'none'
-
-                  }}
-
-                />
-
-                <input
-
-                  type="text"
-
-                  placeholder="Size..."
-
-                  value={stockSearchFilters.size}
-
-                  onChange={e => {
-
-                    setStockSearchFilters(f => ({ ...f, size: e.target.value }));
-
-                    setStockModalSelectedIndex(0);
-
-                  }}
-
-                  onKeyDown={handleStockModalKeyDown}
-
-                  style={{
-
-                    flex: '1',
-
-                    minWidth: '100px',
-
-                    padding: '8px 12px',
-
-                    borderRadius: '6px',
-
-                    border: '1px solid #475569',
-
-                    background: '#0f172a',
-
-                    color: '#fff',
-
-                    fontSize: '0.9rem',
-
-                    outline: 'none'
-
-                  }}
-
-                />
-
-                {(stockSearchFilters.search || stockSearchFilters.brand || stockSearchFilters.category || stockSearchFilters.size) && (
-
-                  <button
-
-                    type="button"
-
-                    onClick={() => setStockSearchFilters({ search: '', brand: '', category: '', size: '' })}
-
-                    style={{ background: '#475569', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 12px', fontSize: '0.85rem', cursor: 'pointer' }}
-
-                  >
-
-                    Clear Filters
-
-                  </button>
-
-                )}
-
-              </div>
-
-
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', fontSize: '0.85rem', color: '#cbd5e1' }}>
-
-                <span>
-
-                  Showing {filteredStockItems.length > 150 ? `top 150 of ${filteredStockItems.length}` : `${filteredStockItems.length}`} matching items
-
-                </span>
-
-                <span style={{ color: '#38bdf8', fontWeight: 600 }}>
-
-                  Total Stock Value: PKR {totalStockSearchValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-
-                </span>
-
-              </div>
-
-            </div>
-
-
-
-            {/* Table Content */}
-
-            <div style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', padding: '12px 20px' }}>
-
-              <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-
-                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-
-                  <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 2 }}>
-
-                    <tr>
-
-                      <th style={{ padding: '10px 12px' }}>Item Code</th>
-
-                      <th style={{ padding: '10px 12px' }}>Description</th>
-
-                      <th style={{ padding: '10px 12px' }}>Category</th>
-
-                      <th style={{ padding: '10px 12px' }}>Size Range</th>
-
-                      <th style={{ padding: '10px 12px' }} className="text-right">Purch. Rate</th>
-
-                      <th style={{ padding: '10px 12px' }} className="text-right">Sale Rate</th>
-
-                      <th style={{ padding: '10px 12px' }} className="text-center">Stock (Pcs)</th>
-
-                      <th style={{ padding: '10px 12px' }} className="text-right">Stock Value</th>
-
-                      <th style={{ padding: '10px 12px' }} className="text-center">Action</th>
-
-                    </tr>
-
-                  </thead>
-
-                  <tbody>
-
-                    {stockSearchLoading ? (
-
-                      <tr>
-
-                        <td colSpan={9} className="empty-state" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
-
-                          Loading stock inventory...
-
-                        </td>
-
-                      </tr>
-
-                    ) : filteredStockItems.length === 0 ? (
-
-                      <tr>
-
-                        <td colSpan={9} className="empty-state" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
-
-                          No items match search criteria
-
-                        </td>
-
-                      </tr>
-
-                    ) : (
-
-                      filteredStockItems.slice(0, 150).map((p, idx) => {
-
-                        const isSelected = idx === stockModalSelectedIndex;
-
-                        const stockPcs = p.stock_packets || 0;
-
-                        const chipCls = stockPcs > 5 ? 'chip-ok' : stockPcs > 0 ? 'chip-low' : 'chip-zero';
-
-                        return (
-
-                          <tr
-
-                            key={p.id || p.item_code}
-
-                            ref={el => stockModalRowRefs.current[idx] = el}
-
-                            onClick={() => setStockModalSelectedIndex(idx)}
-
-                            onDoubleClick={() => handleAddStockItemToSale(p)}
-
-                            style={{
-
-                              background: isSelected ? '#e0f2fe' : 'transparent',
-
-                              borderLeft: isSelected ? '4px solid #0284c7' : '4px solid transparent',
-
-                              cursor: 'pointer',
-
-                              transition: 'background 0.15s'
-
-                            }}
-
-                          >
-
-                            <td><span className="badge badge-code">{p.item_code}</span></td>
-
-                            <td>
-
-                              <div style={{ fontWeight: 600, color: '#0f172a' }}>{p.description}</div>
-
-                              {p.brand && <div style={{ fontSize: '11px', color: '#64748b' }}>Brand: {p.brand}</div>}
-
-                            </td>
-
-                            <td><span className="badge badge-cat">{p.category || '—'}</span></td>
-
-                            <td>{p.size_range || '—'}</td>
-
-                            <td className="text-right">PKR {(parseFloat(p.purchase_rate) || 0).toLocaleString()}</td>
-
-                            <td className="text-right" style={{ color: '#16a34a', fontWeight: 700 }}>
-
-                              PKR {(parseFloat(p.sale_rate) || 0).toLocaleString()}
-
-                            </td>
-
-                            <td className="text-center">
-
-                              <span className={`stock-chip ${chipCls}`}>{stockPcs}</span>
-
-                            </td>
-
-                            <td className="text-right" style={{ fontWeight: 600 }}>
-
-                              PKR {(stockPcs * (parseFloat(p.purchase_rate) || 0)).toLocaleString()}
-
-                            </td>
-
-                            <td className="text-center">
-
-                              <button
-
-                                type="button"
-
-                                onClick={(e) => {
-
-                                  e.stopPropagation();
-
-                                  handleAddStockItemToSale(p);
-
-                                }}
-
-                                style={{
-
-                                  background: '#16a34a',
-
-                                  color: '#fff',
-
-                                  border: 'none',
-
-                                  padding: '5px 12px',
-
-                                  borderRadius: '6px',
-
-                                  fontWeight: 600,
-
-                                  fontSize: '0.8rem',
-
-                                  cursor: 'pointer',
-
-                                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-
-                                }}
-
-                              >
-
-                                + Add
-
-                              </button>
-
-                            </td>
-
-                          </tr>
-
-                        );
-
-                      })
-
-                    )}
-
-                  </tbody>
-
-                </table>
-
-              </div>
-
-            </div>
-
-
-
-            {/* Footer */}
-
-            <div style={{ background: '#f1f5f9', borderTop: '1px solid #cbd5e1', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-
-              <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
-
-                💡 <strong>Tip:</strong> Click <strong>+ Add</strong> or <strong>Double-Click</strong> any row to add item to invoice. Press <strong>Esc</strong> to close.
-
-              </span>
-
-              <button
-
-                type="button"
-
-                onClick={() => setStockSearchModalOpen(false)}
-
-                style={{ padding: '8px 20px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#334155', fontWeight: 600, cursor: 'pointer' }}
-
-              >
-
-                Close (Esc)
-
-              </button>
-
-            </div>
-
-          </div>
-
-        </div>
-
+          onSelectItem={(product) => {
+            addProduct(product);
+            setStockSearchModalOpen(false);
+            setTimeout(() => {
+              if (scanRef.current) {
+                scanRef.current.focus();
+                scanRef.current.select?.();
+              }
+            }, 50);
+          }}
+          stockVer={stockVer}
+          productVer={productVer}
+          title="Stock Inventory Search"
+        />
       )}
 
 

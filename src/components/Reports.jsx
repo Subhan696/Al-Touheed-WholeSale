@@ -177,7 +177,7 @@ function Reports({ currentUser, isActive }) {
               <div class="row">
                 <div>
                   <span class="title-col">Total Sales</span>
-                  <span class="meta-col">(${dailyReport.sales.length} Invs, ${dailyReport.summary.totalSoldItems || 0} Items)</span>
+                  <span class="meta-col">(${(dailyReport?.sales?.length || 0)} Invs, ${dailyReport?.summary?.totalSoldItems || 0} Items)</span>
                 </div>
                 <span class="amt-col-main">${fmt(dailyReport.summary.totalSales)}</span>
               </div>
@@ -511,7 +511,7 @@ function Reports({ currentUser, isActive }) {
                                     <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#10b981', marginTop: '2px' }}>{fmt(dailyReport.summary.totalSales)}</div>
                                 </div>
                                 <div style={{ textAlign: 'right' }}>
-                                    <div style={{ fontSize: '15px', color: '#6b7280' }}>{dailyReport.sales.length} invoice{dailyReport.sales.length !== 1 ? 's' : ''}</div>
+                                    <div style={{ fontSize: '15px', color: '#6b7280' }}>{(dailyReport?.sales?.length || 0)} invoice{(dailyReport?.sales?.length || 0) !== 1 ? 's' : ''}</div>
                                     <div style={{ fontSize: '15px', color: '#6b7280' }}>{dailyReport.summary.totalSoldItems || 0} items</div>
                                 </div>
                             </div>
@@ -665,13 +665,13 @@ function Reports({ currentUser, isActive }) {
                                 </div>
 
 
-                                {dailyReport.sales.length === 0 && (
+                                 {(!dailyReport?.sales || dailyReport.sales.length === 0) && (
                                     <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', background: '#f9fafb', borderRadius: '8px', marginBottom: '16px' }}>
                                         No sales for this period.
                                     </div>
                                 )}
 
-                                {dailyReport.sales
+                                {(dailyReport?.sales || [])
                                     .filter(sale => !filterMethod || (sale.payment_method && sale.payment_method.toLowerCase().includes(filterMethod.toLowerCase())))
                                     .map((sale, idx) => (
                                         <div key={idx} className="invoice-block" style={{ marginBottom: '14px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
@@ -746,10 +746,10 @@ function Reports({ currentUser, isActive }) {
                                     ))}
 
                                 {/* Returns Section */}
-                                {dailyReport.returns.length > 0 && (
+                                {(dailyReport?.returns?.length || 0) > 0 && (
                                     <>
                                         <h2 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '12px', paddingBottom: '6px', borderBottom: '2px solid #ef4444', color: '#991b1b', marginTop: '20px' }}>
-                                            ↩️ Sales Returns ({dailyReport.returns.length})
+                                            ↩️ Sales Returns ({(dailyReport?.returns?.length || 0)})
                                         </h2>
                                         {dailyReport.returns.map((ret, idx) => (
                                             <div key={idx} className="return-block" style={{ marginBottom: '14px', border: '1px solid #fecaca', borderRadius: '8px', overflow: 'hidden' }}>

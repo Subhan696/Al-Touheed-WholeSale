@@ -3,7 +3,7 @@ import './BankLedger.css';
 
 const { ipcRenderer } = window.require('electron');
 
-function BankLedger({ currentUser, isActive }) {
+function BankLedger({ currentUser, isActive, initialBank }) {
   const getTodayDate = () => {
     const today = new Date();
     const year = today.getFullYear();
@@ -17,12 +17,18 @@ function BankLedger({ currentUser, isActive }) {
   const [bankSearch, setBankSearch] = useState('');
   const [bankList, setBankList] = useState([]);
   const [showBankDrop, setShowBankDrop] = useState(false);
-  const [selectedBank, setSelectedBank] = useState(null);
+  const [selectedBank, setSelectedBank] = useState(initialBank || null);
   const [statement, setStatement] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const reportRef = useRef(null);
+
+  useEffect(() => {
+    if (initialBank) {
+      setSelectedBank(initialBank);
+    }
+  }, [initialBank]);
 
   // Fetch bank options from GL Accounts
   useEffect(() => {
@@ -88,7 +94,7 @@ function BankLedger({ currentUser, isActive }) {
 
   const fmtDate = (dStr) => {
     if (!dStr) return '';
-    
+
     // Handle Date objects
     if (dStr instanceof Date) {
       const day = String(dStr.getDate()).padStart(2, '0');
@@ -96,7 +102,7 @@ function BankLedger({ currentUser, isActive }) {
       const year = dStr.getFullYear();
       return `${day}/${month}/${year}`;
     }
-    
+
     // Handle ISO date strings
     if (typeof dStr === 'string') {
       if (dStr.includes('T')) {
@@ -114,7 +120,7 @@ function BankLedger({ currentUser, isActive }) {
         }
       }
     }
-    
+
     return String(dStr);
   };
 
@@ -169,9 +175,9 @@ function BankLedger({ currentUser, isActive }) {
         <div className="bl-control-group">
           <label>Bank Account:</label>
           <div className="bl-search-wrap">
-            <input 
-              type="text" 
-              placeholder="Type bank name..." 
+            <input
+              type="text"
+              placeholder="Type bank name..."
               value={bankSearch}
               onChange={e => { setBankSearch(e.target.value); setShowBankDrop(true); }}
               onFocus={() => setShowBankDrop(true)}
@@ -191,27 +197,27 @@ function BankLedger({ currentUser, isActive }) {
 
         <div className="bl-control-group">
           <label>From Date:</label>
-          <input 
-            type="date" 
-            value={startDate} 
-            onChange={e => setStartDate(e.target.value)} 
+          <input
+            type="date"
+            value={startDate}
+            onChange={e => setStartDate(e.target.value)}
             className="bl-input-date"
           />
         </div>
 
         <div className="bl-control-group">
           <label>To Date:</label>
-          <input 
-            type="date" 
-            value={endDate} 
-            onChange={e => setEndDate(e.target.value)} 
+          <input
+            type="date"
+            value={endDate}
+            onChange={e => setEndDate(e.target.value)}
             className="bl-input-date"
           />
         </div>
 
         <div className="bl-btn-group">
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             onClick={handlePrint}
             disabled={!statement}
             style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: statement ? 'pointer' : 'not-allowed' }}
@@ -219,8 +225,8 @@ function BankLedger({ currentUser, isActive }) {
             🖨️ Print Ledger
           </button>
 
-          <button 
-            className="btn btn-secondary" 
+          <button
+            className="btn btn-secondary"
             onClick={fetchStatement}
             style={{ background: '#64748b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
           >
@@ -274,14 +280,14 @@ function BankLedger({ currentUser, isActive }) {
             <table className="bl-table">
               <thead>
                 <tr>
-                  <th style={{ width: '105px' }}>Date</th>
-                  <th style={{ width: '85px' }}>Type</th>
-                  <th style={{ width: '75px' }}>V/Code</th>
+                  <th style={{ width: '75px' }}>Date</th>
+                  <th style={{ width: '80px' }}>Type</th>
+                  <th style={{ width: '75px' }}>User</th>
                   <th>Remarks</th>
-                  <th style={{ width: '220px' }}>Cheque #</th>
-                  <th className="right" style={{ width: '120px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
-                  <th className="right" style={{ width: '120px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
-                  <th className="right" style={{ width: '140px' }}>Balance</th>
+                  <th style={{ width: '85px' }}>Cheque #</th>
+                  <th className="right" style={{ width: '80px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
+                  <th className="right" style={{ width: '80px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
+                  <th className="right" style={{ width: '130px' }}>Balance</th>
                 </tr>
               </thead>
               <tbody>
@@ -307,7 +313,7 @@ function BankLedger({ currentUser, isActive }) {
                       <tr key={t.id || idx}>
                         <td>{fmtDate(t.date)}</td>
                         <td style={{ fontWeight: 700 }}>{String(t.type || '')}</td>
-                        <td>{String(t.v_code || '')}</td>
+                        <td style={{ fontWeight: 600, color: '#475569' }}>{String(t.user_name || t.user || 'Admin')}</td>
                         <td>{String(t.remarks || '')}</td>
                         <td>{String(t.cheque_no || '')}</td>
                         <td className="right" style={{ fontWeight: 700, color: (t.debit || 0) > 0 ? '#dc2626' : '#94a3b8' }}>{fmt(t.debit)}</td>

@@ -20,12 +20,13 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
     if (isActive) {
       load();
     }
-  }, [isActive, version]);
+  }, [isActive, version, filterDate, showAll]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await ipcRenderer.invoke('get-sales-returns');
+      const payload = showAll ? {} : { startDate: filterDate, endDate: filterDate };
+      const data = await ipcRenderer.invoke('get-sales-returns', payload);
       setRows(data || []);
     } catch { }
     setLoading(false);
@@ -39,12 +40,9 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
         (r.customer_name || '').toLowerCase().includes(s) ||
         (r.invoice_no || '').toLowerCase().includes(s);
 
-      const dateStr = getLocalDateString(r.created_at || r.return_date);
-      const matchDate = showAll || dateStr === filterDate;
-
-      return matchSearch && matchDate;
+      return matchSearch;
     });
-  }, [rows, search, filterDate, showAll]);
+  }, [rows, search]);
 
   const netAmount = (r) => Math.max(0, parseFloat(r.total_amount) || 0);
 
@@ -89,6 +87,10 @@ function SalesReturnList({ currentUser, onEditReturn, onNewReturn, onExit, isAct
 
   const handleDelete = async (id, e) => {
     e.stopPropagation();
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete sales returns.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this return?');
     if (!confirmed) return;
     await ipcRenderer.invoke('delete-sales-return', id);

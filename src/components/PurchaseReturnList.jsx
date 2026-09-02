@@ -96,7 +96,14 @@ function PurchaseReturnList({ currentUser, onEditReturn, isActive }) {
                     <button onClick={() => handlePrintRow(r)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, marginRight: 4 }} title="Print Purchase Return">🖨️ Print</button>
                     <button onClick={() => handlePDFRow(r)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, marginRight: 4 }} title="Save PDF">📄 PDF</button>
                     {onEditReturn && <button onClick={() => onEditReturn(r)} style={{ background: '#ffa800', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, marginRight: 4 }}>Edit</button>}
-                    <button onClick={async () => { const conf = await ipcRenderer.invoke('confirm-dialog', 'Delete this return?'); if (conf) { await ipcRenderer.invoke('delete-purchase-return', r.id); load(); } }} style={{ background: '#f64e60', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Del</button>
+                    <button onClick={async () => {
+                      if (currentUser?.role !== 'superadmin') {
+                        await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete purchase returns.');
+                        return;
+                      }
+                      const conf = await ipcRenderer.invoke('confirm-dialog', 'Delete this return?');
+                      if (conf) { await ipcRenderer.invoke('delete-purchase-return', r.id); load(); }
+                    }} style={{ background: '#f64e60', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Del</button>
                   </td>
                 </tr>
               ))}

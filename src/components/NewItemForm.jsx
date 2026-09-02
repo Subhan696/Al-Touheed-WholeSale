@@ -603,6 +603,10 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
   };
 
   const handleDeleteListItem = async (id) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete list items.');
+      return;
+    }
     if (manageListType === 'categories') {
       const itemToDelete = manageListItems.find(i => i.id === id);
       if (itemToDelete && itemToDelete.name === defaultCategory) {
@@ -641,6 +645,10 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
     await loadProfitRules();
   };
   const deleteProfitRule = async (id) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete profit rules.');
+      return;
+    }
     await ipcRenderer.invoke('delete-profit-rule', id);
     await loadProfitRules();
   };
@@ -1599,7 +1607,13 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                           style={{ padding: '9px 13px', cursor: 'pointer', borderLeft: `3px solid ${isSel ? '#3699ff' : 'transparent'}`, background: isSel ? '#eff6ff' : 'transparent', borderBottom: '1px solid #f3f4f6', transition: 'background 0.1s' }}>
                           <div style={{ fontWeight: 600, fontSize: '0.87rem', color: '#1e1e2d' }}>{co}</div>
                           <div style={{ fontSize: '0.71rem', color: def ? '#3699ff' : '#9ca3af', marginTop: 2 }}>
-                            {def ? `${def.profit_pct}% default` : 'no default'}
+                            {def ? (
+                              <span>
+                                <span>{def.profit_pct || 0}%</span>
+                                <span style={{ margin: '0 8px', opacity: 0.6 }}>|</span>
+                                <span>{def.discount_pct || 0}%</span>
+                              </span>
+                            ) : 'no default'}
                             {ov.length > 0 && <span style={{ color: '#9ca3af' }}> · {ov.length} rule{ov.length > 1 ? 's' : ''}</span>}
                           </div>
                         </div>
@@ -1620,26 +1634,32 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                         {overallEnabled ? 'ON' : 'OFF'}
                       </label>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: overallEnabled ? 1 : 0.5, pointerEvents: overallEnabled ? 'auto' : 'none' }}>
-                      <div>
-                        <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold' }}>Profit</span>
-                        <input type="number" value={overallProfitPct}
-                          onChange={e => setOverallProfitPct(e.target.value)}
-                          onBlur={saveOverallProfit}
-                          min="0" max="500" step="0.5"
-                          style={{ width: 60, padding: '7px 5px', border: '2px solid #4caf50', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
-                        />
-                        <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, opacity: overallEnabled ? 1 : 0.5, pointerEvents: overallEnabled ? 'auto' : 'none' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                        <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold', marginBottom: 6 }}>Profit</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#16a34a', textTransform: 'uppercase', marginBottom: 2 }}>SUPP</div>
+                          <input type="number" value={overallProfitPct}
+                            onChange={e => setOverallProfitPct(e.target.value)}
+                            onBlur={saveOverallProfit}
+                            min="0" max="500" step="0.5"
+                            style={{ width: 60, padding: '7px 5px', border: '2px solid #4caf50', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
+                          />
+                        </div>
+                        <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4, marginBottom: 6 }}>%</span>
                       </div>
-                      <div style={{ marginLeft: 8 }}>
-                        <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold' }}>Discount</span>
-                        <input type="number" value={overallDiscountPct}
-                          onChange={e => setOverallDiscountPct(e.target.value)}
-                          onBlur={saveOverallProfit}
-                          min="0" max="100" step="0.5"
-                          style={{ width: 60, padding: '7px 5px', border: '2px solid #f44336', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
-                        />
-                        <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
+                      <div style={{ display: 'flex', alignItems: 'flex-end', marginLeft: 8 }}>
+                        <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold', marginBottom: 6 }}>Discount</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#dc2626', textTransform: 'uppercase', marginBottom: 2 }}>CUST</div>
+                          <input type="number" value={overallDiscountPct}
+                            onChange={e => setOverallDiscountPct(e.target.value)}
+                            onBlur={saveOverallProfit}
+                            min="0" max="100" step="0.5"
+                            style={{ width: 60, padding: '7px 5px', border: '2px solid #f44336', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
+                          />
+                        </div>
+                        <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4, marginBottom: 6 }}>%</span>
                       </div>
                       <span style={{ fontSize: '0.68rem', color: '#9ca3af', marginLeft: 'auto' }}>Overridden by brand settings</span>
                     </div>
@@ -1654,36 +1674,42 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                       {/* Brand Default % */}
                       <div style={{ background: '#f8fafc', border: '1px solid #e4e6ef', borderRadius: 8, padding: '11px 14px' }}>
                         <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#5e6278', textTransform: 'uppercase', marginBottom: 8 }}>Brand Default % — overrides overall</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div>
-                            <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold' }}>Profit</span>
-                            <input
-                              ref={el => profitModalRefs.current.defaultPct = el}
-                              type="number" value={defaultPctInput}
-                              onChange={e => setDefaultPctInput(e.target.value)}
-                              onBlur={() => { if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); }}
-                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.defaultDisc?.focus(); } }}
-                              min="0" max="500" step="0.5"
-                              style={{ width: 60, padding: '7px 5px', border: '2px solid #4caf50', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
-                            />
-                            <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                            <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#16a34a', fontWeight: 'bold', marginBottom: 6 }}>Profit</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#16a34a', textTransform: 'uppercase', marginBottom: 2 }}>SUPP</div>
+                              <input
+                                ref={el => profitModalRefs.current.defaultPct = el}
+                                type="number" value={defaultPctInput}
+                                onChange={e => setDefaultPctInput(e.target.value)}
+                                onBlur={() => { if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); }}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.defaultDisc?.focus(); } }}
+                                min="0" max="500" step="0.5"
+                                style={{ width: 60, padding: '7px 5px', border: '2px solid #4caf50', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
+                              />
+                            </div>
+                            <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4, marginBottom: 6 }}>%</span>
                           </div>
-                          <div style={{ marginLeft: 8 }}>
-                            <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold' }}>Discount</span>
-                            <input
-                              ref={el => profitModalRefs.current.defaultDisc = el}
-                              type="number" value={defaultDiscInput}
-                              onChange={e => setDefaultDiscInput(e.target.value)}
-                              onBlur={() => { if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); }}
-                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); profitModalRefs.current.newCat?.focus(); } }}
-                              min="0" max="100" step="0.5"
-                              style={{ width: 60, padding: '7px 5px', border: '2px solid #f44336', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
-                            />
-                            <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4 }}>%</span>
+                          <div style={{ display: 'flex', alignItems: 'flex-end', marginLeft: 8 }}>
+                            <span style={{ fontSize: '0.75rem', marginRight: 4, color: '#dc2626', fontWeight: 'bold', marginBottom: 6 }}>Discount</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#dc2626', textTransform: 'uppercase', marginBottom: 2 }}>CUST</div>
+                              <input
+                                ref={el => profitModalRefs.current.defaultDisc = el}
+                                type="number" value={defaultDiscInput}
+                                onChange={e => setDefaultDiscInput(e.target.value)}
+                                onBlur={() => { if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); }}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (defaultPctInput || defaultDiscInput) saveProfitRule(selectedProfitCompany, '', '', defaultPctInput, defaultDiscInput); profitModalRefs.current.newCat?.focus(); } }}
+                                min="0" max="100" step="0.5"
+                                style={{ width: 60, padding: '7px 5px', border: '2px solid #f44336', borderRadius: 5, fontSize: '1rem', fontFamily: 'inherit', fontWeight: 700 }}
+                              />
+                            </div>
+                            <span style={{ fontWeight: 700, color: '#5e6278', marginLeft: 4, marginBottom: 6 }}>%</span>
                           </div>
                           {defaultRule && (
                             <button onClick={() => { deleteProfitRule(defaultRule.id); setDefaultPctInput(''); setDefaultDiscInput(''); }}
-                              style={{ marginLeft: 4, background: '#fee2e2', color: '#dc2626', border: 'none', padding: '5px 10px', borderRadius: 5, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}>
+                              style={{ marginLeft: 4, background: '#fee2e2', color: '#dc2626', border: 'none', padding: '5px 10px', borderRadius: 5, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, marginBottom: 4 }}>
                               Remove
                             </button>
                           )}
@@ -1703,7 +1729,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                                 <tr style={{ background: '#f5f7fa' }}>
                                   <th style={mTh}>Category</th>
                                   <th style={mTh}>Size Range</th>
-                                  <th style={{ ...mTh, width: 80 }}>Profit %</th><th style={{ ...mTh, width: 80 }}>Disc %</th>
+                                  <th style={{ ...mTh, width: 80 }}>
+                                    <div style={{ fontSize: '0.65rem', color: '#16a34a', fontWeight: '800' }}>SUPP</div>
+                                    Profit %
+                                  </th>
+                                  <th style={{ ...mTh, width: 80 }}>
+                                    <div style={{ fontSize: '0.65rem', color: '#dc2626', fontWeight: '800' }}>CUST</div>
+                                    Disc %
+                                  </th>
                                   <th style={{ ...mTh, width: 50, textAlign: 'center' }}>Del</th>
                                 </tr>
                               </thead>
@@ -1788,36 +1821,42 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                             <option value="">-- Size Range --</option>
                             {sizeRangesList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                           </select>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 700 }}>Profit</span>
-                            <input
-                              ref={el => profitModalRefs.current.newPct = el}
-                              type="number" value={newRulePct}
-                              onChange={e => setNewRulePct(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.newDisc?.focus(); } }}
-                              min="0" max="500" step="0.5"
-                              style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #4caf50' }}
-                            />
+                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3 }}>
+                            <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 700, marginBottom: 4 }}>Profit</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{ fontSize: '0.65rem', color: '#16a34a', fontWeight: '800', marginBottom: 2 }}>SUPP</div>
+                              <input
+                                ref={el => profitModalRefs.current.newPct = el}
+                                type="number" value={newRulePct}
+                                onChange={e => setNewRulePct(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); profitModalRefs.current.newDisc?.focus(); } }}
+                                min="0" max="500" step="0.5"
+                                style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #4caf50' }}
+                              />
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <span style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 700 }}>Disc</span>
-                            <input
-                              ref={el => profitModalRefs.current.newDisc = el}
-                              type="number" value={newRuleDisc}
-                              onChange={e => setNewRuleDisc(e.target.value)}
-                              onKeyDown={async e => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  if (newRuleSizeRange && (newRulePct || newRuleDisc)) {
-                                    await saveProfitRule(selectedProfitCompany, newRuleCategory, newRuleSizeRange, newRulePct, newRuleDisc);
-                                    setNewRuleSizeRange(''); setNewRulePct(''); setNewRuleDisc('');
-                                    profitModalRefs.current.newRange?.focus();
+                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3 }}>
+                            <span style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 700, marginBottom: 4 }}>Disc</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{ fontSize: '0.65rem', color: '#dc2626', fontWeight: '800', marginBottom: 2 }}>CUST</div>
+                              <input
+                                ref={el => profitModalRefs.current.newDisc = el}
+                                type="number" value={newRuleDisc}
+                                onChange={e => setNewRuleDisc(e.target.value)}
+                                onKeyDown={async e => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (newRuleSizeRange && (newRulePct || newRuleDisc)) {
+                                      await saveProfitRule(selectedProfitCompany, newRuleCategory, newRuleSizeRange, newRulePct, newRuleDisc);
+                                      setNewRuleSizeRange(''); setNewRulePct(''); setNewRuleDisc('');
+                                      profitModalRefs.current.newRange?.focus();
+                                    }
                                   }
-                                }
-                              }}
-                              min="0" max="100" step="0.5"
-                              style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #f44336' }}
-                            />
+                                }}
+                                min="0" max="100" step="0.5"
+                                style={{ ...mInput, width: 55, fontWeight: 700, border: '2px solid #f44336' }}
+                              />
+                            </div>
                           </div>
                           <button
                             onClick={async () => {
@@ -2006,7 +2045,14 @@ function NewItemForm({ editItemData, onClearEdit, isActive, currentUser, openWin
                     <tr key={c} style={{ borderTop: '1px solid #f0f0f0' }}>
                       <td style={{ padding: '10px' }}>{c}</td>
                       <td style={{ padding: '10px', textAlign: 'center' }}>
-                        <button onClick={async () => { await ipcRenderer.invoke('delete-company', c); await loadCompanies(); }}
+                        <button onClick={async () => {
+                          if (currentUser?.role !== 'superadmin') {
+                            await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete companies.');
+                            return;
+                          }
+                          await ipcRenderer.invoke('delete-company', c);
+                          await loadCompanies();
+                        }}
                           style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}>
                           🗑️
                         </button>

@@ -63,12 +63,13 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
     return () => window.removeEventListener('keydown', handler);
   }, [isActive]);
 
-  useEffect(() => { load(); }, [version]);
+  useEffect(() => { load(); }, [version, filterDate, showAll]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await ipcRenderer.invoke('get-purchases') || [];
+      const payload = showAll ? {} : { startDate: filterDate, endDate: filterDate };
+      const res = await ipcRenderer.invoke('get-purchases', payload) || [];
       setPurchases(res);
     } catch { } finally {
       setLoading(false);
@@ -76,6 +77,10 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
   };
 
   const handleDelete = async (p) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete purchases.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete purchase #${p.id}?`);
     if (confirmed) {
       await ipcRenderer.invoke('delete-purchase', p.id);
@@ -131,12 +136,9 @@ function PurchaseList({ currentUser, onEditPurchase, isActive }) {
         p.blt_number?.toLowerCase().includes(q) ||
         String(p.id).includes(q);
 
-      const pDate = getLocalDateString(p.purchase_date || p.created_at);
-      const matchDate = showAll || pDate === filterDate;
-
-      return matchSearch && matchDate;
+      return matchSearch;
     });
-  }, [purchases, search, filterDate, showAll]);
+  }, [purchases, search]);
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

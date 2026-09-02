@@ -16,9 +16,10 @@ export function buildManufacturerStockHTML(groups, grandQty, grandPackets, grand
     let balText = '';
     if (showSupplierBalance && balance !== undefined) {
       const netBal = balance - (sup.totalValue || 0);
-      const supBalLabel = balance > 0 ? 'Cr (Dene Hain)' : balance < 0 ? 'Dr (Lene Hain)' : 'Nil';
-      const netBalLabel = netBal > 0 ? 'Cr (Dene Hain)' : netBal < 0 ? 'Dr (Lene Hain)' : 'Nil';
-      balText = ` | Sup Bal: ${fmt2(Math.abs(balance))} ${supBalLabel} | Stock in Hand: ${fmt2(Math.abs(netBal))} ${netBalLabel}`;
+      const supBalLabel = balance > 0 ? 'Cr' : balance < 0 ? 'Dr' : 'Nil';
+      const netBalPrefix = netBal < 0 ? '(-) ' : netBal > 0 ? '(+) ' : '';
+      const netBalLabel = netBal > 0 ? 'Cr' : netBal < 0 ? 'Dr' : 'Nil';
+      balText = ` | Sup Bal: ${fmt2(Math.abs(balance))} ${supBalLabel} | Stock in Hand: ${netBalPrefix}${fmt2(Math.abs(netBal))} ${netBalLabel}`;
     }
 
     let categoriesHtml = '';
@@ -101,13 +102,14 @@ export function buildManufacturerStockHTML(groups, grandQty, grandPackets, grand
       const netBal = totalPayable - totalReceivable;
 
       const rowsHtml = filteredBals.map(([name, bal]) => {
-        const typeLabel = bal > 0 ? 'Dene Hain (Cr)' : bal < 0 ? 'Lene Hain (Dr)' : 'Nil';
-        const amtLabel = bal > 0 ? 'Cr (Dene Hain)' : bal < 0 ? 'Dr (Lene Hain)' : 'Nil';
+        const typeLabel = bal > 0 ? 'Cr' : bal < 0 ? 'Dr' : 'Nil';
+        const prefix = bal < 0 ? '(-) ' : bal > 0 ? '(+) ' : '';
+        const amtLabel = bal > 0 ? 'Cr' : bal < 0 ? 'Dr' : 'Nil';
         return `
         <tr>
           <td style="border: 1px solid #000; padding: 6px 8px; font-size: 13.5px; font-weight: 600; text-transform: uppercase;">${(name || '').toUpperCase()}</td>
           <td style="border: 1px solid #000; padding: 6px 8px; text-align: center; font-size: 13.5px; font-weight: bold;">${typeLabel}</td>
-          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: 900; font-size: 14px;">${fmt2(Math.abs(bal))} ${amtLabel}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: 900; font-size: 14px;">${prefix}${fmt2(Math.abs(bal))} ${amtLabel}</td>
         </tr>
       `;
       }).join('');
@@ -130,16 +132,16 @@ export function buildManufacturerStockHTML(groups, grandQty, grandPackets, grand
             </tbody>
             <tfoot>
               <tr style="background: #f1f5f9; font-weight: 900; font-size: 13.5px;">
-                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">TOTAL PAYABLE — DENE HAIN (Cr):</td>
+                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">TOTAL PAYABLE (Cr):</td>
                 <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; color: #15803d;">${fmt2(totalPayable)} Cr</td>
               </tr>
               <tr style="background: #f1f5f9; font-weight: 900; font-size: 13.5px;">
-                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">TOTAL RECEIVABLE / ADVANCE — LENE HAIN (Dr):</td>
+                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">TOTAL RECEIVABLE / ADVANCE (Dr):</td>
                 <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; color: #dc2626;">${fmt2(totalReceivable)} Dr</td>
               </tr>
               <tr style="background: #e2e8f0; font-weight: 900; font-size: 14px;">
-                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">STOCK IN HAND (${netBal >= 0 ? 'TOTAL PAYABLE — DENE HAIN' : 'TOTAL RECEIVABLE — LENE HAIN'}):</td>
-                <td style="border: 1px solid #000; padding: 6px 8px; text-align: right;">${fmt2(Math.abs(netBal))} ${netBal >= 0 ? 'Cr (Dene Hain)' : 'Dr (Lene Hain)'}</td>
+                <td colSpan="2" style="border: 1px solid #000; padding: 6px 8px; text-align: right;">STOCK IN HAND (${netBal >= 0 ? 'TOTAL PAYABLE (Cr)' : 'TOTAL RECEIVABLE (Dr)'}):</td>
+                <td style="border: 1px solid #000; padding: 6px 8px; text-align: right;">${netBal < 0 ? '(-) ' : netBal > 0 ? '(+) ' : ''}${fmt2(Math.abs(netBal))} ${netBal >= 0 ? 'Cr' : 'Dr'}</td>
               </tr>
             </tfoot>
           </table>

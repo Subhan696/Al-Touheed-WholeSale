@@ -345,6 +345,10 @@ function ManufacturerDiscounts({ openWindow }) {
 
   const handleDeleteMfg = async (id) => {
     setMfgError('');
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete manufacturers/suppliers.');
+      return;
+    }
     const res = await ipcRenderer.invoke('delete-supplier', id);
     if (res && res.success === false && res.error) {
       setMfgError(res.error);

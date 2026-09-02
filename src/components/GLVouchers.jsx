@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getLocalDateString, getFirstDayOfMonthString } from '../utils/dateUtils';
 import GLVoucherEntry from './GLVoucherEntry';
 import './GL.css';
@@ -36,7 +36,7 @@ const formatDateDMY = (val) => {
   return rawStr;
 };
 
-export default function GLVouchers() {
+export default function GLVouchers({ currentUser }) {
   const [vouchers, setVouchers] = useState([]);
   const [showEntry, setShowEntry] = useState(false);
   const [editingVoucher, setEditingVoucher] = useState(null);
@@ -45,6 +45,8 @@ export default function GLVouchers() {
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   const [search, setSearch] = useState('');
+  const [startDate, setStartDate] = useState(getLocalDateString());
+  const [endDate, setEndDate] = useState(getLocalDateString());
 
   useEffect(() => {
     fetchVouchers(startDate, endDate, search);
@@ -75,6 +77,10 @@ export default function GLVouchers() {
   }, [vouchers, search]);
 
   const handleDelete = async (id) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete vouchers/transactions.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this transaction and all its details permanently?');
     if (confirmed) {
       await ipcRenderer.invoke('delete-voucher', id);
@@ -112,6 +118,7 @@ export default function GLVouchers() {
   if (showEntry) {
     return (
       <GLVoucherEntry
+        currentUser={currentUser}
         voucherToEdit={editingVoucher}
         onCancel={() => { setShowEntry(false); setEditingVoucher(null); }}
         onSuccess={() => { setShowEntry(false); setEditingVoucher(null); fetchVouchers(startDate, endDate, search); }}
@@ -127,104 +134,187 @@ export default function GLVouchers() {
     viewTotalCredit += Number(d.credit) || 0;
   });
 
+  const todayStr = getLocalDateString();
+  const firstDayStr = getFirstDayOfMonthString();
+
   return (
     <div className="p-4 bg-slate-50 min-h-screen">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
         <h1 className="text-2xl font-bold text-slate-800">Transaction Entry</h1>
-        <button onClick={handleNewTransaction} className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 font-semibold">
-          + New Transaction
-        </button>
-      </div>
-
-      <div className="bg-white p-4 rounded shadow mb-6 border border-slate-200 flex flex-wrap gap-4 items-end justify-between">
-        <div className="flex gap-4 items-end flex-wrap">
-          <div className="flex gap-2 items-end">
-            <div>
-              <label className="block text-sm font-semibold mb-1">Search Transactions</label>
-              <input
-                type="text"
-                placeholder="Voucher #, Remarks, or Account..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') fetchVouchers(startDate, endDate, search); }}
-                className="border p-2 rounded text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+        
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex gap-2 items-center mr-3">
             <button
-              onClick={() => fetchVouchers(startDate, endDate, search)}
-              className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 text-sm font-semibold flex items-center gap-1"
+              onClick={() => {
+                setStartDate(todayStr);
+                setEndDate(todayStr);
+                fetchVouchers(todayStr, todayStr, search);
+              }}
+              style={{
+                height: '34px',
+                padding: '0 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                backgroundColor: startDate === todayStr && endDate === todayStr ? '#2563eb' : '#ffffff',
+                color: startDate === todayStr && endDate === todayStr ? '#ffffff' : '#334155',
+                border: startDate === todayStr && endDate === todayStr ? '1px solid #2563eb' : '1px solid #cbd5e1'
+              }}
+              className="flex items-center gap-1 transition shadow-sm hover:border-slate-400"
             >
-              🔍 Search
+              <span>📅</span> Today
+            </button>
+            <button
+              onClick={() => {
+                setStartDate(firstDayStr);
+                setEndDate(todayStr);
+                fetchVouchers(firstDayStr, todayStr, search);
+              }}
+              style={{
+                height: '34px',
+                padding: '0 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                backgroundColor: startDate === firstDayStr && endDate === todayStr ? '#2563eb' : '#ffffff',
+                color: startDate === firstDayStr && endDate === todayStr ? '#ffffff' : '#334155',
+                border: startDate === firstDayStr && endDate === todayStr ? '1px solid #2563eb' : '1px solid #cbd5e1'
+              }}
+              className="flex items-center gap-1 transition shadow-sm hover:border-slate-400"
+            >
+              <span>📆</span> This Month
+            </button>
+            <button
+              onClick={() => {
+                setStartDate('');
+                setEndDate('');
+                setSearch('');
+                fetchVouchers('', '', '');
+              }}
+              style={{
+                height: '34px',
+                padding: '0 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                backgroundColor: !startDate && !endDate ? '#2563eb' : '#ffffff',
+                color: !startDate && !endDate ? '#ffffff' : '#334155',
+                border: !startDate && !endDate ? '1px solid #2563eb' : '1px solid #cbd5e1'
+              }}
+              className="flex items-center gap-1 transition shadow-sm hover:border-slate-400"
+            >
+              <span>🌐</span> Show All
             </button>
           </div>
-          <div>
-            <label className="block text-sm font-semibold mb-1">Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => {
-                setStartDate(e.target.value);
-                fetchVouchers(e.target.value, endDate, search);
-              }}
-              className="border p-2 rounded text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold mb-1">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => {
-                setEndDate(e.target.value);
-                fetchVouchers(startDate, e.target.value, search);
-              }}
-              className="border p-2 rounded text-sm"
-            />
-          </div>
+
           <button
-            onClick={() => fetchVouchers(startDate, endDate, search)}
-            className="bg-slate-800 text-white px-4 py-2 rounded shadow hover:bg-slate-900 text-sm font-semibold"
+            onClick={handleNewTransaction}
+            style={{
+              backgroundColor: '#2563eb',
+              color: '#ffffff',
+              border: 'none',
+              height: '40px',
+              padding: '0 18px',
+              fontSize: '14px',
+              fontWeight: 600,
+              borderRadius: '8px',
+              boxShadow: '0 2px 4px rgba(37,99,235,0.2)',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+            className="flex items-center gap-1.5 hover:bg-blue-700 transition"
           >
-            🔍 Filter
+            <span style={{ fontSize: '16px', fontWeight: 700 }}>+</span> New Transaction
           </button>
+        </div>
+      </div>
+
+      <div className="bg-white p-4 rounded-xl shadow-sm mb-6 border border-slate-200 flex flex-wrap gap-4 items-end">
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">Search Transactions</label>
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              placeholder="Voucher #, Remarks, or Account..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') fetchVouchers(startDate, endDate, search); }}
+              style={{ height: '38px', padding: '0 12px', fontSize: '14px', borderRadius: '6px', width: '260px', borderColor: '#cbd5e1' }}
+              className="border focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+            />
+            <button
+              onClick={() => fetchVouchers(startDate, endDate, search)}
+              style={{
+                height: '38px',
+                padding: '0 16px',
+                fontSize: '14px',
+                fontWeight: 600,
+                backgroundColor: '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer'
+              }}
+              className="flex items-center gap-1.5 hover:bg-blue-700 transition shadow-sm"
+            >
+              <span>🔍</span> Search
+            </button>
+          </div>
         </div>
 
-        <div className="flex gap-2 items-center flex-wrap">
-          <button
-            onClick={() => {
-              const today = getLocalDateString();
-              setStartDate(today);
-              setEndDate(today);
-              fetchVouchers(today, today, search);
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">Start Date</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={e => {
+              setStartDate(e.target.value);
+              fetchVouchers(e.target.value, endDate, search);
             }}
-            className="bg-blue-50 text-blue-700 border border-blue-300 px-3 py-2 rounded text-xs font-bold hover:bg-blue-100"
-          >
-            📅 Today
-          </button>
-          <button
-            onClick={() => {
-              const firstDay = getFirstDayOfMonthString();
-              const today = getLocalDateString();
-              setStartDate(firstDay);
-              setEndDate(today);
-              fetchVouchers(firstDay, today, search);
-            }}
-            className="bg-indigo-50 text-indigo-700 border border-indigo-300 px-3 py-2 rounded text-xs font-bold hover:bg-indigo-100"
-          >
-            📆 This Month
-          </button>
-          <button
-            onClick={() => {
-              setStartDate('');
-              setEndDate('');
-              setSearch('');
-              fetchVouchers('', '', '');
-            }}
-            className="bg-amber-50 text-amber-700 border border-amber-300 px-3 py-2 rounded text-xs font-bold hover:bg-amber-100"
-          >
-            🌐 Show All
-          </button>
+            style={{ height: '38px', padding: '0 10px', fontSize: '14px', borderRadius: '6px', borderColor: '#cbd5e1' }}
+            className="border focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+          />
         </div>
+
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">End Date</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={e => {
+              setEndDate(e.target.value);
+              fetchVouchers(startDate, e.target.value, search);
+            }}
+            style={{ height: '38px', padding: '0 10px', fontSize: '14px', borderRadius: '6px', borderColor: '#cbd5e1' }}
+            className="border focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+          />
+        </div>
+
+        <button
+          onClick={() => fetchVouchers(startDate, endDate, search)}
+          style={{
+            height: '38px',
+            padding: '0 16px',
+            fontSize: '14px',
+            fontWeight: 600,
+            backgroundColor: '#1e293b',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '6px',
+            whiteSpace: 'nowrap',
+            cursor: 'pointer'
+          }}
+          className="flex items-center gap-1.5 hover:bg-slate-900 transition shadow-sm"
+        >
+          <span>⚡</span> Filter
+        </button>
       </div>
 
       <div className="bg-white rounded shadow overflow-x-auto border border-slate-200">
@@ -235,6 +325,7 @@ export default function GLVouchers() {
               <th className="py-2 px-4 text-left">Transaction No</th>
               <th className="py-2 px-4 text-left">Type</th>
               <th className="py-2 px-4 text-left">Remarks</th>
+              <th className="py-2 px-4 text-left">User</th>
               <th className="py-2 px-4 text-center">Actions</th>
             </tr>
           </thead>
@@ -245,6 +336,7 @@ export default function GLVouchers() {
                 <td className="py-2 px-4 font-semibold text-blue-700">{v.voucher_no}</td>
                 <td className="py-2 px-4 font-medium">{VOUCHER_TYPE_NAMES[v.voucher_type] || v.voucher_type}</td>
                 <td className="py-2 px-4">{v.remarks || '-'}</td>
+                <td className="py-2 px-4 font-semibold text-slate-700">{v.user_name || v.username || 'Admin'}</td>
                 <td className="py-2 px-4 text-center space-x-2">
                   <button onClick={() => handleView(v)} style={{ backgroundColor: '#059669', color: '#ffffff', border: 'none' }} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs hover:bg-emerald-700 font-semibold shadow-sm">
                     View
@@ -259,7 +351,7 @@ export default function GLVouchers() {
               </tr>
             ))}
             {filteredVouchers.length === 0 && (
-              <tr><td colSpan="5" className="text-center py-4 text-slate-500">No transactions found matching your search.</td></tr>
+              <tr><td colSpan="6" className="text-center py-4 text-slate-500">No transactions found matching your search.</td></tr>
             )}
           </tbody>
         </table>

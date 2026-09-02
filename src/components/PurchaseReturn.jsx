@@ -517,7 +517,8 @@ function PurchaseReturn({ currentUser, returnToEdit, onSaveSuccess, onCancelEdit
     ctnQty,
     notes,
     discount,
-    miscCharges
+    miscCharges,
+    total_amount: totals.grand
   });
 
   const handlePrint = () => {

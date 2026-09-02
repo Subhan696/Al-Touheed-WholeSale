@@ -11,17 +11,29 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
   const [defaultAccounts, setDefaultAccounts] = useState({});
   const [addingNewAcc, setAddingNewAcc] = useState({});
   const [bankMethods, setBankMethods] = useState([]);
+  const [glAccountsList, setGlAccountsList] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef({});
 
   useEffect(() => {
     ipcRenderer.invoke('get-gl-accounts').then(accounts => {
       if (accounts && Array.isArray(accounts)) {
+        setGlAccountsList(accounts);
         const banks = accounts.filter(a => a.account_type === 'Bank').map(a => a.account_name);
         setBankMethods(banks);
       }
     }).catch(() => { });
   }, []);
+
+  const getMethodLabel = (methodName) => {
+    if (!methodName || methodName === 'Cash Received') return 'Cash Received';
+    const acc = glAccountsList.find(a => 
+      a.account_name === methodName || 
+      (a.short_name && a.short_name.toLowerCase() === methodName.toLowerCase()) ||
+      a.account_name.toLowerCase() === methodName.toLowerCase()
+    );
+    return (acc && acc.short_name) ? acc.short_name : methodName;
+  };
 
   const availableMethods = useMemo(() => {
     let methods = [];
@@ -30,7 +42,6 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
     } else {
       methods = [...PRESET_METHODS];
     }
-    // When editing, ensure existing payment methods are available even if not in current list
     if (isEditMode && existingPayments && existingPayments.length > 0) {
       existingPayments.forEach(p => {
         if (p.method && !methods.includes(p.method)) {
@@ -194,7 +205,7 @@ function NormalModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
                   cursor: 'pointer'
                 }}
               >
-                {cashOnly ? <option value="Cash Received">Cash Received</option> : availableMethods.map(m => <option key={m} value={m}>{m}</option>)}
+                {cashOnly ? <option value="Cash Received">Cash Received</option> : availableMethods.map(m => <option key={m} value={m}>{getMethodLabel(m)}</option>)}
               </select>
             </div>
 
@@ -335,11 +346,19 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
 
           payments.forEach((p, i) => {
             // Try to match this payment entry to a known bank account
-            const matchedBank = bankAccs.find(b =>
-              b.account_name === p.method ||
-              p.method.toLowerCase().includes(b.account_name.toLowerCase()) ||
-              b.account_name.toLowerCase().includes(p.method.toLowerCase())
-            );
+            const pMethod = (p.method || '').trim().toLowerCase();
+            const matchedBank = bankAccs.find(b => {
+              const bName = (b.account_name || '').trim().toLowerCase();
+              const bShort = (b.short_name || '').trim().toLowerCase();
+              return (
+                bName === pMethod ||
+                (bShort && bShort === pMethod) ||
+                (bName && pMethod.includes(bName)) ||
+                (bName && bName.includes(pMethod)) ||
+                (bShort && pMethod.includes(bShort)) ||
+                (bShort && bShort.includes(pMethod))
+              );
+            });
             if (matchedBank) {
               initialBankRows.push({
                 id: `bankrow-${Date.now()}-${i}`,
@@ -541,7 +560,9 @@ function MasterModalContent({ invoiceNo, grandTotal, isEditMode, existingPayment
                         >
                           <option value={row.accountName}>{row.accountName}</option>
                           {availableBankAccounts.map(a => (
-                            <option key={a.id} value={a.account_name}>{a.account_name}</option>
+                            <option key={a.id} value={a.account_name}>
+                              {a.account_name}
+                            </option>
                           ))}
                         </select>
                       </div>

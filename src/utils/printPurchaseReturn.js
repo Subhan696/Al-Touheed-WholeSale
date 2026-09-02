@@ -85,7 +85,14 @@ export function buildPurchaseReturnHTML(header, items) {
   }
 
   const discLabel = exprList.length > 0 ? `Total Discount (${exprList.join(', ')}):` : 'Total Discount:';
-  const grandTotal = Math.max(0, netSub - discount);
+
+  const rawHeaderTotal = header.total_amount ?? header.totalAmount ?? header.total_price ?? header.totalPrice ?? header.grandTotal ?? header.grand_total ?? header.total;
+  const headerTotal = (rawHeaderTotal !== undefined && rawHeaderTotal !== null && rawHeaderTotal !== '') ? parseFloat(rawHeaderTotal) : null;
+  const miscCharges = parseFloat(header.miscCharges || header.misc_charges || 0);
+
+  const grandTotal = (headerTotal !== null && !isNaN(headerTotal))
+    ? headerTotal
+    : Math.max(0, netSub - discount + miscCharges);
 
   return `
   <!DOCTYPE html>

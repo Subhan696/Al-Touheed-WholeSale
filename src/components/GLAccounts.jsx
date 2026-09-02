@@ -3,10 +3,10 @@ import './GL.css';
 
 const { ipcRenderer } = window.require('electron');
 
-export default function GLAccounts() {
+export default function GLAccounts({ currentUser }) {
   const [accounts, setAccounts] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ id: null, account_name: '', account_type: 'Bank', opening_balance: 0, balance_type: 'Dr' });
+  const [formData, setFormData] = useState({ id: null, account_name: '', short_name: '', account_type: 'Bank', opening_balance: 0, balance_type: 'Dr' });
   const [searchTerm, setSearchTerm] = useState('');
 
   const accountTypes = ['Bank', 'Cash', 'Supplier', 'Customer', 'Expense', 'Income', 'Equity'];
@@ -36,7 +36,7 @@ export default function GLAccounts() {
         await ipcRenderer.invoke('add-gl-account', formData);
       }
       setShowForm(false);
-      setFormData({ id: null, account_name: '', account_type: 'Bank', opening_balance: 0, balance_type: 'Dr' });
+      setFormData({ id: null, account_name: '', short_name: '', account_type: 'Bank', opening_balance: 0, balance_type: 'Dr' });
       fetchAccounts();
     } catch (err) {
       alert('Error saving account: ' + err.message);
@@ -52,6 +52,7 @@ export default function GLAccounts() {
     setFormData({
       id: acc.id,
       account_name: acc.account_name || '',
+      short_name: acc.short_name || '',
       account_type: acc.account_type || 'Expense',
       opening_balance: acc.opening_balance ?? 0,
       balance_type: normalizeBalanceType(acc.balance_type),
@@ -60,6 +61,10 @@ export default function GLAccounts() {
   };
 
   const handleDelete = async (id) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete accounts.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Are you sure you want to delete this account?');
     if (confirmed) {
       try {
@@ -71,7 +76,10 @@ export default function GLAccounts() {
     }
   };
 
-  const filtered = accounts.filter(a => a.account_name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filtered = accounts.filter(a => {
+    const q = searchTerm.toLowerCase();
+    return (a.account_name || '').toLowerCase().includes(q) || (a.short_name || '').toLowerCase().includes(q);
+  });
 
   return (
     <div className="p-4 bg-slate-50 flex flex-col h-full" style={{ height: '100%', boxSizing: 'border-box' }}>
@@ -79,7 +87,7 @@ export default function GLAccounts() {
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-2xl font-bold text-slate-800">Chart of Accounts</h1>
           <button 
-            onClick={() => { setShowForm(true); setFormData({ id: null, account_name: '', account_type: 'Bank', opening_balance: 0, balance_type: 'Dr' }); }}
+            onClick={() => { setShowForm(true); setFormData({ id: null, account_name: '', short_name: '', account_type: 'Bank', opening_balance: 0, balance_type: 'Dr' }); }}
             className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
           >
             Add New Account
@@ -93,6 +101,10 @@ export default function GLAccounts() {
               <div>
                 <label className="block text-sm font-semibold mb-1">Account Name *</label>
                 <input required type="text" value={formData.account_name} onChange={e => setFormData({...formData, account_name: e.target.value.toUpperCase()})} className="w-full border p-2 rounded focus:outline-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">Short Name / Code (Cashier Display)</label>
+                <input type="text" value={formData.short_name} onChange={e => setFormData({...formData, short_name: e.target.value.toUpperCase()})} placeholder="e.g. MEEZAN, HBL, MCB" className="w-full border p-2 rounded focus:outline-blue-500" />
               </div>
               <div>
                 <label className="block text-sm font-semibold mb-1">Account Type *</label>
@@ -120,7 +132,7 @@ export default function GLAccounts() {
         )}
 
         <div className="mb-4">
-          <input type="text" placeholder="Search accounts..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full md:w-1/3 border p-2 rounded shadow-sm focus:outline-blue-500" />
+          <input type="text" placeholder="Search accounts or short names..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full md:w-1/3 border p-2 rounded shadow-sm focus:outline-blue-500" />
         </div>
       </div>
 
@@ -130,6 +142,7 @@ export default function GLAccounts() {
             <tr>
               <th className="py-2 px-4 text-left bg-slate-800 sticky top-0 z-10">ID</th>
               <th className="py-2 px-4 text-left bg-slate-800 sticky top-0 z-10">Account Name</th>
+              <th className="py-2 px-4 text-left bg-slate-800 sticky top-0 z-10">Short Code</th>
               <th className="py-2 px-4 text-left bg-slate-800 sticky top-0 z-10">Type</th>
               <th className="py-2 px-4 text-right bg-slate-800 sticky top-0 z-10">Opening Bal</th>
               <th className="py-2 px-4 text-center bg-slate-800 sticky top-0 z-10">Actions</th>
@@ -140,6 +153,13 @@ export default function GLAccounts() {
               <tr key={acc.id} className="border-b hover:bg-slate-50">
                 <td className="py-2 px-4">{acc.id}</td>
                 <td className="py-2 px-4 font-semibold text-blue-700">{acc.account_name}</td>
+                <td className="py-2 px-4 font-bold text-slate-700">
+                  {acc.short_name ? (
+                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-extrabold">{acc.short_name}</span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
                 <td className="py-2 px-4">{acc.account_type}</td>
                 <td className="py-2 px-4 text-right">{Number(acc.opening_balance || 0).toLocaleString()} {acc.balance_type}</td>
                 <td className="py-2 px-4 text-center">
@@ -149,7 +169,7 @@ export default function GLAccounts() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan="5" className="text-center py-4 text-slate-500">No accounts found.</td></tr>
+              <tr><td colSpan="6" className="text-center py-4 text-slate-500">No accounts found.</td></tr>
             )}
           </tbody>
         </table>

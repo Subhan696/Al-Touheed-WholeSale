@@ -24,6 +24,9 @@ function CustomerBalanceList({ currentUser, isActive }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
+  const [balanceFilter, setBalanceFilter] = useState('all'); // 'all', 'hide_zero', 'debit_only', 'credit_only', 'zero_only'
+  const [sortField, setSortField] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc'); // 'asc', 'desc'
   const [asOfTime, setAsOfTime] = useState(getNowFormatted());
 
   useEffect(() => {
@@ -47,16 +50,79 @@ function CustomerBalanceList({ currentUser, isActive }) {
     return Array.from(set).sort();
   }, [data]);
 
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortOrder(field === 'debit' || field === 'credit' ? 'desc' : 'asc');
+    }
+  };
+
+  const getSortIcon = (field) => {
+    if (sortField !== field) return <span className="cbl-sort-icon neutral no-print-sort"> ↕</span>;
+    return <span className="cbl-sort-icon active no-print-sort">{sortOrder === 'asc' ? ' ⬆️' : ' ⬇️'}</span>;
+  };
+
   const filteredData = useMemo(() => {
-    return data.filter(item => {
+    let result = data.filter(item => {
       const matchSearch = !searchTerm.trim() || 
         item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
         String(item.code).includes(searchTerm) || 
         (item.phone && item.phone.includes(searchTerm));
       const matchCity = !selectedCity || item.city === selectedCity;
-      return matchSearch && matchCity;
+
+      let matchBalance = true;
+      const debit = item.debit || 0;
+      const credit = item.credit || 0;
+      if (balanceFilter === 'hide_zero') {
+        matchBalance = debit > 0 || credit > 0;
+      } else if (balanceFilter === 'debit_only') {
+        matchBalance = debit > 0;
+      } else if (balanceFilter === 'credit_only') {
+        matchBalance = credit > 0;
+      } else if (balanceFilter === 'zero_only') {
+        matchBalance = debit === 0 && credit === 0;
+      }
+
+      return matchSearch && matchCity && matchBalance;
     });
-  }, [data, searchTerm, selectedCity]);
+
+    result.sort((a, b) => {
+      let valA, valB;
+      if (sortField === 'name') {
+        valA = (a.name || '').toLowerCase();
+        valB = (b.name || '').toLowerCase();
+        return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      } else if (sortField === 'code') {
+        valA = a.code || 0;
+        valB = b.code || 0;
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return sortOrder === 'asc' ? valA - valB : valB - valA;
+        }
+        return sortOrder === 'asc' ? String(valA).localeCompare(String(valB)) : String(valB).localeCompare(String(valA));
+      } else if (sortField === 'city') {
+        valA = (a.city || '').toLowerCase();
+        valB = (b.city || '').toLowerCase();
+        return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      } else if (sortField === 'debit') {
+        valA = a.debit || 0;
+        valB = b.debit || 0;
+        return sortOrder === 'asc' ? valA - valB : valB - valA;
+      } else if (sortField === 'credit') {
+        valA = a.credit || 0;
+        valB = b.credit || 0;
+        return sortOrder === 'asc' ? valA - valB : valB - valA;
+      } else if (sortField === 'balance') {
+        valA = a.balance || 0;
+        valB = b.balance || 0;
+        return sortOrder === 'asc' ? valA - valB : valB - valA;
+      }
+      return 0;
+    });
+
+    return result;
+  }, [data, searchTerm, selectedCity, balanceFilter, sortField, sortOrder]);
 
   const totals = useMemo(() => {
     let totalDebit = 0;
@@ -100,6 +166,39 @@ function CustomerBalanceList({ currentUser, isActive }) {
           >
             <option value="">ALL CITIES / AREAS</option>
             {citiesList.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select
+            value={balanceFilter}
+            onChange={e => setBalanceFilter(e.target.value)}
+            className="cbl-select-input"
+            title="Filter by balance"
+          >
+            <option value="all">⚡ All Balances</option>
+            <option value="hide_zero">🚫 Hide 0 Balances</option>
+            <option value="debit_only">🟢 Debit Only (Lene Hain)</option>
+            <option value="credit_only">🔴 Credit Only (Dene Hain)</option>
+            <option value="zero_only">⭕ 0 Balances Only</option>
+          </select>
+          <select
+            value={`${sortField}_${sortOrder}`}
+            onChange={e => {
+              const [field, order] = e.target.value.split('_');
+              setSortField(field);
+              setSortOrder(order);
+            }}
+            className="cbl-select-input"
+            title="Sort list"
+          >
+            <option value="name_asc">Sort: Customer (A to Z)</option>
+            <option value="name_desc">Sort: Customer (Z to A)</option>
+            <option value="debit_desc">Sort: Debit (High to Low)</option>
+            <option value="debit_asc">Sort: Debit (Low to High)</option>
+            <option value="credit_desc">Sort: Credit (High to Low)</option>
+            <option value="credit_asc">Sort: Credit (Low to High)</option>
+            <option value="city_asc">Sort: City (A to Z)</option>
+            <option value="city_desc">Sort: City (Z to A)</option>
+            <option value="code_asc">Sort: Alias (Asc)</option>
+            <option value="code_desc">Sort: Alias (Desc)</option>
           </select>
           <button type="button" onClick={loadData} className="cbl-btn cbl-btn-refresh">
             🔄 Refresh
@@ -150,16 +249,27 @@ function CustomerBalanceList({ currentUser, isActive }) {
               <thead>
                 <tr>
                   <th style={{ width: '45px', textAlign: 'center' }}>SNo.</th>
-                  <th style={{ width: '75px' }}>Alias</th>
-                  <th>Customer Name</th>
-                  <th style={{ width: '180px', textAlign: 'right' }}>Debit (Lene Hain)</th>
-                  <th style={{ width: '180px', textAlign: 'right' }}>Credit (Dene Hain)</th>
+                  <th style={{ width: '75px', cursor: 'pointer' }} onClick={() => handleSort('code')} title="Click to sort by Alias">
+                    Alias {getSortIcon('code')}
+                  </th>
+                  <th style={{ cursor: 'pointer' }} onClick={() => handleSort('name')} title="Click to sort by Customer Name">
+                    Customer Name {getSortIcon('name')}
+                  </th>
+                  <th style={{ width: '120px', cursor: 'pointer' }} onClick={() => handleSort('city')} title="Click to sort by City / Area">
+                    City / Area {getSortIcon('city')}
+                  </th>
+                  <th style={{ width: '170px', textAlign: 'right', cursor: 'pointer' }} onClick={() => handleSort('debit')} title="Click to sort by Debit">
+                    Debit (Lene Hain) {getSortIcon('debit')}
+                  </th>
+                  <th style={{ width: '170px', textAlign: 'right', cursor: 'pointer' }} onClick={() => handleSort('credit')} title="Click to sort by Credit">
+                    Credit (Dene Hain) {getSortIcon('credit')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="cbl-empty-row">No customer balances found.</td>
+                    <td colSpan="6" className="cbl-empty-row">No customer balances found.</td>
                   </tr>
                 ) : (
                   filteredData.map((item, idx) => (
@@ -167,6 +277,7 @@ function CustomerBalanceList({ currentUser, isActive }) {
                       <td style={{ textAlign: 'center' }}>{idx + 1}</td>
                       <td>{item.code}</td>
                       <td className="cbl-cust-name-cell">{item.name}</td>
+                      <td>{item.city || '-'}</td>
                       <td style={{ textAlign: 'right' }}>
                         {item.debit > 0 ? (
                           <div className="cbl-val-box">
@@ -189,7 +300,7 @@ function CustomerBalanceList({ currentUser, isActive }) {
               </tbody>
               <tfoot>
                 <tr className="cbl-tfoot-row">
-                  <td colSpan="3" style={{ textAlign: 'right', fontWeight: 700 }}>
+                  <td colSpan="4" style={{ textAlign: 'right', fontWeight: 700 }}>
                     Balance : <span className="cbl-net-bal dr-text">{totals.netBalanceStr}</span> &nbsp;&nbsp;&nbsp;&nbsp; Total:
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }} className="dr-text">{formatNum(totals.totalDebit)}</td>
@@ -205,3 +316,4 @@ function CustomerBalanceList({ currentUser, isActive }) {
 }
 
 export default CustomerBalanceList;
+

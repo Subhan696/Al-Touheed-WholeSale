@@ -292,9 +292,29 @@
   color: #475569;
 }
 
+.cbl-sort-icon {
+  font-size: 0.8rem;
+  margin-left: 2px;
+  user-select: none;
+}
+
+.cbl-sort-icon.neutral {
+  opacity: 0.4;
+}
+
+.cbl-sort-icon.active {
+  opacity: 1;
+}
+
+.cbl-table th[onClick]:hover {
+  background: #e2e8f0;
+  cursor: pointer;
+}
+
 /* Print CSS */
 @media print {
-  .no-print {
+  .no-print,
+  .no-print-sort {
     display: none !important;
   }
   .customer-balance-list-page {
@@ -318,3 +338,4 @@
     display: none !important;
   }
 }
+

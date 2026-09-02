@@ -107,11 +107,15 @@ function ProductList({ onEditProduct, currentUser, isActive, onOpenAudit }) {
   }, []);
 
   const handleDelete = useCallback(async (p) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete items.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete "${p.item_code} - ${p.description}"?`);
     if (!confirmed) return;
     await ipcRenderer.invoke('delete-product', p.id);
     loadProducts();
-  }, [loadProducts]);
+  }, [currentUser, loadProducts]);
 
   const filtered = useMemo(() => {
     const s = debouncedFilters.search.toLowerCase();
@@ -144,7 +148,7 @@ function ProductList({ onEditProduct, currentUser, isActive, onOpenAudit }) {
     return res;
   }, [products, debouncedFilters]);
 
-  const canManage = currentUser?.role === 'admin' || (currentUser?.permissions || []).includes('manage_products');
+  const canManage = !currentUser || currentUser?.role === 'superadmin' || currentUser?.role === 'admin' || (currentUser?.permissions || []).includes('manage_products');
 
   useEffect(() => { setSelectedIndex(0); }, [debouncedFilters]);
   useEffect(() => { setSelectedIndex(prev => Math.min(prev, Math.max(0, Math.min(filtered.length, 100) - 1))); }, [filtered.length]);

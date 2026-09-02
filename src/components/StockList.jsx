@@ -91,7 +91,7 @@ function StockList({ isActive, currentUser, onOpenAudit }) {
     return filtered.reduce((sum, p) => sum + (p.stock_packets * (parseFloat(p.purchase_rate) || 0)), 0);
   }, [filtered]);
 
-  const canAdjust = currentUser?.role === 'admin' || (currentUser?.permissions || []).includes('manage_products');
+  const canAdjust = !currentUser || currentUser?.role === 'superadmin' || currentUser?.role === 'admin' || (currentUser?.permissions || []).includes('manage_products');
 
   const chipClass = (stock) => stock > 5 ? 'chip-ok' : stock > 0 ? 'chip-low' : 'chip-zero';
 

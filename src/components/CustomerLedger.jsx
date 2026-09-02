@@ -35,7 +35,7 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
   useEffect(() => {
     ipcRenderer.invoke('get-customers', { searchTerm: customerSearch }).then(res => {
       setCustomerList(res || []);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [customerSearch]);
 
   // Load statement whenever selectedCustomer, startDate, or endDate changes
@@ -77,17 +77,17 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
   };
 
   const fmtBal = (num) => {
-    return (num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return Math.abs(num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const getBalanceStatus = (balance, balanceType) => {
     if (!balance || balance === 0) return { text: 'NIL', color: '#94a3b8', bgColor: '#f1f5f9' };
-    
-    // For Customer Ledger: Dr balance means we owe customer (TO PAY), Cr balance means customer owes us (TO RECEIVE)
+
+    // For Customer Ledger: Dr (Debit) = Customer owes us (TR - To Receive), Cr (Credit) = Customer advance (TP - To Pay)
     if (balanceType === 'Dr') {
-      return { text: 'TO PAY', color: '#dc2626', bgColor: '#fee2e2' };
+      return { text: 'TR', color: '#16a34a', bgColor: '#d1fae5' };
     } else {
-      return { text: 'TO RECEIVE', color: '#16a34a', bgColor: '#d1fae5' };
+      return { text: 'TP', color: '#dc2626', bgColor: '#fee2e2' };
     }
   };
 
@@ -140,7 +140,8 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
 
   if (showVoucherEntry) {
     return (
-      <GLVoucherEntry 
+      <GLVoucherEntry
+        currentUser={currentUser}
         initialCustomer={selectedCustomer}
         onCancel={() => setShowVoucherEntry(false)}
         onSuccess={() => {
@@ -158,9 +159,9 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
         <div className="cl-control-group">
           <label>Customer Search:</label>
           <div className="cl-search-wrap">
-            <input 
-              type="text" 
-              placeholder="Type customer name or code..." 
+            <input
+              type="text"
+              placeholder="Type customer name or code..."
               value={customerSearch}
               onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDrop(true); }}
               onFocus={() => setShowCustomerDrop(true)}
@@ -180,27 +181,27 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
 
         <div className="cl-control-group">
           <label>From Date:</label>
-          <input 
-            type="date" 
-            value={startDate} 
-            onChange={e => setStartDate(e.target.value)} 
+          <input
+            type="date"
+            value={startDate}
+            onChange={e => setStartDate(e.target.value)}
             className="cl-input-date"
           />
         </div>
 
         <div className="cl-control-group">
           <label>To Date:</label>
-          <input 
-            type="date" 
-            value={endDate} 
-            onChange={e => setEndDate(e.target.value)} 
+          <input
+            type="date"
+            value={endDate}
+            onChange={e => setEndDate(e.target.value)}
             className="cl-input-date"
           />
         </div>
 
         <div className="cl-btn-group">
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             onClick={handlePrint}
             disabled={!statement}
             style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: statement ? 'pointer' : 'not-allowed' }}
@@ -208,8 +209,8 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
             🖨️ Print Ledger
           </button>
 
-          <button 
-            className="btn btn-secondary" 
+          <button
+            className="btn btn-secondary"
             onClick={fetchStatement}
             style={{ background: '#64748b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
           >
@@ -257,15 +258,15 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
             <table className="cl-table">
               <thead>
                 <tr>
-                  <th style={{ width: '105px' }}>Date</th>
-                  <th style={{ width: '85px' }}>Type</th>
-                  <th style={{ width: '75px' }}>V/Code</th>
+                  <th style={{ width: '75px' }}>Date</th>
+                  <th style={{ width: '90px' }}>Type</th>
+                  <th style={{ width: '75px' }}>User</th>
                   <th>Remarks</th>
-                  <th style={{ width: '220px' }}>Cheque #</th>
-                  <th className="right" style={{ width: '120px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
-                  <th className="right" style={{ width: '120px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
-                  <th className="right" style={{ width: '140px' }}>Balance</th>
-                  <th style={{ width: '100px', textAlign: 'center' }}>Status</th>
+                  <th style={{ width: '85px' }}>Cheque #</th>
+                  <th className="right" style={{ width: '80px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
+                  <th className="right" style={{ width: '80px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
+                  <th className="right" style={{ width: '130px' }}>Balance</th>
+                  <th style={{ width: '55px', textAlign: 'center' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,20 +285,20 @@ function CustomerLedger({ currentUser, initialCustomer, isActive }) {
                 </tr>
 
                 {/* Transaction Rows */}
-                {statement.transactions.length === 0 ? (
+                {(!statement?.transactions || statement.transactions.length === 0) ? (
                   <tr>
                     <td colSpan={9} style={{ textAlign: 'center', padding: '16px', color: '#64748b', fontStyle: 'italic' }}>
                       No transactions recorded in this date range.
                     </td>
                   </tr>
                 ) : (
-                  statement.transactions.map((t) => {
+                  (statement?.transactions || []).map((t) => {
                     const status = getBalanceStatus(t.balance, t.balance_type);
                     return (
                       <tr key={t.id}>
                         <td>{fmtDate(t.date)}</td>
                         <td style={{ fontWeight: 700 }}>{t.type}</td>
-                        <td>{t.v_code}</td>
+                        <td style={{ fontWeight: 600, color: '#475569' }}>{t.user_name || t.user || 'Admin'}</td>
                         <td>{t.remarks}</td>
                         <td>{t.cheque_no}</td>
                         <td className="right" style={{ fontWeight: 700, color: t.debit > 0 ? '#dc2626' : '#94a3b8' }}>{fmt(t.debit)}</td>

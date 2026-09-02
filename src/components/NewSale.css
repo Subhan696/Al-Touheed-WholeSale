@@ -374,7 +374,7 @@
 .sale-table input.packing-input:focus {
   background: #bfdbfe !important;
   border-color: #2563eb !important;
-  box-shadow: 0 0 0 2px rgba(59,130,246,0.25) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
 }
 
 /* Rate input — yellow highlight */
@@ -390,7 +390,7 @@
 .sale-table input.sale-rate-input:focus {
   background: #fff !important;
   border-color: #f59e0b !important;
-  box-shadow: 0 0 0 2px rgba(245,158,11,0.2) !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
 }
 
 /* Amount cell */
@@ -641,17 +641,21 @@
   border-radius: 8px;
   font-size: 1rem;
   box-shadow: 0 2px 6px rgba(30, 27, 75, 0.35);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .footer-grand span {
   color: black;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .footer-grand strong {
   font-size: 2.5rem;
   font-weight: 800;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 /* Total Qty: right side, bigger */
@@ -661,12 +665,14 @@
   gap: 6px;
   font-size: 1.1rem;
   color: #6b7280;
+  white-space: nowrap;
 }
 
 .footer-total-qty strong {
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: #111827;
+  white-space: nowrap;
 }
 
 .footer-subtotal {

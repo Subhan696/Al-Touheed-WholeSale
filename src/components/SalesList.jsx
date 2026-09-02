@@ -20,12 +20,13 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
     if (isActive) {
       load();
     }
-  }, [isActive, version]);
+  }, [isActive, version, filterDate, showAll]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await ipcRenderer.invoke('get-sales');
+      const payload = showAll ? {} : { startDate: filterDate, endDate: filterDate };
+      const data = await ipcRenderer.invoke('get-sales', payload);
       setRows(data || []);
     } catch { }
     setLoading(false);
@@ -38,12 +39,9 @@ function SalesList({ currentUser, onEditSale, onNewSale, onExit, isActive }) {
         (r.invoice_no || '').toLowerCase().includes(s) ||
         (r.customer_name || '').toLowerCase().includes(s);
 
-      const dateStr = getLocalDateString(r.created_at || r.sale_date);
-      const matchDate = showAll || dateStr === filterDate;
-
-      return matchSearch && matchDate;
+      return matchSearch;
     });
-  }, [rows, search, filterDate, showAll]);
+  }, [rows, search]);
 
   // total_amount in DB is already the Grand Total (subTotal - discount + miscCharges)
   const netAmount = (r) => Math.max(0, parseFloat(r.total_amount) || 0);

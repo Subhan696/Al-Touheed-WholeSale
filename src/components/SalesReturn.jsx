@@ -6,13 +6,29 @@ import StockSearchModal from './StockSearchModal';
 
 const { ipcRenderer } = window.require('electron');
 
+const LiveClock = React.memo(({ initialDate, isLive }) => {
+  const [now, setNow] = useState(initialDate || new Date());
+  useEffect(() => {
+    if (!isLive) return;
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, [isLive]);
+
+  const d = isLive ? now : (initialDate || new Date());
+  return (
+    <span className="topbar-dt">
+      {`${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}, ${d.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
+    </span>
+  );
+});
+
 function descForProduct(p) {
   return `${p.description || ''} ${p.category || ''} ${p.size_range || ''} ${p.gender || ''}`.replace(/\s+/g, ' ').trim();
 }
 
 function nextId() { return Math.random().toString(36).substr(2, 9); }
 
-function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewReturnsList, onNewReturn, isActive }) {
+function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewReturnsList, onNewReturn, isActive, onCustomerNameChange }) {
   const isEditing = !!returnToEdit;
   const stockVer = useDataVersion('stock');
   const productVer = useDataVersion('products');
@@ -23,6 +39,10 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
   const [customerId, setCustomerId] = useState(null);
 
   const [customerName, setCustomerName] = useState('');
+
+  useEffect(() => {
+    onCustomerNameChange?.(customerName);
+  }, [customerName, onCustomerNameChange]);
 
   const [customerPhone, setCustomerPhone] = useState('');
 
@@ -154,8 +174,6 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
       });
     } else {
       ipcRenderer.invoke('get-next-return-no').then(n => setReturnNo(n)).catch(() => { });
-      const t = setInterval(() => setReturnDate(new Date()), 1000);
-      return () => clearInterval(t);
     }
   }, [returnToEdit]);
 
@@ -539,9 +557,7 @@ function SalesReturn({ currentUser, returnToEdit, onSaveSuccess, onExit, onViewR
       <div className="sale-topbar">
         <div className="topbar-left">
           <span className="topbar-inv">{isEditing ? `Edit Return: ${returnNo}` : `New Return: ${returnNo}`}</span>
-          <span className="topbar-dt">
-            {`${String(returnDate.getDate()).padStart(2, '0')}-${String(returnDate.getMonth() + 1).padStart(2, '0')}-${returnDate.getFullYear()}, ${returnDate.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()}`}
-          </span>
+          <LiveClock initialDate={returnDate} isLive={!isEditing} />
           {!isEditing && onNewReturn && (
             <button type="button" className="topbar-btn topbar-btn-primary" onClick={onNewReturn} style={{ marginLeft: 10 }}>+ New Return</button>
           )}

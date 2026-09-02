@@ -80,6 +80,10 @@ function UserManagement({ currentUser }) {
   };
 
   const handleDelete = async (user) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete user accounts.');
+      return;
+    }
     if (user.id === currentUser?.id) { await ipcRenderer.invoke('alert-dialog', 'Cannot delete your own account.'); return; }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this user?');
     if (!confirmed) return;

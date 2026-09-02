@@ -105,6 +105,10 @@ function Customers({ onSelectCustomerLedger }) {
   };
 
   const handleDelete = async (c) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete customers.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', `Delete customer ${c.name}?`);
     if (!confirmed) return;
     await ipcRenderer.invoke('delete-customer', c.id);

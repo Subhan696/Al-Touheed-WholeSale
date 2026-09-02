@@ -76,6 +76,10 @@ export default function ExpenseAccounts() {
   };
 
   const handleDelete = async (id) => {
+    if (currentUser?.role !== 'superadmin') {
+      await ipcRenderer.invoke('alert-dialog', '🔒 Permission Denied: Only Super Admin can delete expense accounts.');
+      return;
+    }
     const confirmed = await ipcRenderer.invoke('confirm-dialog', 'Delete this expense account?');
     if (!confirmed) return;
     try {

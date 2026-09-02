@@ -3,7 +3,7 @@ import './CashLedger.css';
 
 const { ipcRenderer } = window.require('electron');
 
-function CashLedger({ currentUser, isActive }) {
+function CashLedger({ currentUser, isActive, initialCash }) {
   const getTodayDate = () => {
     const today = new Date();
     const year = today.getFullYear();
@@ -17,12 +17,19 @@ function CashLedger({ currentUser, isActive }) {
   const [cashSearch, setCashSearch] = useState('');
   const [cashList, setCashList] = useState([]);
   const [showCashDrop, setShowCashDrop] = useState(false);
-  const [selectedCash, setSelectedCash] = useState(null);
+  const [selectedCash, setSelectedCash] = useState(initialCash || null);
   const [statement, setStatement] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const reportRef = useRef(null);
+
+  useEffect(() => {
+    if (initialCash) {
+      setSelectedCash(initialCash);
+      setCashSearch(initialCash.account_name || '');
+    }
+  }, [initialCash]);
 
   // Fetch cash account options from GL Accounts
   useEffect(() => {
@@ -93,14 +100,14 @@ function CashLedger({ currentUser, isActive }) {
 
   const fmtDate = (dStr) => {
     if (!dStr) return '';
-    
+
     if (dStr instanceof Date) {
       const day = String(dStr.getDate()).padStart(2, '0');
       const month = String(dStr.getMonth() + 1).padStart(2, '0');
       const year = dStr.getFullYear();
       return `${day}/${month}/${year}`;
     }
-    
+
     if (typeof dStr === 'string') {
       if (dStr.includes('T')) {
         const datePart = dStr.split('T')[0];
@@ -116,7 +123,7 @@ function CashLedger({ currentUser, isActive }) {
         }
       }
     }
-    
+
     return String(dStr);
   };
 
@@ -171,9 +178,9 @@ function CashLedger({ currentUser, isActive }) {
         <div className="csl-control-group">
           <label>Cash Account:</label>
           <div className="csl-search-wrap">
-            <input 
-              type="text" 
-              placeholder="Type cash account name..." 
+            <input
+              type="text"
+              placeholder="Type cash account name..."
               value={cashSearch}
               onChange={e => { setCashSearch(e.target.value); setShowCashDrop(true); }}
               onFocus={() => setShowCashDrop(true)}
@@ -193,27 +200,27 @@ function CashLedger({ currentUser, isActive }) {
 
         <div className="csl-control-group">
           <label>From Date:</label>
-          <input 
-            type="date" 
-            value={startDate} 
-            onChange={e => setStartDate(e.target.value)} 
+          <input
+            type="date"
+            value={startDate}
+            onChange={e => setStartDate(e.target.value)}
             className="csl-input-date"
           />
         </div>
 
         <div className="csl-control-group">
           <label>To Date:</label>
-          <input 
-            type="date" 
-            value={endDate} 
-            onChange={e => setEndDate(e.target.value)} 
+          <input
+            type="date"
+            value={endDate}
+            onChange={e => setEndDate(e.target.value)}
             className="csl-input-date"
           />
         </div>
 
         <div className="csl-btn-group">
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             onClick={handlePrint}
             disabled={!statement}
             style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: statement ? 'pointer' : 'not-allowed' }}
@@ -221,8 +228,8 @@ function CashLedger({ currentUser, isActive }) {
             🖨️ Print Ledger
           </button>
 
-          <button 
-            className="btn btn-secondary" 
+          <button
+            className="btn btn-secondary"
             onClick={fetchStatement}
             style={{ background: '#64748b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
           >
@@ -276,14 +283,14 @@ function CashLedger({ currentUser, isActive }) {
             <table className="csl-table">
               <thead>
                 <tr>
-                  <th style={{ width: '105px' }}>Date</th>
-                  <th style={{ width: '85px' }}>Type</th>
-                  <th style={{ width: '75px' }}>V/Code</th>
+                  <th style={{ width: '75px' }}>Date</th>
+                  <th style={{ width: '80px' }}>Type</th>
+                  <th style={{ width: '75px' }}>User</th>
                   <th>Remarks</th>
-                  <th style={{ width: '220px' }}>Reference #</th>
-                  <th className="right" style={{ width: '120px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
-                  <th className="right" style={{ width: '120px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
-                  <th className="right" style={{ width: '140px' }}>Balance</th>
+                  <th style={{ width: '85px' }}>Reference #</th>
+                  <th className="right" style={{ width: '80px', color: '#dc2626', backgroundColor: '#fee2e2' }}>Debit</th>
+                  <th className="right" style={{ width: '80px', color: '#16a34a', backgroundColor: '#d1fae5' }}>Credit</th>
+                  <th className="right" style={{ width: '130px' }}>Balance</th>
                 </tr>
               </thead>
               <tbody>
@@ -309,7 +316,7 @@ function CashLedger({ currentUser, isActive }) {
                       <tr key={t.id || idx}>
                         <td>{fmtDate(t.date)}</td>
                         <td style={{ fontWeight: 700 }}>{String(t.type || '')}</td>
-                        <td>{String(t.v_code || '')}</td>
+                        <td style={{ fontWeight: 600, color: '#475569' }}>{String(t.user_name || t.user || 'Admin')}</td>
                         <td>{String(t.remarks || '')}</td>
                         <td>{String(t.cheque_no || '')}</td>
                         <td className="right" style={{ fontWeight: 700, color: (t.debit || 0) > 0 ? '#dc2626' : '#94a3b8' }}>{fmt(t.debit)}</td>

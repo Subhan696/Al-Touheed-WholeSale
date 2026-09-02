@@ -281,9 +281,29 @@
   color: #475569;
 }
 
+.sbl-sort-icon {
+  font-size: 0.8rem;
+  margin-left: 2px;
+  user-select: none;
+}
+
+.sbl-sort-icon.neutral {
+  opacity: 0.4;
+}
+
+.sbl-sort-icon.active {
+  opacity: 1;
+}
+
+.sbl-table th[onClick]:hover {
+  background: #e2e8f0;
+  cursor: pointer;
+}
+
 /* Print CSS */
 @media print {
-  .no-print {
+  .no-print,
+  .no-print-sort {
     display: none !important;
   }
   .supplier-balance-list-page {
@@ -307,3 +327,4 @@
     display: none !important;
   }
 }
+

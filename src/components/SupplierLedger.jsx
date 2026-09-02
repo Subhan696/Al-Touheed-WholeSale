@@ -3,7 +3,7 @@ import { getLocalDateString } from '../utils/dateUtils';
 
 const { ipcRenderer } = window.require('electron');
 
-function SupplierLedger() {
+function SupplierLedger({ initialSupplier, onClose }) {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -24,25 +24,45 @@ function SupplierLedger() {
   const [statementSupplier, setStatementSupplier] = useState(null);
   const [statementData, setStatementData] = useState(null);
 
+  const handleCloseStatement = () => {
+    setStatementSupplier(null);
+    setStatementData(null);
+    setPaySupplier(null);
+    setEditSupplier(null);
+    if (onClose) {
+      onClose();
+    }
+  };
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
         if (statementSupplier || paySupplier || editSupplier) {
           e.preventDefault();
           e.stopPropagation();
-          setStatementSupplier(null);
-          setPaySupplier(null);
-          setEditSupplier(null);
+          handleCloseStatement();
+        }
+      } else if (e.key === 'Escape') {
+        if (statementSupplier || paySupplier || editSupplier || initialSupplier) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleCloseStatement();
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [statementSupplier, paySupplier, editSupplier]);
+  }, [statementSupplier, paySupplier, editSupplier, initialSupplier, onClose]);
 
   useEffect(() => {
     loadLedger();
   }, []);
+
+  useEffect(() => {
+    if (initialSupplier && initialSupplier.name) {
+      openStatement(initialSupplier);
+    }
+  }, [initialSupplier]);
 
   const loadLedger = async () => {
     setLoading(true);
@@ -88,11 +108,11 @@ function SupplierLedger() {
   const getBalanceStatus = (balance) => {
     if (!balance || balance === 0) return { text: 'NIL', color: '#94a3b8', bgColor: '#f1f5f9' };
     
-    // For Supplier Ledger: Cr balance means we owe supplier (TO PAY), Dr balance means supplier owes us (TO RECEIVE)
+    // For Supplier Ledger: Cr balance means we owe supplier (TP), Dr balance means supplier owes us (TR)
     if (balance > 0) {
-      return { text: 'TO PAY', color: '#dc2626', bgColor: '#fee2e2' };
+      return { text: 'TP', color: '#dc2626', bgColor: '#fee2e2' };
     } else {
-      return { text: 'TO RECEIVE', color: '#16a34a', bgColor: '#d1fae5' };
+      return { text: 'TR', color: '#16a34a', bgColor: '#d1fae5' };
     }
   };
 
@@ -258,7 +278,7 @@ function SupplierLedger() {
                   window.location.reload();
                 }} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '6px 16px', cursor: 'pointer', fontWeight: 'bold' }}>🖨️ Print Ledger</button>
               </div>
-              <button onClick={() => setStatementSupplier(null)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '4px 12px', fontSize: 16, cursor: 'pointer', fontWeight: 'bold' }}>X CLOSE</button>
+              <button onClick={handleCloseStatement} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '4px 12px', fontSize: 16, cursor: 'pointer', fontWeight: 'bold' }}>X CLOSE</button>
             </div>
             
             {!statementData ? (
@@ -278,7 +298,7 @@ function SupplierLedger() {
                     <tr>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Date</th>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Type</th>
-                      <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold', width: '15%' }}>Remarks</th>
+                      <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold', width: '25%' }}>Remarks</th>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Supp.<br/>Date</th>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Supp.<br/>Inv. #</th>
                       <th style={{ border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>Bilty<br/>No.</th>

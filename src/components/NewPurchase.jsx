@@ -36,7 +36,7 @@ const VirtuosoTableComponents = {
   TableRow: (props) => <tr {...props} style={{ height: 32, fontSize: '0.95rem' }} />
 };
 
-function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit, isActive }) {
+function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit, isActive, onSupplierNameChange }) {
   const isEditing = !!purchaseToEdit;
 
   const todayDMY = () => {
@@ -48,6 +48,10 @@ function NewPurchase({ currentUser, purchaseToEdit, onSaveSuccess, onCancelEdit,
   const [supplierDate, setSupplierDate] = useState(todayDMY);
   const [invoiceNo, setInvoiceNo] = useState('');
   const [supplierName, setSupplierName] = useState('');
+
+  useEffect(() => {
+    onSupplierNameChange?.(supplierName);
+  }, [supplierName, onSupplierNameChange]);
   const [supplierInvNo, setSupplierInvNo] = useState('');
   const [vehicleNo, setVehicleNo] = useState('');
   const [godown, setGodown] = useState('1-SHOP');

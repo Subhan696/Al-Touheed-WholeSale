@@ -96,8 +96,8 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
   if (tabKey === 'bank-ledger') return <Ledgers currentUser={currentUser} initialTab="bank" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'supplier-ledger') return <Ledgers currentUser={currentUser} initialTab="supplier" isActive={isActive} hasPermission={hasPermission} />;
   if (tabKey === 'freight-report') return <Ledgers currentUser={currentUser} initialTab="freight" isActive={isActive} hasPermission={hasPermission} />;
-  if (tabKey === 'expense-ledger') return <GLLedgerReport initialTab="expense" />;
-  if (tabKey === 'equity-ledger') return <GLLedgerReport initialTab="equity" />;
+  if (tabKey === 'expense-ledger') return <GLLedgerReport currentUser={currentUser} initialTab="expense" />;
+  if (tabKey === 'equity-ledger') return <GLLedgerReport currentUser={currentUser} initialTab="equity" />;
   if (tabKey === 'network-settings') return <NetworkSettings />;
   if (tabKey === 'receipt-settings') return <ReceiptSettings />;
   if (tabKey === 'backup') return <BackupSettings />;
@@ -105,10 +105,10 @@ const WindowContent = memo(({ win, isActive, currentUser, closeTopWindow, openWi
   if (tabKey === 'expense-accounts') return <ExpenseAccounts />;
   if (tabKey === 'manufacturer-stock') return <ManufacturerStockReport />;
 
-  if (tabKey === 'gl-accounts') return <GLAccounts />;
-  if (tabKey === 'gl-vouchers') return <GLVouchers />;
-  if (tabKey === 'gl-ledger') return <GLLedgerReport initialTab="all" />;
-  if (tabKey === 'gl-cash-activity') return <GLCashActivityReport />;
+  if (tabKey === 'gl-accounts') return <GLAccounts currentUser={currentUser} />;
+  if (tabKey === 'gl-vouchers') return <GLVouchers currentUser={currentUser} />;
+  if (tabKey === 'gl-ledger') return <GLLedgerReport currentUser={currentUser} initialTab="all" />;
+  if (tabKey === 'gl-cash-activity') return <GLCashActivityReport currentUser={currentUser} />;
 
   return <div style={{ padding: 20 }}>Unknown view</div>;
 }, (prev, next) => prev.isActive === next.isActive && prev.win === next.win && prev.currentUser === next.currentUser);
