@@ -181,30 +181,44 @@ const BACKUP_TABLES = [
   'cities',
 ];
 // Tables without a serial id column (need separate handling)
-const BACKUP_TABLES_NO_ID = ['daily_sessions', 'global_counters'];
+const BACKUP_TABLES_NO_ID = ['daily_sessions', 'global_counters', 'feature_locks'];
 
 const AUTO_BACKUP_TRIGGERS = new Set([
-  'save-product', 'update-product', 'delete-product',
+  // Products & Meta
+  'save-product', 'update-product', 'delete-product', 'start-new-item-session', 'save-product-photo',
   'add-brand', 'update-brand', 'delete-brand',
   'add-category', 'update-category', 'delete-category',
   'add-packing', 'update-packing', 'delete-packing',
   'add-gender', 'update-gender', 'delete-gender',
   'add-size-range', 'update-size-range', 'delete-size-range',
+  'add-city',
+  'save-company', 'delete-company',
   'save-profit-rule', 'delete-profit-rule', 'save-overall-profit',
+  // Purchases & Stock
   'save-purchase', 'update-purchase', 'delete-purchase', 'post-purchase', 'post-purchase-bulk',
-  'save-sale', 'update-sale', 'delete-sale',
   'save-purchase-return', 'update-purchase-return', 'delete-purchase-return',
+  'adjust-stock',
+  // Sales
+  'save-sale', 'update-sale', 'delete-sale',
   'save-sales-return', 'update-sales-return', 'delete-sales-return',
+  // GL & Vouchers & Accounts
   'save-voucher', 'delete-voucher',
-  'add-customer-payment', 'add-supplier-payment',
-  'update-customer', 'update-customer-balance', 'delete-customer',
-  'update-supplier', 'update-supplier-balance', 'delete-supplier',
+  'add-gl-account', 'update-gl-account', 'delete-gl-account',
+  'add-expense-account', 'update-expense-account', 'delete-expense-account',
+  // Customers & Suppliers
+  'add-customer', 'update-customer', 'update-customer-balance', 'delete-customer', 'add-customer-payment',
+  'update-supplier', 'update-supplier-balance', 'delete-supplier', 'add-supplier-payment',
   'add-manufacturer', 'update-manufacturer', 'delete-manufacturer',
-  'save-manufacturer-discounts-bulk', 'adjust-stock',
+  'save-manufacturer-discounts-bulk',
+  // Auth & Settings
+  'add-user', 'create-user', 'update-user', 'delete-user', 'register',
+  'lock-feature', 'unlock-feature',
   'test-backup', 'trigger-auto-backup'
 ]);
 
 let isAutoBackupRunning = false;
+let autoBackupTimeout = null;
+let hasPendingBackup = false;
 
 async function executeAutoBackup() {
   if (isRestoring || isAutoBackupRunning) return;
@@ -212,7 +226,10 @@ async function executeAutoBackup() {
   try {
     const backupRoot = findBackupDrive();
     if (!backupRoot) {
-      store.set('lastBackupStatus', 'Drive not found (unplugged or missing)');
+      const configuredPath = store.get('backupDrivePath');
+      if (configuredPath) {
+        store.set('lastBackupStatus', 'Drive not found (unplugged or missing)');
+      }
       return;
     }
     const atgDir = path.join(backupRoot, 'SHOP_Backup');
@@ -240,21 +257,40 @@ async function executeAutoBackup() {
 
     store.set('lastBackupTime', new Date().toISOString());
     store.set('lastBackupStatus', 'OK');
+
+    broadcast('auto-backup');
+    try {
+      const { BrowserWindow } = require('electron');
+      BrowserWindow.getAllWindows().forEach(w => {
+        if (!w.isDestroyed()) {
+          w.webContents.send('auto-backup-completed');
+        }
+      });
+    } catch (e) { }
   } catch (err) {
-    console.error('AutoBackup failed:', err);
+    console.error('[AutoBackup] Error:', err);
     store.set('lastBackupStatus', 'Error: ' + err.message);
   } finally {
     isAutoBackupRunning = false;
   }
 }
 
-let autoBackupTimeout = null;
-function scheduleAutoBackup() {
+function scheduleAutoBackup(delayMs = 1500) {
+  hasPendingBackup = true;
   if (autoBackupTimeout) return;
-  autoBackupTimeout = setTimeout(() => {
+  autoBackupTimeout = setTimeout(async () => {
     autoBackupTimeout = null;
-    executeAutoBackup().catch(err => console.error('[AutoBackup] Error:', err));
-  }, 120000); // Wait 2 minutes of idle time before dumping entire DB
+    if (isRestoring) return;
+    if (isAutoBackupRunning) {
+      scheduleAutoBackup(1000);
+      return;
+    }
+    hasPendingBackup = false;
+    await executeAutoBackup().catch(err => console.error('[AutoBackup] Error:', err));
+    if (hasPendingBackup && !autoBackupTimeout) {
+      scheduleAutoBackup(delayMs);
+    }
+  }, delayMs);
 }
 
 async function runRestoreData(parsedData, skipBackup = false) {
@@ -2234,7 +2270,7 @@ async function getAccountClosingBalance({ accountId }) {
   }
 }
 
-async function handleIPC(channel, ...args) {
+async function handleIPCRaw(channel, ...args) {
   const data = args[0];
 
   switch (channel) {
@@ -4951,6 +4987,15 @@ async function handleIPC(channel, ...args) {
           broadcast('auto-backup');
         }
 
+        try {
+          const { BrowserWindow } = require('electron');
+          BrowserWindow.getAllWindows().forEach(w => {
+            if (!w.isDestroyed()) {
+              w.webContents.send('auto-backup-completed');
+            }
+          });
+        } catch (e) { }
+
         return { success: true };
       } catch (err) {
         store.set('lastBackupStatus', 'Error: ' + err.message);
@@ -6040,13 +6085,25 @@ async function handleIPC(channel, ...args) {
       return await runRestoreData(data);
     }
     case 'trigger-auto-backup': {
-      executeAutoBackup().catch(err => console.error('[AutoBackup] Trigger error:', err));
+      scheduleAutoBackup();
       return { success: true };
     }
 
     default:
       throw new Error(`No handler registered for '${channel}'`);
   }
+}
+
+async function handleIPC(channel, ...args) {
+  const result = await handleIPCRaw(channel, ...args);
+  if (AUTO_BACKUP_TRIGGERS.has(channel)) {
+    const isSuccess = result && (result.success !== false) && (!result.error);
+    if (isSuccess) {
+      scheduleAutoBackup();
+      broadcast('trigger-client-backup');
+    }
+  }
+  return result;
 }
 
 // ── Client mode forwarding ────────────────────────────────────────────────────
@@ -6057,7 +6114,8 @@ async function forwardToServer(channel, data) {
   const token = store.get('networkToken', '');
   const nodeFetch = require('node-fetch');
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutMs = (channel === 'export-database-dump' || channel === 'import-database-restore') ? 120000 : 20000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await nodeFetch(`${serverAddress}/api/ipc`, {
       method: 'POST',
@@ -6132,6 +6190,12 @@ function registerIPC() {
       const currentNetMode = store.get('networkMode', 'server');
       if (currentNetMode === 'client' && !LOCAL_CHANNELS.has(channel)) {
         result = await forwardToServer(channel, data);
+        if (AUTO_BACKUP_TRIGGERS.has(channel)) {
+          const isSuccess = result && (result.success !== false) && (!result.error);
+          if (isSuccess) {
+            scheduleAutoBackup();
+          }
+        }
       } else {
         result = await handleIPC(channel, data);
       }
@@ -6516,7 +6580,11 @@ if (-not $winspoolOk) {
 
 
   // Relaunch
-  ipcMain.handle('relaunch-app', () => { app.relaunch(); app.quit(); });
+  ipcMain.handle('relaunch-app', () => {
+    isAppQuitting = true;
+    app.relaunch();
+    app.quit();
+  });
 
   // Select backup directory
   ipcMain.handle('select-backup-dir', async (event) => {
@@ -6543,6 +6611,7 @@ if (-not $winspoolOk) {
 // ── Electron app lifecycle ────────────────────────────────────────────────────
 let mainWindow;
 let dbStatus = { connected: false, error: null };
+let isAppQuitting = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -6558,6 +6627,25 @@ function createWindow() {
       backgroundThrottling: false
     },
     title: 'Al-Touheed Wholesale',
+  });
+
+  mainWindow.on('close', (e) => {
+    if (isAppQuitting) return;
+    e.preventDefault();
+
+    const response = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Yes', 'No'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Exit Application',
+      message: 'Are you sure you want to close the application?'
+    });
+
+    if (response === 0) {
+      isAppQuitting = true;
+      mainWindow.close();
+    }
   });
 
   const isDev = !app.isPackaged;

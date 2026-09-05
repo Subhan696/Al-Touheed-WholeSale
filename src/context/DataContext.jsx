@@ -27,13 +27,33 @@ export function DataProvider({ children }) {
           if (!isMounted) return;
           try {
             const { type } = JSON.parse(e.data);
-            if (type && type !== 'connected') bump(type);
+            if (type && type !== 'connected') {
+              bump(type);
+              if (type === 'trigger-client-backup') {
+                ipcRenderer.invoke('trigger-auto-backup').catch(() => {});
+              }
+            }
           } catch { }
         };
         es.onerror = () => {
           // EventSource automatically handles reconnection
         };
       }).catch(() => { });
+
+      const onBackupCompleted = () => {
+        bump('auto-backup');
+      };
+      ipcRenderer.on('auto-backup-completed', onBackupCompleted);
+
+      return () => {
+        isMounted = false;
+        if (es) {
+          try { es.close(); } catch { }
+        }
+        try {
+          ipcRenderer.removeListener('auto-backup-completed', onBackupCompleted);
+        } catch { }
+      };
     } catch { }
 
     return () => {

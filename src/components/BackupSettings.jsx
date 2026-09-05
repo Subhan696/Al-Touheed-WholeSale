@@ -30,8 +30,17 @@ function BackupSettings() {
         loadSettings();
         const timer = setInterval(() => {
             loadSettings();
-        }, 5000);
-        return () => clearInterval(timer);
+        }, 2000);
+
+        const onBackupDone = () => {
+            loadSettings();
+        };
+        ipcRenderer.on('auto-backup-completed', onBackupDone);
+
+        return () => {
+            clearInterval(timer);
+            ipcRenderer.removeListener('auto-backup-completed', onBackupDone);
+        };
     }, [backupVer]);
 
     const fmtTime = (iso) => {
